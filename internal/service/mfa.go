@@ -26,7 +26,7 @@ var (
 	ErrMFAAlreadyEnabled = apperrors.ErrMFAAlreadyEnabled
 	ErrMFANotEnabled     = apperrors.ErrMFANotEnabled
 	ErrInvalidTOTPCode   = apperrors.ErrInvalidTOTPCode
-	ErrTOTPCodeExpired   = apperrors.ErrInvalidTOTPCode // 临时映射
+	ErrTOTPCodeExpired   = apperrors.ErrTOTPCodeExpired
 	ErrInvalidMFASecret  = apperrors.ErrInvalidMFASecret
 )
 

@@ -25,9 +25,9 @@ import (
 
 var (
 	ErrProviderNotSupported = apperrors.ErrProviderNotSupported
-	ErrOAuthStateInvalid    = apperrors.ErrInvalidToken // 临时映射
-	ErrOAuthCodeInvalid     = apperrors.ErrInvalidCode  // 临时映射
-	ErrSocialLoginFailed    = apperrors.ErrInternal     // 临时映射
+	ErrOAuthStateInvalid    = apperrors.ErrOAuthStateInvalid
+	ErrOAuthCodeInvalid     = apperrors.ErrInvalidCode
+	ErrSocialLoginFailed    = apperrors.ErrSocialLoginFailed
 )
 
 // ============================================================================

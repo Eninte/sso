@@ -18,10 +18,10 @@ const (
 	MaxRequestBodySize = 1 << 20 // 1MB
 )
 
-// 请求处理错误定义
+// 请求处理错误定义（使用统一错误定义）
 var (
-	ErrRequestBodyTooLarge  = errors.New("请求体过大")
-	ErrRequestBodyExtraData = errors.New("请求体包含多余数据")
+	ErrRequestBodyTooLarge  = apperrors.ErrRequestBodyTooLarge
+	ErrRequestBodyExtraData = apperrors.ErrRequestBodyExtraData
 )
 
 // ============================================================================

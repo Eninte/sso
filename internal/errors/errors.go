@@ -65,11 +65,14 @@ const (
 	ErrCodeMFAAlreadyEnabled ErrorCode = "MFA_ALREADY_ENABLED" // MFA已启用
 	ErrCodeMFANotEnabled     ErrorCode = "MFA_NOT_ENABLED"     // MFA未启用
 	ErrCodeInvalidTOTPCode   ErrorCode = "INVALID_TOTP_CODE"   // TOTP验证码无效
+	ErrCodeTOTPCodeExpired   ErrorCode = "TOTP_CODE_EXPIRED"   // TOTP验证码过期
 	ErrCodeInvalidMFASecret  ErrorCode = "INVALID_MFA_SECRET"  // MFA密钥无效
 
 	// 第三方登录相关错误
 	ErrCodeProviderNotSupported    ErrorCode = "PROVIDER_NOT_SUPPORTED"     // 提供商不支持
 	ErrCodeOAuthCodeExchangeFailed ErrorCode = "OAUTH_CODE_EXCHANGE_FAILED" // OAuth授权码交换失败
+	ErrCodeSocialLoginFailed       ErrorCode = "SOCIAL_LOGIN_FAILED"        // 社交登录失败
+	ErrCodeOAuthStateInvalid       ErrorCode = "OAUTH_STATE_INVALID"        // OAuth状态无效
 
 	// 密钥相关错误
 	ErrCodeKeyNotFound    ErrorCode = "KEY_NOT_FOUND"    // 密钥未找到
@@ -78,6 +81,10 @@ const (
 
 	// 缓存相关错误
 	ErrCodeCacheMiss ErrorCode = "CACHE_MISS" // 缓存未命中
+
+	// 请求相关错误
+	ErrCodeRequestBodyTooLarge  ErrorCode = "REQUEST_BODY_TOO_LARGE"  // 请求体过大
+	ErrCodeRequestBodyExtraData ErrorCode = "REQUEST_BODY_EXTRA_DATA" // 请求体包含多余数据
 )
 
 // ============================================================================
@@ -191,11 +198,14 @@ var (
 	ErrMFAAlreadyEnabled = New(ErrCodeMFAAlreadyEnabled, "MFA已启用", 409)
 	ErrMFANotEnabled     = New(ErrCodeMFANotEnabled, "MFA未启用", 400)
 	ErrInvalidTOTPCode   = New(ErrCodeInvalidTOTPCode, "验证码错误", 400)
+	ErrTOTPCodeExpired   = New(ErrCodeTOTPCodeExpired, "验证码已过期", 400)
 	ErrInvalidMFASecret  = New(ErrCodeInvalidMFASecret, "MFA密钥无效", 400)
 
 	// 第三方登录错误
 	ErrProviderNotSupported    = New(ErrCodeProviderNotSupported, "不支持的登录提供商", 400)
 	ErrOAuthCodeExchangeFailed = New(ErrCodeOAuthCodeExchangeFailed, "OAuth授权码交换失败", 400)
+	ErrSocialLoginFailed       = New(ErrCodeSocialLoginFailed, "社交登录失败", 400)
+	ErrOAuthStateInvalid       = New(ErrCodeOAuthStateInvalid, "OAuth状态无效", 400)
 
 	// 密钥错误
 	ErrKeyNotFound    = New(ErrCodeKeyNotFound, "密钥未找到", 500)
@@ -204,6 +214,10 @@ var (
 
 	// 缓存错误
 	ErrCacheMiss = New(ErrCodeCacheMiss, "缓存未命中", 404)
+
+	// 请求错误
+	ErrRequestBodyTooLarge  = New(ErrCodeRequestBodyTooLarge, "请求体过大", 413)
+	ErrRequestBodyExtraData = New(ErrCodeRequestBodyExtraData, "请求体包含多余数据", 400)
 )
 
 // ============================================================================
