@@ -38,6 +38,7 @@ const (
 	ErrCodePasswordTooShort    ErrorCode = "PASSWORD_TOO_SHORT"    // 密码太短
 	ErrCodePasswordTooLong     ErrorCode = "PASSWORD_TOO_LONG"     // 密码太长
 	ErrCodePasswordRequired    ErrorCode = "PASSWORD_REQUIRED"     // 密码必填
+	ErrCodePasswordMismatch    ErrorCode = "PASSWORD_MISMATCH"     // 密码不匹配
 	ErrCodePasswordNoUppercase ErrorCode = "PASSWORD_NO_UPPERCASE" // 密码缺少大写
 	ErrCodePasswordNoLowercase ErrorCode = "PASSWORD_NO_LOWERCASE" // 密码缺少小写
 	ErrCodePasswordNoDigit     ErrorCode = "PASSWORD_NO_DIGIT"     // 密码缺少数字
@@ -163,6 +164,7 @@ var (
 	ErrPasswordTooShort    = New(ErrCodePasswordTooShort, "密码长度不能少于8个字符", 400)
 	ErrPasswordTooLong     = New(ErrCodePasswordTooLong, "密码长度不能超过72个字符", 400)
 	ErrPasswordRequired    = New(ErrCodePasswordRequired, "密码不能为空", 400)
+	ErrPasswordMismatch    = New(ErrCodePasswordMismatch, "密码不匹配", 400)
 	ErrPasswordNoUppercase = New(ErrCodePasswordNoUppercase, "密码必须包含至少一个大写字母", 400)
 	ErrPasswordNoLowercase = New(ErrCodePasswordNoLowercase, "密码必须包含至少一个小写字母", 400)
 	ErrPasswordNoDigit     = New(ErrCodePasswordNoDigit, "密码必须包含至少一个数字", 400)

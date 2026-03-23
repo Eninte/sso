@@ -3,19 +3,19 @@
 package crypto
 
 import (
-	"errors"
-
 	"golang.org/x/crypto/bcrypt"
+
+	apperrors "github.com/your-org/sso/internal/errors"
 )
 
 // ============================================================================
-// 密码相关错误
+// 密码相关错误（使用统一错误定义）
 // ============================================================================
 
 var (
-	ErrPasswordTooShort = errors.New("密码长度不能少于8个字符")
-	ErrPasswordTooLong  = errors.New("密码长度不能超过72个字符")
-	ErrPasswordMismatch = errors.New("密码不匹配")
+	ErrPasswordTooShort = apperrors.ErrPasswordTooShort
+	ErrPasswordTooLong  = apperrors.ErrPasswordTooLong
+	ErrPasswordMismatch = apperrors.ErrPasswordMismatch
 )
 
 // ============================================================================
