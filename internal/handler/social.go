@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/service"
 )
 
@@ -49,7 +50,7 @@ func (h *SocialLoginHandler) HandleLogin(w http.ResponseWriter, r *http.Request)
 	// 4. 获取授权URL
 	authURL, err := h.socialSvc.GetAuthorizationURL(provider, redirectURI, state)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "不支持的登录方式")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeUnsupportedLoginMethod))
 		return
 	}
 
@@ -73,7 +74,7 @@ func (h *SocialLoginHandler) HandleCallback(w http.ResponseWriter, r *http.Reque
 	// 2. 获取授权码
 	code := r.URL.Query().Get("code")
 	if code == "" {
-		writeError(w, http.StatusBadRequest, "缺少授权码")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeMissingAuthCode))
 		return
 	}
 
@@ -83,7 +84,7 @@ func (h *SocialLoginHandler) HandleCallback(w http.ResponseWriter, r *http.Reque
 	// 4. 处理回调
 	token, err := h.socialSvc.HandleCallback(r.Context(), provider, code, redirectURI)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "登录失败")
+		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeSocialLoginFailed))
 		return
 	}
 

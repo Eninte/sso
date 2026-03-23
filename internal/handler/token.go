@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/service"
 )
@@ -34,7 +35,7 @@ func NewTokenHandler(authSvc service.AuthServiceInterface, oauthSvc service.OAut
 func (h *TokenHandler) HandleToken(w http.ResponseWriter, r *http.Request) {
 	var req model.TokenRequest
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "无效的请求格式")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
 		return
 	}
 
@@ -45,24 +46,24 @@ func (h *TokenHandler) HandleToken(w http.ResponseWriter, r *http.Request) {
 	case model.GrantTypeAuthorizationCode:
 		h.handleAuthorizationCode(w, r, &req)
 	default:
-		writeError(w, http.StatusBadRequest, "不支持的授权类型")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeUnsupportedGrantType))
 	}
 }
 
 // handleRefreshToken 处理刷新Token请求
 func (h *TokenHandler) handleRefreshToken(w http.ResponseWriter, r *http.Request, refreshToken string) {
 	if refreshToken == "" {
-		writeError(w, http.StatusBadRequest, "缺少refresh_token参数")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeMissingRefreshToken))
 		return
 	}
 
 	resp, err := h.authSvc.RefreshToken(r.Context(), refreshToken)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidToken) {
-			writeError(w, http.StatusUnauthorized, "无效的refresh_token")
+			writeError(w, http.StatusUnauthorized, getMessage(r, apperrors.ErrCodeInvalidRefreshToken))
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "刷新Token失败")
+		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeRefreshTokenFailed))
 		return
 	}
 
@@ -74,15 +75,15 @@ func (h *TokenHandler) handleRefreshToken(w http.ResponseWriter, r *http.Request
 func (h *TokenHandler) handleAuthorizationCode(w http.ResponseWriter, r *http.Request, req *model.TokenRequest) {
 	// 验证必需参数
 	if req.Code == "" {
-		writeError(w, http.StatusBadRequest, "缺少code参数")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeMissingCode))
 		return
 	}
 	if req.ClientID == "" {
-		writeError(w, http.StatusBadRequest, "缺少client_id参数")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeMissingClientID))
 		return
 	}
 	if req.RedirectURI == "" {
-		writeError(w, http.StatusBadRequest, "缺少redirect_uri参数")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeMissingRedirectURI))
 		return
 	}
 
@@ -97,26 +98,26 @@ func (h *TokenHandler) handleAuthorizationCode(w http.ResponseWriter, r *http.Re
 	)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidCode) {
-			writeError(w, http.StatusBadRequest, "无效的授权码")
+			writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidCode))
 			return
 		}
 		if errors.Is(err, service.ErrCodeExpired) {
-			writeError(w, http.StatusBadRequest, "授权码已过期")
+			writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeCodeExpired))
 			return
 		}
 		if errors.Is(err, service.ErrCodeUsed) {
-			writeError(w, http.StatusBadRequest, "授权码已被使用")
+			writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeCodeUsed))
 			return
 		}
 		if errors.Is(err, service.ErrInvalidClient) {
-			writeError(w, http.StatusUnauthorized, "无效的客户端")
+			writeError(w, http.StatusUnauthorized, getMessage(r, apperrors.ErrCodeInvalidClient))
 			return
 		}
 		if errors.Is(err, service.ErrInvalidCodeVerifier) {
-			writeError(w, http.StatusBadRequest, "无效的PKCE验证器")
+			writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidCodeVerifier))
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "交换授权码失败")
+		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeExchangeCodeFailed))
 		return
 	}
 
@@ -137,17 +138,17 @@ func (h *TokenHandler) HandleRevoke(w http.ResponseWriter, r *http.Request) {
 		Token string `json:"token"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "无效的请求格式")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
 		return
 	}
 
 	if req.Token == "" {
-		writeError(w, http.StatusBadRequest, "缺少token参数")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeMissingToken))
 		return
 	}
 
 	if err := h.authSvc.Logout(r.Context(), req.Token); err != nil {
-		writeError(w, http.StatusInternalServerError, "撤销失败")
+		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeRevokeTokenFailed))
 		return
 	}
 

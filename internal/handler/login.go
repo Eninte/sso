@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 
+	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/service"
 )
@@ -30,7 +31,7 @@ func (h *LoginHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// 1. 解析请求体 (带大小限制)
 	var req model.LoginRequest
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "无效的请求格式")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
 		return
 	}
 
@@ -39,19 +40,19 @@ func (h *LoginHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// 处理已知错误
 		if errors.Is(err, service.ErrInvalidCredentials) {
-			writeError(w, http.StatusUnauthorized, "邮箱或密码错误")
+			writeError(w, http.StatusUnauthorized, getMessage(r, apperrors.ErrCodeInvalidCredentials))
 			return
 		}
 		if errors.Is(err, service.ErrAccountLocked) {
-			writeError(w, http.StatusForbidden, "账户已锁定，请30分钟后再试")
+			writeError(w, http.StatusForbidden, getMessage(r, apperrors.ErrCodeAccountLocked))
 			return
 		}
 		if errors.Is(err, service.ErrAccountDisabled) {
-			writeError(w, http.StatusForbidden, "账户已被禁用")
+			writeError(w, http.StatusForbidden, getMessage(r, apperrors.ErrCodeAccountDisabled))
 			return
 		}
 		// 未知错误
-		writeError(w, http.StatusInternalServerError, "登录失败")
+		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeLoginFailed))
 		return
 	}
 

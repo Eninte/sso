@@ -5,6 +5,7 @@ package handler
 import (
 	"net/http"
 
+	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/middleware"
 	"github.com/your-org/sso/internal/service"
 )
@@ -29,14 +30,14 @@ func (h *UserHandler) HandleSendVerificationEmail(w http.ResponseWriter, r *http
 	// 1. 获取当前用户ID
 	userID := middleware.GetUserIDFromContext(r.Context())
 	if userID == "" {
-		writeError(w, http.StatusUnauthorized, "未认证")
+		writeError(w, http.StatusUnauthorized, getMessage(r, apperrors.ErrCodeUnauthorized))
 		return
 	}
 
 	// 2. 发送验证邮件
 	err := h.userSvc.SendVerificationEmail(r.Context(), userID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "发送验证邮件失败")
+		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeSendVerificationEmailFailed))
 		return
 	}
 
@@ -51,14 +52,14 @@ func (h *UserHandler) HandleVerifyEmail(w http.ResponseWriter, r *http.Request) 
 	userID := r.URL.Query().Get("user_id")
 
 	if token == "" || userID == "" {
-		writeError(w, http.StatusBadRequest, "缺少必要参数")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeMissingRequiredParam))
 		return
 	}
 
 	// 2. 验证邮箱
 	err := h.userSvc.VerifyEmail(r.Context(), userID, token)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "验证失败")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeVerifyEmailFailed))
 		return
 	}
 
@@ -72,12 +73,12 @@ func (h *UserHandler) HandleForgotPassword(w http.ResponseWriter, r *http.Reques
 		Email string `json:"email"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "无效的请求格式")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
 		return
 	}
 
 	if req.Email == "" {
-		writeError(w, http.StatusBadRequest, "邮箱不能为空")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeEmailRequired))
 		return
 	}
 
@@ -101,19 +102,19 @@ func (h *UserHandler) HandleResetPassword(w http.ResponseWriter, r *http.Request
 		NewPassword string `json:"new_password"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "无效的请求格式")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
 		return
 	}
 
 	if req.Token == "" || req.UserID == "" || req.NewPassword == "" {
-		writeError(w, http.StatusBadRequest, "缺少必要参数")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeMissingRequiredParam))
 		return
 	}
 
 	// 重置密码
 	err := h.userSvc.ResetPassword(r.Context(), req.UserID, req.Token, req.NewPassword)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "重置失败")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeResetPasswordFailed))
 		return
 	}
 
@@ -126,7 +127,7 @@ func (h *UserHandler) HandleChangePassword(w http.ResponseWriter, r *http.Reques
 	// 1. 获取当前用户ID
 	userID := middleware.GetUserIDFromContext(r.Context())
 	if userID == "" {
-		writeError(w, http.StatusUnauthorized, "未认证")
+		writeError(w, http.StatusUnauthorized, getMessage(r, apperrors.ErrCodeUnauthorized))
 		return
 	}
 
@@ -135,19 +136,19 @@ func (h *UserHandler) HandleChangePassword(w http.ResponseWriter, r *http.Reques
 		NewPassword string `json:"new_password"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "无效的请求格式")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
 		return
 	}
 
 	if req.OldPassword == "" || req.NewPassword == "" {
-		writeError(w, http.StatusBadRequest, "缺少必要参数")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeMissingRequiredParam))
 		return
 	}
 
 	// 修改密码
 	err := h.userSvc.ChangePassword(r.Context(), userID, req.OldPassword, req.NewPassword)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "修改密码失败")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeChangePasswordFailed))
 		return
 	}
 

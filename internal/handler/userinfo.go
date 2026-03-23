@@ -5,6 +5,7 @@ package handler
 import (
 	"net/http"
 
+	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/middleware"
 	"github.com/your-org/sso/internal/service"
 )
@@ -33,7 +34,7 @@ func (h *UserInfoHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	userScopes := middleware.GetUserScopesFromContext(r.Context())
 
 	if userID == "" {
-		writeError(w, http.StatusUnauthorized, "未认证")
+		writeError(w, http.StatusUnauthorized, getMessage(r, apperrors.ErrCodeUnauthorized))
 		return
 	}
 

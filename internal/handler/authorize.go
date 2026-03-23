@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/middleware"
 	"github.com/your-org/sso/internal/service"
 )
@@ -40,13 +41,13 @@ func (h *AuthorizeHandler) HandleAuthorize(w http.ResponseWriter, r *http.Reques
 
 	// 2. 验证必需参数
 	if clientID == "" || redirectURI == "" || responseType != "code" {
-		writeError(w, http.StatusBadRequest, "无效的授权请求")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeBadRequest))
 		return
 	}
 
 	// 2.1 验证 state 参数（CSRF 防护）
 	if state == "" || len(state) < 16 {
-		writeError(w, http.StatusBadRequest, "state参数无效或缺失")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeStateInvalid))
 		return
 	}
 
@@ -94,7 +95,7 @@ func (h *AuthorizeHandler) HandleApprove(w http.ResponseWriter, r *http.Request)
 	// 1. 获取当前登录用户
 	userID := middleware.GetUserIDFromContext(r.Context())
 	if userID == "" {
-		writeError(w, http.StatusUnauthorized, "未认证")
+		writeError(w, http.StatusUnauthorized, getMessage(r, apperrors.ErrCodeUnauthorized))
 		return
 	}
 
@@ -108,13 +109,13 @@ func (h *AuthorizeHandler) HandleApprove(w http.ResponseWriter, r *http.Request)
 		CodeChallengeMethod string `json:"code_challenge_method"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "无效的请求格式")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
 		return
 	}
 
 	// 2.1 验证 state 参数（CSRF 防护）
 	if req.State == "" || len(req.State) < 16 {
-		writeError(w, http.StatusBadRequest, "state参数无效或缺失")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeStateInvalid))
 		return
 	}
 
