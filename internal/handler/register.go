@@ -32,7 +32,7 @@ func (h *RegisterHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// 1. 解析请求体 (带大小限制)
 	var req model.RegisterRequest
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "无效的请求格式")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
 		return
 	}
 
@@ -41,12 +41,12 @@ func (h *RegisterHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// 处理已知错误 - 使用errors包的错误而不是store包的错误
 		if errors.Is(err, apperrors.ErrEmailExists) {
-			writeError(w, http.StatusConflict, "该邮箱已注册")
+			writeError(w, http.StatusConflict, getMessage(r, apperrors.ErrCodeEmailExists))
 			return
 		}
 		// 处理验证错误
 		if errors.Is(err, validator.ErrEmailInvalid) || errors.Is(err, validator.ErrEmailRequired) {
-			writeError(w, http.StatusBadRequest, "邮箱格式无效")
+			writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeEmailInvalid))
 			return
 		}
 		if errors.Is(err, validator.ErrPasswordTooShort) || errors.Is(err, validator.ErrPasswordTooLong) || errors.Is(err, validator.ErrPasswordRequired) {
@@ -58,7 +58,7 @@ func (h *RegisterHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// 未知错误
-		writeError(w, http.StatusInternalServerError, "注册失败")
+		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeRegisterFailed))
 		return
 	}
 

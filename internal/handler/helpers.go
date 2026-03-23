@@ -28,6 +28,12 @@ var (
 // 辅助函数
 // ============================================================================
 
+// getMessage 获取本地化的错误消息
+func getMessage(r *http.Request, code apperrors.ErrorCode) string {
+	lang := middleware.GetLanguageFromContext(r.Context())
+	return apperrors.GetMessage(code, lang)
+}
+
 // writeJSON 写入JSON响应
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

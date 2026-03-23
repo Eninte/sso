@@ -9,6 +9,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/service"
 )
 
@@ -69,7 +70,7 @@ func (h *AdminHandler) HandleListUsers(w http.ResponseWriter, r *http.Request) {
 	// 通过Service获取用户列表
 	users, total, err := h.adminSvc.ListUsers(r.Context(), offset, pageSize)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "获取用户列表失败")
+		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeListUsersFailed))
 		return
 	}
 
@@ -110,14 +111,14 @@ func (h *AdminHandler) HandleGetUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if userID == "" {
-		writeError(w, http.StatusBadRequest, "缺少用户ID")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeMissingUserID))
 		return
 	}
 
 	// 通过Service获取用户
 	user, err := h.adminSvc.GetUser(r.Context(), userID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "用户不存在")
+		writeError(w, http.StatusNotFound, getMessage(r, apperrors.ErrCodeNotFound))
 		return
 	}
 
@@ -140,13 +141,13 @@ func (h *AdminHandler) HandleDisableUser(w http.ResponseWriter, r *http.Request)
 		UserID string `json:"user_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "无效的请求格式")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
 		return
 	}
 
 	// 通过Service禁用用户
 	if err := h.adminSvc.DisableUser(r.Context(), req.UserID); err != nil {
-		writeError(w, http.StatusNotFound, "用户不存在")
+		writeError(w, http.StatusNotFound, getMessage(r, apperrors.ErrCodeNotFound))
 		return
 	}
 
@@ -161,13 +162,13 @@ func (h *AdminHandler) HandleEnableUser(w http.ResponseWriter, r *http.Request) 
 		UserID string `json:"user_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "无效的请求格式")
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
 		return
 	}
 
 	// 通过Service启用用户
 	if err := h.adminSvc.EnableUser(r.Context(), req.UserID); err != nil {
-		writeError(w, http.StatusNotFound, "用户不存在")
+		writeError(w, http.StatusNotFound, getMessage(r, apperrors.ErrCodeNotFound))
 		return
 	}
 
@@ -185,7 +186,7 @@ func (h *AdminHandler) HandleSystemHealth(w http.ResponseWriter, r *http.Request
 	// 通过Service获取系统健康信息
 	health, err := h.adminSvc.SystemHealth(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "获取系统健康状态失败")
+		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeSystemHealthFailed))
 		return
 	}
 
@@ -203,7 +204,7 @@ func (h *AdminHandler) HandleSystemHealth(w http.ResponseWriter, r *http.Request
 func (h *AdminHandler) HandleCleanup(w http.ResponseWriter, r *http.Request) {
 	// 通过Service清理过期数据
 	if err := h.adminSvc.CleanupExpired(r.Context()); err != nil {
-		writeError(w, http.StatusInternalServerError, "清理失败")
+		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeCleanupFailed))
 		return
 	}
 
