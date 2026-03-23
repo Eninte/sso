@@ -85,6 +85,11 @@ const (
 	// 请求相关错误
 	ErrCodeRequestBodyTooLarge  ErrorCode = "REQUEST_BODY_TOO_LARGE"  // 请求体过大
 	ErrCodeRequestBodyExtraData ErrorCode = "REQUEST_BODY_EXTRA_DATA" // 请求体包含多余数据
+
+	// 配置相关错误
+	ErrCodeDBPasswordRequired ErrorCode = "DB_PASSWORD_REQUIRED" // 数据库密码未设置
+	ErrCodeJWTKeyRequired     ErrorCode = "JWT_KEY_REQUIRED"     // JWT密钥未设置
+	ErrCodeBcryptCostTooLow   ErrorCode = "BCRYPT_COST_TOO_LOW"  // bcrypt成本过低
 )
 
 // ============================================================================
@@ -151,11 +156,12 @@ var (
 	ErrInternal = New(ErrCodeInternal, "内部服务器错误", 500)
 
 	// 请求错误
-	ErrBadRequest   = New(ErrCodeBadRequest, "请求参数错误", 400)
-	ErrNotFound     = New(ErrCodeNotFound, "资源不存在", 404)
-	ErrConflict     = New(ErrCodeConflict, "资源冲突", 409)
-	ErrUnauthorized = New(ErrCodeUnauthorized, "未授权", 401)
-	ErrForbidden    = New(ErrCodeForbidden, "禁止访问", 403)
+	ErrBadRequest      = New(ErrCodeBadRequest, "请求参数错误", 400)
+	ErrNotFound        = New(ErrCodeNotFound, "资源不存在", 404)
+	ErrConflict        = New(ErrCodeConflict, "资源冲突", 409)
+	ErrUnauthorized    = New(ErrCodeUnauthorized, "未授权", 401)
+	ErrForbidden       = New(ErrCodeForbidden, "禁止访问", 403)
+	ErrTooManyRequests = New(ErrCodeTooManyRequests, "请求过多，请稍后重试", 429)
 
 	// 认证错误
 	ErrInvalidCredentials = New(ErrCodeInvalidCredentials, "邮箱或密码错误", 401)
@@ -218,6 +224,11 @@ var (
 	// 请求错误
 	ErrRequestBodyTooLarge  = New(ErrCodeRequestBodyTooLarge, "请求体过大", 413)
 	ErrRequestBodyExtraData = New(ErrCodeRequestBodyExtraData, "请求体包含多余数据", 400)
+
+	// 配置错误
+	ErrDBPasswordRequired = New(ErrCodeDBPasswordRequired, "DB_PASSWORD环境变量必须设置", 500)
+	ErrJWTKeyRequired     = New(ErrCodeJWTKeyRequired, "JWT密钥路径必须设置", 500)
+	ErrBcryptCostTooLow   = New(ErrCodeBcryptCostTooLow, "生产环境bcrypt cost必须 >= 12", 500)
 )
 
 // ============================================================================

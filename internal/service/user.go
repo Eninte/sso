@@ -25,7 +25,6 @@ var (
 	ErrResetTokenInvalid       = apperrors.ErrResetTokenInvalid
 	ErrResetTokenExpired       = apperrors.ErrResetTokenExpired
 	ErrEmailAlreadyVerified    = apperrors.ErrEmailAlreadyVerified
-	ErrPasswordTooWeak         = apperrors.ErrPasswordNoSpecial // 临时映射
 )
 
 // ============================================================================

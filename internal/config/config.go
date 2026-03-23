@@ -4,19 +4,20 @@
 package config
 
 import (
-	"errors"
 	"log/slog"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	apperrors "github.com/your-org/sso/internal/errors"
 )
 
-// 配置错误定义
+// 配置错误定义（使用统一错误定义）
 var (
-	ErrDBPasswordRequired = errors.New("DB_PASSWORD环境变量必须设置")
-	ErrJWTKeyRequired     = errors.New("JWT密钥路径必须设置")
-	ErrBcryptCostTooLow   = errors.New("生产环境bcrypt cost必须 >= 12")
+	ErrDBPasswordRequired = apperrors.ErrDBPasswordRequired
+	ErrJWTKeyRequired     = apperrors.ErrJWTKeyRequired
+	ErrBcryptCostTooLow   = apperrors.ErrBcryptCostTooLow
 )
 
 // Config 服务配置结构
