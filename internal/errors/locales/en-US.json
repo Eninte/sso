@@ -1,0 +1,56 @@
+{
+  "INTERNAL_ERROR": "Internal server error",
+  "BAD_REQUEST": "Bad request",
+  "NOT_FOUND": "Resource not found",
+  "CONFLICT": "Resource conflict",
+  "UNAUTHORIZED": "Unauthorized",
+  "FORBIDDEN": "Forbidden",
+  "TOO_MANY_REQUESTS": "Too many requests, please try again later",
+  
+  "INVALID_CREDENTIALS": "Invalid email or password",
+  "ACCOUNT_LOCKED": "Account is locked, please try again later",
+  "ACCOUNT_DISABLED": "Account is disabled",
+  "INVALID_TOKEN": "Invalid token",
+  "TOKEN_EXPIRED": "Token has expired",
+  
+  "EMAIL_EXISTS": "Email already registered",
+  "EMAIL_INVALID": "Invalid email format",
+  "EMAIL_REQUIRED": "Email is required",
+  "PASSWORD_TOO_SHORT": "Password must be at least 8 characters",
+  "PASSWORD_TOO_LONG": "Password must be at most 72 characters",
+  "PASSWORD_REQUIRED": "Password is required",
+  "PASSWORD_NO_UPPERCASE": "Password must contain at least one uppercase letter",
+  "PASSWORD_NO_LOWERCASE": "Password must contain at least one lowercase letter",
+  "PASSWORD_NO_DIGIT": "Password must contain at least one digit",
+  "PASSWORD_NO_SPECIAL": "Password must contain at least one special character",
+  
+  "EMAIL_ALREADY_VERIFIED": "Email already verified",
+  "VERIFICATION_CODE_INVALID": "Invalid verification code",
+  "VERIFICATION_CODE_EXPIRED": "Verification code has expired",
+  "RESET_TOKEN_INVALID": "Invalid reset token",
+  "RESET_TOKEN_EXPIRED": "Reset token has expired",
+  
+  "INVALID_CLIENT": "Invalid client",
+  "INVALID_REDIRECT_URI": "Invalid redirect URI",
+  "INVALID_GRANT_TYPE": "Invalid grant type",
+  "INVALID_CODE": "Invalid authorization code",
+  "CODE_EXPIRED": "Authorization code has expired",
+  "CODE_USED": "Authorization code has been used",
+  "INVALID_CODE_VERIFIER": "Invalid PKCE verifier",
+  "INVALID_PKCE_CHALLENGE": "Invalid PKCE challenge",
+  
+  "MFA_ALREADY_ENABLED": "MFA already enabled",
+  "MFA_NOT_ENABLED": "MFA not enabled",
+  "INVALID_TOTP_CODE": "Invalid verification code",
+  "INVALID_MFA_SECRET": "Invalid MFA secret",
+  
+  "PROVIDER_NOT_SUPPORTED": "Provider not supported",
+  "OAUTH_CODE_EXCHANGE_FAILED": "OAuth code exchange failed",
+  
+  "KEY_NOT_FOUND": "Key not found",
+  "KEY_PATH_INVALID": "Invalid key path",
+  "KEY_PARSE_FAILED": "Key parse failed",
+  "KEY_PERMISSION_OPEN": "Key file permissions are too open",
+  
+  "CACHE_MISS": "Cache miss"
+}

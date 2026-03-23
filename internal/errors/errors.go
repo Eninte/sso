@@ -1,0 +1,251 @@
+// Package errors 统一错误定义
+// 提供项目级别的错误类型和错误码
+package errors
+
+import (
+	"errors"
+	"fmt"
+)
+
+// ============================================================================
+// 错误码定义
+// ============================================================================
+
+// ErrorCode 错误码
+type ErrorCode string
+
+const (
+	// 通用错误
+	ErrCodeInternal        ErrorCode = "INTERNAL_ERROR"    // 内部错误
+	ErrCodeBadRequest      ErrorCode = "BAD_REQUEST"       // 请求参数错误
+	ErrCodeNotFound        ErrorCode = "NOT_FOUND"         // 资源不存在
+	ErrCodeConflict        ErrorCode = "CONFLICT"          // 资源冲突
+	ErrCodeUnauthorized    ErrorCode = "UNAUTHORIZED"      // 未授权
+	ErrCodeForbidden       ErrorCode = "FORBIDDEN"         // 禁止访问
+	ErrCodeTooManyRequests ErrorCode = "TOO_MANY_REQUESTS" // 请求过多
+
+	// 认证相关错误
+	ErrCodeInvalidCredentials ErrorCode = "INVALID_CREDENTIALS" // 凭证无效
+	ErrCodeAccountLocked      ErrorCode = "ACCOUNT_LOCKED"      // 账户锁定
+	ErrCodeAccountDisabled    ErrorCode = "ACCOUNT_DISABLED"    // 账户禁用
+	ErrCodeInvalidToken       ErrorCode = "INVALID_TOKEN"       // Token无效
+	ErrCodeTokenExpired       ErrorCode = "TOKEN_EXPIRED"       // Token过期
+
+	// 用户相关错误
+	ErrCodeEmailExists         ErrorCode = "EMAIL_EXISTS"          // 邮箱已存在
+	ErrCodeEmailInvalid        ErrorCode = "EMAIL_INVALID"         // 邮箱格式无效
+	ErrCodeEmailRequired       ErrorCode = "EMAIL_REQUIRED"        // 邮箱必填
+	ErrCodePasswordTooShort    ErrorCode = "PASSWORD_TOO_SHORT"    // 密码太短
+	ErrCodePasswordTooLong     ErrorCode = "PASSWORD_TOO_LONG"     // 密码太长
+	ErrCodePasswordRequired    ErrorCode = "PASSWORD_REQUIRED"     // 密码必填
+	ErrCodePasswordNoUppercase ErrorCode = "PASSWORD_NO_UPPERCASE" // 密码缺少大写
+	ErrCodePasswordNoLowercase ErrorCode = "PASSWORD_NO_LOWERCASE" // 密码缺少小写
+	ErrCodePasswordNoDigit     ErrorCode = "PASSWORD_NO_DIGIT"     // 密码缺少数字
+	ErrCodePasswordNoSpecial   ErrorCode = "PASSWORD_NO_SPECIAL"   // 密码缺少特殊字符
+
+	// 邮箱验证相关错误
+	ErrCodeEmailAlreadyVerified    ErrorCode = "EMAIL_ALREADY_VERIFIED"    // 邮箱已验证
+	ErrCodeVerificationCodeInvalid ErrorCode = "VERIFICATION_CODE_INVALID" // 验证码无效
+	ErrCodeVerificationCodeExpired ErrorCode = "VERIFICATION_CODE_EXPIRED" // 验证码过期
+	ErrCodeResetTokenInvalid       ErrorCode = "RESET_TOKEN_INVALID"       // 重置令牌无效
+	ErrCodeResetTokenExpired       ErrorCode = "RESET_TOKEN_EXPIRED"       // 重置令牌过期
+
+	// OAuth相关错误
+	ErrCodeInvalidClient        ErrorCode = "INVALID_CLIENT"         // 客户端无效
+	ErrCodeInvalidRedirectURI   ErrorCode = "INVALID_REDIRECT_URI"   // 重定向URI无效
+	ErrCodeInvalidGrantType     ErrorCode = "INVALID_GRANT_TYPE"     // 授权类型无效
+	ErrCodeInvalidCode          ErrorCode = "INVALID_CODE"           // 授权码无效
+	ErrCodeCodeExpired          ErrorCode = "CODE_EXPIRED"           // 授权码过期
+	ErrCodeCodeUsed             ErrorCode = "CODE_USED"              // 授权码已使用
+	ErrCodeInvalidCodeVerifier  ErrorCode = "INVALID_CODE_VERIFIER"  // PKCE验证器无效
+	ErrCodeInvalidPKCEChallenge ErrorCode = "INVALID_PKCE_CHALLENGE" // PKCE挑战码无效
+
+	// MFA相关错误
+	ErrCodeMFAAlreadyEnabled ErrorCode = "MFA_ALREADY_ENABLED" // MFA已启用
+	ErrCodeMFANotEnabled     ErrorCode = "MFA_NOT_ENABLED"     // MFA未启用
+	ErrCodeInvalidTOTPCode   ErrorCode = "INVALID_TOTP_CODE"   // TOTP验证码无效
+	ErrCodeInvalidMFASecret  ErrorCode = "INVALID_MFA_SECRET"  // MFA密钥无效
+
+	// 第三方登录相关错误
+	ErrCodeProviderNotSupported    ErrorCode = "PROVIDER_NOT_SUPPORTED"     // 提供商不支持
+	ErrCodeOAuthCodeExchangeFailed ErrorCode = "OAUTH_CODE_EXCHANGE_FAILED" // OAuth授权码交换失败
+
+	// 密钥相关错误
+	ErrCodeKeyNotFound    ErrorCode = "KEY_NOT_FOUND"    // 密钥未找到
+	ErrCodeKeyPathInvalid ErrorCode = "KEY_PATH_INVALID" // 密钥路径无效
+	ErrCodeKeyParseFailed ErrorCode = "KEY_PARSE_FAILED" // 密钥解析失败
+
+	// 缓存相关错误
+	ErrCodeCacheMiss ErrorCode = "CACHE_MISS" // 缓存未命中
+)
+
+// ============================================================================
+// AppError 应用错误
+// ============================================================================
+
+// AppError 应用错误
+type AppError struct {
+	Code       ErrorCode `json:"code"`              // 错误码
+	Message    string    `json:"message"`           // 错误消息
+	Details    string    `json:"details,omitempty"` // 详细信息
+	HTTPStatus int       `json:"-"`                 // HTTP状态码
+	Err        error     `json:"-"`                 // 原始错误
+}
+
+// Error 实现error接口
+func (e *AppError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("%s: %s (%v)", e.Code, e.Message, e.Err)
+	}
+	return fmt.Sprintf("%s: %s", e.Code, e.Message)
+}
+
+// Unwrap 返回原始错误
+func (e *AppError) Unwrap() error {
+	return e.Err
+}
+
+// ============================================================================
+// 错误构造函数
+// ============================================================================
+
+// New 创建新的应用错误
+func New(code ErrorCode, message string, httpStatus int) *AppError {
+	return &AppError{
+		Code:       code,
+		Message:    message,
+		HTTPStatus: httpStatus,
+	}
+}
+
+// Wrap 包装原始错误
+func Wrap(code ErrorCode, message string, httpStatus int, err error) *AppError {
+	return &AppError{
+		Code:       code,
+		Message:    message,
+		HTTPStatus: httpStatus,
+		Err:        err,
+	}
+}
+
+// WithDetails 添加详细信息
+func (e *AppError) WithDetails(details string) *AppError {
+	e.Details = details
+	return e
+}
+
+// ============================================================================
+// 预定义错误
+// ============================================================================
+
+var (
+	// 内部错误
+	ErrInternal = New(ErrCodeInternal, "内部服务器错误", 500)
+
+	// 请求错误
+	ErrBadRequest   = New(ErrCodeBadRequest, "请求参数错误", 400)
+	ErrNotFound     = New(ErrCodeNotFound, "资源不存在", 404)
+	ErrConflict     = New(ErrCodeConflict, "资源冲突", 409)
+	ErrUnauthorized = New(ErrCodeUnauthorized, "未授权", 401)
+	ErrForbidden    = New(ErrCodeForbidden, "禁止访问", 403)
+
+	// 认证错误
+	ErrInvalidCredentials = New(ErrCodeInvalidCredentials, "邮箱或密码错误", 401)
+	ErrAccountLocked      = New(ErrCodeAccountLocked, "账户已锁定", 403)
+	ErrAccountDisabled    = New(ErrCodeAccountDisabled, "账户已被禁用", 403)
+	ErrInvalidToken       = New(ErrCodeInvalidToken, "无效的Token", 401)
+	ErrTokenExpired       = New(ErrCodeTokenExpired, "Token已过期", 401)
+
+	// 用户错误
+	ErrEmailExists         = New(ErrCodeEmailExists, "邮箱已注册", 409)
+	ErrEmailInvalid        = New(ErrCodeEmailInvalid, "邮箱地址格式无效", 400)
+	ErrEmailRequired       = New(ErrCodeEmailRequired, "邮箱地址不能为空", 400)
+	ErrPasswordTooShort    = New(ErrCodePasswordTooShort, "密码长度不能少于8个字符", 400)
+	ErrPasswordTooLong     = New(ErrCodePasswordTooLong, "密码长度不能超过72个字符", 400)
+	ErrPasswordRequired    = New(ErrCodePasswordRequired, "密码不能为空", 400)
+	ErrPasswordNoUppercase = New(ErrCodePasswordNoUppercase, "密码必须包含至少一个大写字母", 400)
+	ErrPasswordNoLowercase = New(ErrCodePasswordNoLowercase, "密码必须包含至少一个小写字母", 400)
+	ErrPasswordNoDigit     = New(ErrCodePasswordNoDigit, "密码必须包含至少一个数字", 400)
+	ErrPasswordNoSpecial   = New(ErrCodePasswordNoSpecial, "密码必须包含至少一个特殊字符", 400)
+
+	// 邮箱验证错误
+	ErrEmailAlreadyVerified    = New(ErrCodeEmailAlreadyVerified, "邮箱已验证", 409)
+	ErrVerificationCodeInvalid = New(ErrCodeVerificationCodeInvalid, "验证码无效", 400)
+	ErrVerificationCodeExpired = New(ErrCodeVerificationCodeExpired, "验证码已过期", 400)
+	ErrResetTokenInvalid       = New(ErrCodeResetTokenInvalid, "重置令牌无效", 400)
+	ErrResetTokenExpired       = New(ErrCodeResetTokenExpired, "重置令牌已过期", 400)
+
+	// OAuth错误
+	ErrInvalidClient        = New(ErrCodeInvalidClient, "无效的客户端", 400)
+	ErrInvalidRedirectURI   = New(ErrCodeInvalidRedirectURI, "无效的重定向URI", 400)
+	ErrInvalidGrantType     = New(ErrCodeInvalidGrantType, "无效的授权类型", 400)
+	ErrInvalidCode          = New(ErrCodeInvalidCode, "无效的授权码", 400)
+	ErrCodeExpiredErr       = New(ErrCodeCodeExpired, "授权码已过期", 400)
+	ErrCodeUsedErr          = New(ErrCodeCodeUsed, "授权码已被使用", 400)
+	ErrInvalidCodeVerifier  = New(ErrCodeInvalidCodeVerifier, "无效的PKCE验证器", 400)
+	ErrInvalidPKCEChallenge = New(ErrCodeInvalidPKCEChallenge, "无效的PKCE挑战码", 400)
+
+	// MFA错误
+	ErrMFAAlreadyEnabled = New(ErrCodeMFAAlreadyEnabled, "MFA已启用", 409)
+	ErrMFANotEnabled     = New(ErrCodeMFANotEnabled, "MFA未启用", 400)
+	ErrInvalidTOTPCode   = New(ErrCodeInvalidTOTPCode, "验证码错误", 400)
+	ErrInvalidMFASecret  = New(ErrCodeInvalidMFASecret, "MFA密钥无效", 400)
+
+	// 第三方登录错误
+	ErrProviderNotSupported    = New(ErrCodeProviderNotSupported, "不支持的登录提供商", 400)
+	ErrOAuthCodeExchangeFailed = New(ErrCodeOAuthCodeExchangeFailed, "OAuth授权码交换失败", 400)
+
+	// 密钥错误
+	ErrKeyNotFound    = New(ErrCodeKeyNotFound, "密钥未找到", 500)
+	ErrKeyPathInvalid = New(ErrCodeKeyPathInvalid, "密钥路径无效", 500)
+	ErrKeyParseFailed = New(ErrCodeKeyParseFailed, "密钥解析失败", 500)
+
+	// 缓存错误
+	ErrCacheMiss = New(ErrCodeCacheMiss, "缓存未命中", 404)
+)
+
+// ============================================================================
+// 错误判断函数
+// ============================================================================
+
+// Is 判断错误是否为目标错误
+func Is(err, target error) bool {
+	return errors.Is(err, target)
+}
+
+// As 将错误转换为目标类型
+func As(err error, target interface{}) bool {
+	return errors.As(err, target)
+}
+
+// GetHTTPStatus 获取错误的HTTP状态码
+func GetHTTPStatus(err error) int {
+	var appErr *AppError
+	if errors.As(err, &appErr) {
+		return appErr.HTTPStatus
+	}
+	return 500
+}
+
+// GetErrorCode 获取错误码
+func GetErrorCode(err error) ErrorCode {
+	var appErr *AppError
+	if errors.As(err, &appErr) {
+		return appErr.Code
+	}
+	return ErrCodeInternal
+}
+
+// ============================================================================
+// 额外的密钥错误
+// ============================================================================
+
+const (
+	ErrCodeKeyPermissionOpen ErrorCode = "KEY_PERMISSION_OPEN" // 密钥权限过于开放
+	ErrCodeKeyTooShort       ErrorCode = "KEY_TOO_SHORT"       // RSA密钥长度不足
+)
+
+var (
+	ErrKeyPermissionOpen = New(ErrCodeKeyPermissionOpen, "密钥文件权限不安全", 500)
+	ErrKeyTooShort       = New(ErrCodeKeyTooShort, "RSA密钥长度必须至少为2048位", 500)
+)

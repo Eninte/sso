@@ -1,0 +1,98 @@
+run:
+  timeout: 5m
+  tests: true
+  skip-dirs:
+    - vendor
+    - testdata
+
+linters:
+  enable-all: true
+  disable:
+    # Deprecated linters
+    - deadcode
+    - exhaustivestruct
+    - golint
+    - ifshort
+    - interfacer
+    - maligned
+    - nosnakecase
+    - scopelint
+    - structcheck
+    - varcheck
+    # Too strict for this project
+    - exhaustruct
+    - gochecknoglobals
+    - gochecknoinits
+    - wsl
+    - lll
+    - funlen
+    - cyclop
+    - nestif
+    - godox
+    - godot
+    - gofumpt
+    - varnamelen
+    - tagliatelle
+    # Conflict with other linters
+    - gci
+    - goimports
+
+linters-settings:
+  gocyclo:
+    min-complexity: 15
+  gocognit:
+    min-complexity: 30
+  dupl:
+    threshold: 100
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+  misspell:
+    locale: US
+  govet:
+    enable-all: true
+  revive:
+    rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: exported
+      - name: increment-decrement
+      - name: var-naming
+      - name: var-declaration
+      - name: package-comments
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: indent-error-flow
+      - name: errorf
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+      - opinionated
+  staticcheck:
+    checks:
+      - all
+  stylecheck:
+    checks:
+      - all
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+        - dupl
+    - path: cmd/
+      linters:
+        - errcheck
+  max-issues-per-linter: 100
+  max-same-issues: 10

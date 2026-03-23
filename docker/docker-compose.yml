@@ -1,0 +1,120 @@
+# ============================================================================
+# SSO服务 Docker Compose配置
+# ============================================================================
+
+version: '3.8'
+
+services:
+  # --------------------------------------------------------------------------
+  # SSO服务
+  # --------------------------------------------------------------------------
+  sso:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "9090:9090"
+    environment:
+      # 服务器配置
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=9090
+      - SERVER_ENV=development
+      # 数据库配置
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=sso
+      - DB_USER=sso
+      - DB_PASSWORD=${DB_PASSWORD:-changeme}
+      - DB_SSL_MODE=disable
+      # Redis配置
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # JWT配置
+      - JWT_PRIVATE_KEY_PATH=/app/keys/private.pem
+      - JWT_PUBLIC_KEY_PATH=/app/keys/public.pem
+      - JWT_ACCESS_TOKEN_TTL=15m
+      - JWT_REFRESH_TOKEN_TTL=168h
+      - JWT_ISSUER=sso
+      # 安全配置
+      - BCRYPT_COST=12
+      - RATE_LIMIT_REQUESTS=100
+      - RATE_LIMIT_WINDOW=1m
+      - MAX_LOGIN_ATTEMPTS=5
+      - LOCKOUT_DURATION=30m
+    volumes:
+      # 挂载密钥文件 (生产环境应使用Secrets)
+      - ../keys:/app/keys:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - sso-network
+
+  # --------------------------------------------------------------------------
+  # PostgreSQL数据库
+  # --------------------------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: sso
+      POSTGRES_USER: sso
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # 初始化脚本 (可选)
+      # - ./init-scripts:/docker-entrypoint-initdb.d
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sso -d sso"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - sso-network
+
+  # --------------------------------------------------------------------------
+  # Redis缓存
+  # --------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sso-network
+
+# ============================================================================
+# 数据卷
+# ============================================================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+# ============================================================================
+# 网络
+# ============================================================================
+networks:
+  sso-network:
+    driver: bridge

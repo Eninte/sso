@@ -1,0 +1,617 @@
+// Package postgres PostgreSQL存储集成测试
+package postgres_test
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	_ "github.com/lib/pq"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/your-org/sso/internal/model"
+	"github.com/your-org/sso/internal/store/postgres"
+)
+
+// ============================================================================
+// 测试辅助函数
+// ============================================================================
+
+func getTestDB(t *testing.T) *sql.DB {
+	t.Helper()
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("跳过集成测试：未设置DATABASE_URL环境变量")
+	}
+	db, err := sql.Open("postgres", dbURL)
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, db.PingContext(ctx))
+	return db
+}
+
+func setupTestStore(t *testing.T) (*postgres.Store, *sql.DB) {
+	t.Helper()
+	db := getTestDB(t)
+	return postgres.New(db), db
+}
+
+func cleanupTestData(t *testing.T, db *sql.DB) {
+	t.Helper()
+	ctx := context.Background()
+	_, _ = db.ExecContext(ctx, "DELETE FROM audit_logs WHERE user_id LIKE 'test-%'")
+	_, _ = db.ExecContext(ctx, "DELETE FROM verification_tokens WHERE token LIKE 'test-%'")
+	_, _ = db.ExecContext(ctx, "DELETE FROM reset_tokens WHERE token LIKE 'test-%'")
+	_, _ = db.ExecContext(ctx, "DELETE FROM tokens WHERE access_token LIKE 'test-%'")
+	_, _ = db.ExecContext(ctx, "DELETE FROM authorization_codes WHERE code LIKE 'test-%'")
+	_, _ = db.ExecContext(ctx, "DELETE FROM users WHERE email LIKE 'test-%@%'")
+}
+
+func newTestUser(email string) *model.User {
+	return &model.User{
+		ID:            uuid.New().String(),
+		Email:         "test-" + email,
+		PasswordHash:  "$2a$10$testhashvalue0123456789abc",
+		EmailVerified: false,
+		MFASecret:     "",
+		Status:        model.UserStatusActive,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+}
+
+// ============================================================================
+// 用户存储测试
+// ============================================================================
+
+func TestStore_CreateUser(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	defer cleanupTestData(t, db)
+	ctx := context.Background()
+
+	t.Run("成功创建用户", func(t *testing.T) {
+		user := newTestUser("create1@example.com")
+		err := store.Create(ctx, user)
+		assert.NoError(t, err)
+
+		retrieved, err := store.GetByID(ctx, user.ID)
+		require.NoError(t, err)
+		assert.Equal(t, user.Email, retrieved.Email)
+	})
+
+	t.Run("邮箱重复", func(t *testing.T) {
+		user1 := newTestUser("dup@example.com")
+		require.NoError(t, store.Create(ctx, user1))
+
+		user2 := newTestUser("dup@example.com")
+		assert.Error(t, store.Create(ctx, user2))
+	})
+}
+
+func TestStore_GetUserByEmail(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	defer cleanupTestData(t, db)
+	ctx := context.Background()
+
+	user := newTestUser("getbyemail@example.com")
+	require.NoError(t, store.Create(ctx, user))
+
+	t.Run("成功获取用户", func(t *testing.T) {
+		retrieved, err := store.GetByEmail(ctx, user.Email)
+		require.NoError(t, err)
+		assert.Equal(t, user.ID, retrieved.ID)
+	})
+
+	t.Run("用户不存在", func(t *testing.T) {
+		_, err := store.GetByEmail(ctx, "nonexistent@example.com")
+		assert.Error(t, err)
+	})
+}
+
+func TestStore_GetUserByID(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	defer cleanupTestData(t, db)
+	ctx := context.Background()
+
+	user := newTestUser("getbyid@example.com")
+	require.NoError(t, store.Create(ctx, user))
+
+	t.Run("成功获取", func(t *testing.T) {
+		retrieved, err := store.GetByID(ctx, user.ID)
+		require.NoError(t, err)
+		assert.Equal(t, user.Email, retrieved.Email)
+	})
+
+	t.Run("不存在", func(t *testing.T) {
+		_, err := store.GetByID(ctx, uuid.New().String())
+		assert.Error(t, err)
+	})
+}
+
+func TestStore_UpdateUser(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	defer cleanupTestData(t, db)
+	ctx := context.Background()
+
+	user := newTestUser("update@example.com")
+	require.NoError(t, store.Create(ctx, user))
+
+	t.Run("更新用户信息", func(t *testing.T) {
+		user.EmailVerified = true
+		user.Status = model.UserStatusLocked
+		user.UpdatedAt = time.Now()
+		require.NoError(t, store.Update(ctx, user))
+
+		retrieved, err := store.GetByID(ctx, user.ID)
+		require.NoError(t, err)
+		assert.True(t, retrieved.EmailVerified)
+		assert.Equal(t, model.UserStatusLocked, retrieved.Status)
+	})
+
+	t.Run("更新登录尝试次数", func(t *testing.T) {
+		lockedUntil := time.Now().Add(30 * time.Minute)
+		require.NoError(t, store.UpdateLoginAttempts(ctx, user.ID, 3, &lockedUntil))
+
+		retrieved, err := store.GetByID(ctx, user.ID)
+		require.NoError(t, err)
+		assert.Equal(t, 3, retrieved.LoginAttempts)
+		assert.NotNil(t, retrieved.LockedUntil)
+	})
+}
+
+func TestStore_DeleteUser(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	defer cleanupTestData(t, db)
+	ctx := context.Background()
+
+	user := newTestUser("delete@example.com")
+	require.NoError(t, store.Create(ctx, user))
+
+	t.Run("删除用户", func(t *testing.T) {
+		require.NoError(t, store.Delete(ctx, user.ID))
+		_, err := store.GetByID(ctx, user.ID)
+		assert.Error(t, err)
+	})
+}
+
+func TestStore_ListUsers(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	defer cleanupTestData(t, db)
+	ctx := context.Background()
+
+	for i := 0; i < 5; i++ {
+		require.NoError(t, store.Create(ctx, newTestUser(fmt.Sprintf("list%d@example.com", i))))
+	}
+
+	t.Run("列出所有用户", func(t *testing.T) {
+		users, total, err := store.ListUsers(ctx, 0, 10)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, total, 5)
+		assert.GreaterOrEqual(t, len(users), 5)
+	})
+
+	t.Run("分页", func(t *testing.T) {
+		users, _, err := store.ListUsers(ctx, 0, 2)
+		require.NoError(t, err)
+		assert.Equal(t, 2, len(users))
+	})
+}
+
+// ============================================================================
+// Token存储测试
+// ============================================================================
+
+func TestStore_TokenOperations(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	defer cleanupTestData(t, db)
+	ctx := context.Background()
+
+	user := newTestUser("token@example.com")
+	require.NoError(t, store.Create(ctx, user))
+
+	// 创建测试客户端（Token表有client_id外键）
+	testClient := &model.Client{
+		ID:           uuid.New().String(),
+		ClientID:     "test-token-client",
+		ClientSecret: "secret",
+		Name:         "Token Test Client",
+		RedirectURIs: []string{"http://localhost"},
+		GrantTypes:   []string{"authorization_code"},
+		Scopes:       []string{"openid"},
+		CreatedAt:    time.Now(),
+	}
+	_ = store.CreateClient(ctx, testClient)
+
+	t.Run("存储和获取Token", func(t *testing.T) {
+		token := &model.Token{
+			ID:           uuid.New().String(),
+			AccessToken:  "test-access-" + uuid.New().String(),
+			RefreshToken: "test-refresh-" + uuid.New().String(),
+			UserID:       user.ID,
+			ClientID:     "test-token-client",
+			Scopes:       []string{"openid", "profile"},
+			ExpiresAt:    time.Now().Add(1 * time.Hour),
+			CreatedAt:    time.Now(),
+		}
+		require.NoError(t, store.StoreToken(ctx, token))
+
+		retrieved, err := store.GetTokenByAccessToken(ctx, token.AccessToken)
+		require.NoError(t, err)
+		assert.Equal(t, token.ID, retrieved.ID)
+
+		retrieved, err = store.GetTokenByRefreshToken(ctx, token.RefreshToken)
+		require.NoError(t, err)
+		assert.Equal(t, token.ID, retrieved.ID)
+	})
+
+	t.Run("撤销Token", func(t *testing.T) {
+		token := &model.Token{
+			ID:           uuid.New().String(),
+			AccessToken:  "test-access-revoke-" + uuid.New().String(),
+			RefreshToken: "test-refresh-revoke-" + uuid.New().String(),
+			UserID:       user.ID,
+			ClientID:     "test-token-client",
+			Scopes:       []string{"openid"},
+			ExpiresAt:    time.Now().Add(1 * time.Hour),
+			CreatedAt:    time.Now(),
+		}
+		require.NoError(t, store.StoreToken(ctx, token))
+		require.NoError(t, store.RevokeToken(ctx, token.AccessToken))
+
+		retrieved, err := store.GetTokenByAccessToken(ctx, token.AccessToken)
+		require.NoError(t, err)
+		assert.NotNil(t, retrieved.RevokedAt)
+	})
+
+	t.Run("撤销用户所有Token", func(t *testing.T) {
+		for i := 0; i < 3; i++ {
+			token := &model.Token{
+				ID:           uuid.New().String(),
+				AccessToken:  fmt.Sprintf("test-all-%d-%s", i, uuid.New().String()),
+				RefreshToken: fmt.Sprintf("test-all-r-%d-%s", i, uuid.New().String()),
+				UserID:       user.ID,
+				ClientID:     "test-token-client",
+				Scopes:       []string{"openid"},
+				ExpiresAt:    time.Now().Add(1 * time.Hour),
+				CreatedAt:    time.Now(),
+			}
+			require.NoError(t, store.StoreToken(ctx, token))
+		}
+		assert.NoError(t, store.RevokeAllUserTokens(ctx, user.ID))
+	})
+}
+
+// ============================================================================
+// 验证令牌测试
+// ============================================================================
+
+func TestStore_VerificationTokens(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	defer cleanupTestData(t, db)
+	ctx := context.Background()
+
+	user := newTestUser("verify@example.com")
+	require.NoError(t, store.Create(ctx, user))
+
+	t.Run("验证令牌", func(t *testing.T) {
+		token := "vtoken-" + uuid.New().String()
+		require.NoError(t, store.StoreVerificationToken(ctx, user.ID, token, time.Now().Add(24*time.Hour)))
+
+		retrieved, err := store.GetVerificationToken(ctx, user.ID)
+		require.NoError(t, err)
+		assert.Equal(t, token, retrieved.Token)
+
+		assert.NoError(t, store.DeleteVerificationToken(ctx, user.ID))
+	})
+
+	t.Run("重置令牌", func(t *testing.T) {
+		token := "rtoken-" + uuid.New().String()
+		require.NoError(t, store.StoreResetToken(ctx, user.ID, token, time.Now().Add(1*time.Hour)))
+
+		retrieved, err := store.GetResetToken(ctx, user.ID)
+		require.NoError(t, err)
+		assert.Equal(t, token, retrieved.Token)
+
+		assert.NoError(t, store.DeleteResetToken(ctx, user.ID))
+	})
+}
+
+// ============================================================================
+// 授权码测试
+// ============================================================================
+
+func TestStore_AuthorizationCode(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	defer cleanupTestData(t, db)
+	ctx := context.Background()
+
+	user := newTestUser("authcode@example.com")
+	require.NoError(t, store.Create(ctx, user))
+
+	// 创建测试客户端（使用有效UUID）
+	testClientID := uuid.New().String()
+	testClient := &model.Client{
+		ID:           testClientID,
+		ClientID:     "test-authcode-client",
+		ClientSecret: "test-secret",
+		Name:         "Test AuthCode Client",
+		RedirectURIs: []string{"http://localhost/callback"},
+		GrantTypes:   []string{"authorization_code"},
+		Scopes:       []string{"openid"},
+		CreatedAt:    time.Now(),
+	}
+	err := store.CreateClient(ctx, testClient)
+	if err != nil {
+		t.Logf("CreateClient warning: %v (可能已存在)", err)
+	}
+
+	t.Run("创建和获取授权码", func(t *testing.T) {
+		code := &model.AuthorizationCode{
+			Code:        "test-ac-" + uuid.New().String(),
+			ClientID:    "test-authcode-client",
+			UserID:      user.ID,
+			RedirectURI: "http://localhost/callback",
+			Scopes:      []string{"openid"},
+			ExpiresAt:   time.Now().Add(10 * time.Minute),
+			CreatedAt:   time.Now(),
+		}
+		require.NoError(t, store.StoreAuthorizationCode(ctx, code))
+
+		retrieved, err := store.GetAuthorizationCode(ctx, code.Code)
+		require.NoError(t, err)
+		assert.Equal(t, code.UserID, retrieved.UserID)
+		assert.Equal(t, code.ClientID, retrieved.ClientID)
+	})
+
+	t.Run("标记授权码已使用", func(t *testing.T) {
+		code := &model.AuthorizationCode{
+			Code:        "test-ac-used-" + uuid.New().String(),
+			ClientID:    "test-authcode-client",
+			UserID:      user.ID,
+			RedirectURI: "http://localhost/callback",
+			Scopes:      []string{"openid"},
+			ExpiresAt:   time.Now().Add(10 * time.Minute),
+			CreatedAt:   time.Now(),
+		}
+		require.NoError(t, store.StoreAuthorizationCode(ctx, code))
+
+		now := time.Now()
+		code.UsedAt = &now
+		assert.NoError(t, store.UpdateAuthorizationCode(ctx, code))
+	})
+}
+
+// ============================================================================
+// 审计日志测试
+// ============================================================================
+
+func TestStore_AuditLog(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	t.Run("记录审计日志", func(t *testing.T) {
+		log := &model.AuditLog{
+			ID:        uuid.New().String(),
+			EventType: "user.login",
+			UserID:    "test-user-audit",
+			IPAddress: "192.168.1.1",
+			UserAgent: "test-agent",
+			Details:   `{"email":"test@example.com"}`,
+			Success:   true,
+			Timestamp: time.Now(),
+		}
+		assert.NoError(t, store.StoreAuditLog(ctx, log))
+	})
+
+	t.Run("列出审计日志", func(t *testing.T) {
+		logs, total, err := store.ListAuditLogs(ctx, "test-user-audit", "", 0, 10)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, total, 1)
+		assert.GreaterOrEqual(t, len(logs), 1)
+	})
+
+	t.Run("按事件类型过滤", func(t *testing.T) {
+		logs, _, err := store.ListAuditLogs(ctx, "", "user.login", 0, 10)
+		require.NoError(t, err)
+		for _, log := range logs {
+			assert.Equal(t, "user.login", log.EventType)
+		}
+	})
+}
+
+// ============================================================================
+// 连接测试
+// ============================================================================
+
+func TestStore_Ping(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	assert.NoError(t, store.Ping(context.Background()))
+}
+
+func TestStore_Close(t *testing.T) {
+	db := getTestDB(t)
+	assert.NoError(t, postgres.New(db).Close())
+}
+
+// ============================================================================
+// Client查询测试
+// ============================================================================
+
+func TestStore_GetByClientID(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	// 创建测试客户端
+	client := &model.Client{
+		ID:           uuid.New().String(),
+		ClientID:     "test-getclient-" + uuid.New().String()[:8],
+		ClientSecret: "secret",
+		Name:         "GetByClientID Test",
+		RedirectURIs: []string{"http://localhost/callback"},
+		GrantTypes:   []string{"authorization_code"},
+		Scopes:       []string{"openid"},
+		CreatedAt:    time.Now(),
+	}
+	require.NoError(t, store.CreateClient(ctx, client))
+
+	t.Run("通过clientID获取客户端", func(t *testing.T) {
+		retrieved, err := store.GetByClientID(ctx, client.ClientID)
+		require.NoError(t, err)
+		assert.Equal(t, client.ClientID, retrieved.ClientID)
+		assert.Equal(t, client.Name, retrieved.Name)
+		assert.Contains(t, retrieved.RedirectURIs, "http://localhost/callback")
+	})
+
+	t.Run("客户端不存在", func(t *testing.T) {
+		_, err := store.GetByClientID(ctx, "nonexistent-client-id")
+		assert.Error(t, err)
+	})
+}
+
+func TestStore_ValidateRedirectURI(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	clientID := "test-validate-uri-" + uuid.New().String()[:8]
+	client := &model.Client{
+		ID:           uuid.New().String(),
+		ClientID:     clientID,
+		ClientSecret: "secret",
+		Name:         "ValidateURI Test",
+		RedirectURIs: []string{"http://localhost/callback", "https://app.example.com/callback"},
+		GrantTypes:   []string{"authorization_code"},
+		Scopes:       []string{"openid"},
+		CreatedAt:    time.Now(),
+	}
+	require.NoError(t, store.CreateClient(ctx, client))
+
+	t.Run("有效重定向URI", func(t *testing.T) {
+		assert.True(t, store.ValidateRedirectURI(ctx, clientID, "http://localhost/callback"))
+		assert.True(t, store.ValidateRedirectURI(ctx, clientID, "https://app.example.com/callback"))
+	})
+
+	t.Run("无效重定向URI", func(t *testing.T) {
+		assert.False(t, store.ValidateRedirectURI(ctx, clientID, "http://evil.com/callback"))
+		assert.False(t, store.ValidateRedirectURI(ctx, clientID, ""))
+	})
+
+	t.Run("不存在的客户端", func(t *testing.T) {
+		assert.False(t, store.ValidateRedirectURI(ctx, "nonexistent", "http://localhost"))
+	})
+}
+
+// ============================================================================
+// Constructor 测试
+// ============================================================================
+
+func TestStore_NewFromURL(t *testing.T) {
+	t.Run("有效URL", func(t *testing.T) {
+		dbURL := os.Getenv("DATABASE_URL")
+		if dbURL == "" {
+			t.Skip("跳过：未设置DATABASE_URL")
+		}
+		store, err := postgres.NewFromURL(dbURL)
+		require.NoError(t, err)
+		assert.NotNil(t, store)
+		store.Close()
+	})
+
+	t.Run("无效URL格式", func(t *testing.T) {
+		_, err := postgres.NewFromURL("://invalid-url")
+		assert.Error(t, err)
+	})
+}
+
+func TestStore_NewFromConfig(t *testing.T) {
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("跳过：未设置DATABASE_URL")
+	}
+
+	store, err := postgres.NewFromConfig(dbURL, 10, 5, 5*time.Minute, 30*time.Second)
+	require.NoError(t, err)
+	assert.NotNil(t, store)
+	store.Close()
+}
+
+// ============================================================================
+// CleanupExpired 测试
+// ============================================================================
+
+func TestStore_CleanupExpired(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	t.Run("清理过期数据", func(t *testing.T) {
+		err := store.CleanupExpired(ctx)
+		assert.NoError(t, err)
+	})
+}
+
+// ============================================================================
+// MarkAuthorizationCodeUsed 测试
+// ============================================================================
+
+func TestStore_MarkAuthorizationCodeUsed(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	defer cleanupTestData(t, db)
+	ctx := context.Background()
+
+	user := newTestUser("markused@example.com")
+	require.NoError(t, store.Create(ctx, user))
+
+	// 创建测试客户端
+	client := &model.Client{
+		ID:           uuid.New().String(),
+		ClientID:     "test-markused-client",
+		ClientSecret: "secret",
+		Name:         "MarkUsed Test",
+		RedirectURIs: []string{"http://localhost"},
+		GrantTypes:   []string{"authorization_code"},
+		Scopes:       []string{"openid"},
+		CreatedAt:    time.Now(),
+	}
+	_ = store.CreateClient(ctx, client)
+
+	t.Run("标记授权码已使用", func(t *testing.T) {
+		code := &model.AuthorizationCode{
+			Code:        "test-markused-" + uuid.New().String(),
+			ClientID:    "test-markused-client",
+			UserID:      user.ID,
+			RedirectURI: "http://localhost",
+			Scopes:      []string{"openid"},
+			ExpiresAt:   time.Now().Add(10 * time.Minute),
+			CreatedAt:   time.Now(),
+		}
+		require.NoError(t, store.StoreAuthorizationCode(ctx, code))
+
+		err := store.MarkAuthorizationCodeUsed(ctx, code.Code)
+		assert.NoError(t, err)
+
+		// 验证已标记
+		retrieved, err := store.GetAuthorizationCode(ctx, code.Code)
+		require.NoError(t, err)
+		assert.NotNil(t, retrieved.UsedAt)
+	})
+}

@@ -1,0 +1,28 @@
+# ============================================================================
+# SSO服务 Dockerfile (开发环境)
+# 支持热重载，便于开发调试
+# ============================================================================
+
+FROM golang:1.26-alpine
+
+# 安装开发工具
+RUN apk add --no-cache git gcc musl-dev curl
+
+# 安装热重载工具 air
+RUN go install github.com/air-verse/air@latest
+
+# 设置工作目录
+WORKDIR /app
+
+# 复制依赖文件
+COPY go.mod go.sum ./
+RUN go mod download
+
+# 复制源代码 (开发时通过volume挂载覆盖)
+COPY . .
+
+# 暴露端口
+EXPOSE 9090
+
+# 使用air进行热重载
+CMD ["air", "-c", ".air.toml"]
