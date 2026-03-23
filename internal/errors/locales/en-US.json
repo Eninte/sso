@@ -19,6 +19,7 @@
   "PASSWORD_TOO_SHORT": "Password must be at least 8 characters",
   "PASSWORD_TOO_LONG": "Password must be at most 72 characters",
   "PASSWORD_REQUIRED": "Password is required",
+  "PASSWORD_MISMATCH": "Password mismatch",
   "PASSWORD_NO_UPPERCASE": "Password must contain at least one uppercase letter",
   "PASSWORD_NO_LOWERCASE": "Password must contain at least one lowercase letter",
   "PASSWORD_NO_DIGIT": "Password must contain at least one digit",
@@ -42,15 +43,69 @@
   "MFA_ALREADY_ENABLED": "MFA already enabled",
   "MFA_NOT_ENABLED": "MFA not enabled",
   "INVALID_TOTP_CODE": "Invalid verification code",
+  "TOTP_CODE_EXPIRED": "Verification code has expired",
   "INVALID_MFA_SECRET": "Invalid MFA secret",
   
   "PROVIDER_NOT_SUPPORTED": "Provider not supported",
   "OAUTH_CODE_EXCHANGE_FAILED": "OAuth code exchange failed",
+  "SOCIAL_LOGIN_FAILED": "Social login failed",
+  "OAUTH_STATE_INVALID": "OAuth state invalid",
   
   "KEY_NOT_FOUND": "Key not found",
   "KEY_PATH_INVALID": "Invalid key path",
   "KEY_PARSE_FAILED": "Key parse failed",
   "KEY_PERMISSION_OPEN": "Key file permissions are too open",
+  "KEY_TOO_SHORT": "RSA key must be at least 2048 bits",
   
-  "CACHE_MISS": "Cache miss"
+  "CACHE_MISS": "Cache miss",
+  
+  "REQUEST_BODY_TOO_LARGE": "Request body too large",
+  "REQUEST_BODY_EXTRA_DATA": "Request body contains extra data",
+  
+  "DB_PASSWORD_REQUIRED": "DB_PASSWORD environment variable must be set",
+  "JWT_KEY_REQUIRED": "JWT key path must be set",
+  "BCRYPT_COST_TOO_LOW": "Production bcrypt cost must be >= 12",
+
+  "INVALID_REQUEST_FORMAT": "Invalid request format",
+  "MISSING_REQUIRED_PARAM": "Missing required parameter",
+  "MISSING_USER_ID": "Missing user ID",
+  "MISSING_TOKEN": "Missing token parameter",
+  "MISSING_CODE": "Missing code parameter",
+  "MISSING_CLIENT_ID": "Missing client_id parameter",
+  "MISSING_REDIRECT_URI": "Missing redirect_uri parameter",
+  "MISSING_REFRESH_TOKEN": "Missing refresh_token parameter",
+  "MISSING_AUTH_CODE": "Missing authorization code",
+  "MISSING_OLD_PASSWORD": "Missing old password",
+  "MISSING_NEW_PASSWORD": "Missing new password",
+  "MISSING_VERIFICATION_CODE": "Verification code is required",
+  
+  "STATE_INVALID": "State parameter is invalid or missing",
+  "INVALID_REFRESH_TOKEN": "Invalid refresh_token",
+  
+  "LOGIN_FAILED": "Login failed",
+  "REGISTER_FAILED": "Registration failed",
+  "LOGOUT_FAILED": "Logout failed",
+  "SEND_VERIFICATION_EMAIL_FAILED": "Failed to send verification email",
+  "VERIFY_EMAIL_FAILED": "Verification failed",
+  "FORGOT_PASSWORD_FAILED": "Failed to send reset email",
+  "RESET_PASSWORD_FAILED": "Reset failed",
+  "CHANGE_PASSWORD_FAILED": "Password change failed",
+  "REFRESH_TOKEN_FAILED": "Token refresh failed",
+  "REVOKE_TOKEN_FAILED": "Token revocation failed",
+  "EXCHANGE_CODE_FAILED": "Code exchange failed",
+  
+  "SETUP_MFA_FAILED": "MFA setup failed",
+  "VERIFY_MFA_FAILED": "MFA verification failed",
+  "DISABLE_MFA_FAILED": "MFA disable failed",
+  "GET_MFA_STATUS_FAILED": "Failed to get MFA status",
+  
+  "LIST_USERS_FAILED": "Failed to list users",
+  "GET_USER_FAILED": "Failed to get user",
+  "DISABLE_USER_FAILED": "Failed to disable user",
+  "ENABLE_USER_FAILED": "Failed to enable user",
+  "SYSTEM_HEALTH_FAILED": "Failed to get system health",
+  "CLEANUP_FAILED": "Cleanup failed",
+  
+  "UNSUPPORTED_GRANT_TYPE": "Unsupported grant type",
+  "UNSUPPORTED_LOGIN_METHOD": "Unsupported login method"
 }

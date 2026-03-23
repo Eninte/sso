@@ -232,6 +232,61 @@ var (
 )
 
 // ============================================================================
+// Handler消息错误码
+// ============================================================================
+
+const (
+	// 通用消息
+	ErrCodeInvalidRequestFormat    ErrorCode = "INVALID_REQUEST_FORMAT"
+	ErrCodeMissingRequiredParam    ErrorCode = "MISSING_REQUIRED_PARAM"
+	ErrCodeMissingUserID           ErrorCode = "MISSING_USER_ID"
+	ErrCodeMissingToken            ErrorCode = "MISSING_TOKEN"
+	ErrCodeMissingCode             ErrorCode = "MISSING_CODE"
+	ErrCodeMissingClientID         ErrorCode = "MISSING_CLIENT_ID"
+	ErrCodeMissingRedirectURI      ErrorCode = "MISSING_REDIRECT_URI"
+	ErrCodeMissingRefreshToken     ErrorCode = "MISSING_REFRESH_TOKEN"
+	ErrCodeMissingAuthCode         ErrorCode = "MISSING_AUTH_CODE"
+	ErrCodeMissingOldPassword      ErrorCode = "MISSING_OLD_PASSWORD"
+	ErrCodeMissingNewPassword      ErrorCode = "MISSING_NEW_PASSWORD"
+	ErrCodeMissingVerificationCode ErrorCode = "MISSING_VERIFICATION_CODE"
+
+	// OAuth消息
+	ErrCodeStateInvalid        ErrorCode = "STATE_INVALID"
+	ErrCodeInvalidRefreshToken ErrorCode = "INVALID_REFRESH_TOKEN"
+
+	// 操作失败消息
+	ErrCodeLoginFailed                 ErrorCode = "LOGIN_FAILED"
+	ErrCodeRegisterFailed              ErrorCode = "REGISTER_FAILED"
+	ErrCodeLogoutFailed                ErrorCode = "LOGOUT_FAILED"
+	ErrCodeSendVerificationEmailFailed ErrorCode = "SEND_VERIFICATION_EMAIL_FAILED"
+	ErrCodeVerifyEmailFailed           ErrorCode = "VERIFY_EMAIL_FAILED"
+	ErrCodeForgotPasswordFailed        ErrorCode = "FORGOT_PASSWORD_FAILED"
+	ErrCodeResetPasswordFailed         ErrorCode = "RESET_PASSWORD_FAILED"
+	ErrCodeChangePasswordFailed        ErrorCode = "CHANGE_PASSWORD_FAILED"
+	ErrCodeRefreshTokenFailed          ErrorCode = "REFRESH_TOKEN_FAILED"
+	ErrCodeRevokeTokenFailed           ErrorCode = "REVOKE_TOKEN_FAILED"
+	ErrCodeExchangeCodeFailed          ErrorCode = "EXCHANGE_CODE_FAILED"
+
+	// MFA消息
+	ErrCodeSetupMFAFailed     ErrorCode = "SETUP_MFA_FAILED"
+	ErrCodeVerifyMFAFailed    ErrorCode = "VERIFY_MFA_FAILED"
+	ErrCodeDisableMFAFailed   ErrorCode = "DISABLE_MFA_FAILED"
+	ErrCodeGetMFAStatusFailed ErrorCode = "GET_MFA_STATUS_FAILED"
+
+	// 管理员消息
+	ErrCodeListUsersFailed    ErrorCode = "LIST_USERS_FAILED"
+	ErrCodeGetUserFailed      ErrorCode = "GET_USER_FAILED"
+	ErrCodeDisableUserFailed  ErrorCode = "DISABLE_USER_FAILED"
+	ErrCodeEnableUserFailed   ErrorCode = "ENABLE_USER_FAILED"
+	ErrCodeSystemHealthFailed ErrorCode = "SYSTEM_HEALTH_FAILED"
+	ErrCodeCleanupFailed      ErrorCode = "CLEANUP_FAILED"
+
+	// 授权消息
+	ErrCodeUnsupportedGrantType   ErrorCode = "UNSUPPORTED_GRANT_TYPE"
+	ErrCodeUnsupportedLoginMethod ErrorCode = "UNSUPPORTED_LOGIN_METHOD"
+)
+
+// ============================================================================
 // 错误判断函数
 // ============================================================================
 

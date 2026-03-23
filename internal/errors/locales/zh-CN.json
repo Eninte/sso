@@ -19,6 +19,7 @@
   "PASSWORD_TOO_SHORT": "密码长度不能少于8个字符",
   "PASSWORD_TOO_LONG": "密码长度不能超过72个字符",
   "PASSWORD_REQUIRED": "密码不能为空",
+  "PASSWORD_MISMATCH": "密码不匹配",
   "PASSWORD_NO_UPPERCASE": "密码必须包含至少一个大写字母",
   "PASSWORD_NO_LOWERCASE": "密码必须包含至少一个小写字母",
   "PASSWORD_NO_DIGIT": "密码必须包含至少一个数字",
@@ -42,15 +43,69 @@
   "MFA_ALREADY_ENABLED": "MFA已启用",
   "MFA_NOT_ENABLED": "MFA未启用",
   "INVALID_TOTP_CODE": "验证码错误",
+  "TOTP_CODE_EXPIRED": "验证码已过期",
   "INVALID_MFA_SECRET": "MFA密钥无效",
   
   "PROVIDER_NOT_SUPPORTED": "不支持的登录提供商",
   "OAUTH_CODE_EXCHANGE_FAILED": "OAuth授权码交换失败",
+  "SOCIAL_LOGIN_FAILED": "社交登录失败",
+  "OAUTH_STATE_INVALID": "OAuth状态无效",
   
   "KEY_NOT_FOUND": "密钥未找到",
   "KEY_PATH_INVALID": "密钥路径无效",
   "KEY_PARSE_FAILED": "密钥解析失败",
   "KEY_PERMISSION_OPEN": "密钥文件权限不安全",
+  "KEY_TOO_SHORT": "RSA密钥长度必须至少为2048位",
   
-  "CACHE_MISS": "缓存未命中"
+  "CACHE_MISS": "缓存未命中",
+  
+  "REQUEST_BODY_TOO_LARGE": "请求体过大",
+  "REQUEST_BODY_EXTRA_DATA": "请求体包含多余数据",
+  
+  "DB_PASSWORD_REQUIRED": "DB_PASSWORD环境变量必须设置",
+  "JWT_KEY_REQUIRED": "JWT密钥路径必须设置",
+  "BCRYPT_COST_TOO_LOW": "生产环境bcrypt cost必须 >= 12",
+
+  "INVALID_REQUEST_FORMAT": "无效的请求格式",
+  "MISSING_REQUIRED_PARAM": "缺少必要参数",
+  "MISSING_USER_ID": "缺少用户ID",
+  "MISSING_TOKEN": "缺少token参数",
+  "MISSING_CODE": "缺少code参数",
+  "MISSING_CLIENT_ID": "缺少client_id参数",
+  "MISSING_REDIRECT_URI": "缺少redirect_uri参数",
+  "MISSING_REFRESH_TOKEN": "缺少refresh_token参数",
+  "MISSING_AUTH_CODE": "缺少授权码",
+  "MISSING_OLD_PASSWORD": "缺少旧密码",
+  "MISSING_NEW_PASSWORD": "缺少新密码",
+  "MISSING_VERIFICATION_CODE": "验证码不能为空",
+  
+  "STATE_INVALID": "state参数无效或缺失",
+  "INVALID_REFRESH_TOKEN": "无效的refresh_token",
+  
+  "LOGIN_FAILED": "登录失败",
+  "REGISTER_FAILED": "注册失败",
+  "LOGOUT_FAILED": "登出失败",
+  "SEND_VERIFICATION_EMAIL_FAILED": "发送验证邮件失败",
+  "VERIFY_EMAIL_FAILED": "验证失败",
+  "FORGOT_PASSWORD_FAILED": "发送重置邮件失败",
+  "RESET_PASSWORD_FAILED": "重置失败",
+  "CHANGE_PASSWORD_FAILED": "修改密码失败",
+  "REFRESH_TOKEN_FAILED": "刷新Token失败",
+  "REVOKE_TOKEN_FAILED": "撤销失败",
+  "EXCHANGE_CODE_FAILED": "交换授权码失败",
+  
+  "SETUP_MFA_FAILED": "设置MFA失败",
+  "VERIFY_MFA_FAILED": "验证MFA失败",
+  "DISABLE_MFA_FAILED": "禁用MFA失败",
+  "GET_MFA_STATUS_FAILED": "获取MFA状态失败",
+  
+  "LIST_USERS_FAILED": "获取用户列表失败",
+  "GET_USER_FAILED": "获取用户失败",
+  "DISABLE_USER_FAILED": "禁用用户失败",
+  "ENABLE_USER_FAILED": "启用用户失败",
+  "SYSTEM_HEALTH_FAILED": "获取系统健康状态失败",
+  "CLEANUP_FAILED": "清理失败",
+  
+  "UNSUPPORTED_GRANT_TYPE": "不支持的授权类型",
+  "UNSUPPORTED_LOGIN_METHOD": "不支持的登录方式"
 }
