@@ -153,17 +153,42 @@ func (s *Store) GetByEmail(ctx context.Context, email string) (*model.User, erro
 	return s.getUserByField(ctx, "email", email)
 }
 
+// ============================================================================
+// 允许的查询字段白名单
+// ============================================================================
+
+// allowedUserFields 允许用于用户查询的字段白名单
+var allowedUserFields = map[string]bool{
+	"id":    true,
+	"email": true,
+}
+
+// allowedTokenFields 允许用于Token查询的字段白名单
+var allowedTokenFields = map[string]bool{
+	"id":            true,
+	"access_token":  true,
+	"refresh_token": true,
+	"user_id":       true,
+}
+
+// ErrInvalidFieldName 无效的字段名错误
+var ErrInvalidFieldName = errors.New("invalid field name")
+
 // getUserByField 通用用户查询函数
 func (s *Store) getUserByField(ctx context.Context, field, value string) (*model.User, error) {
+	// 验证字段名是否在白名单中
+	if !allowedUserFields[field] {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidFieldName, field)
+	}
+
 	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 
-	query := fmt.Sprintf(`
+	query := `
 		SELECT id, email, password_hash, email_verified, mfa_enabled, mfa_secret, 
 		       status, login_attempts, locked_until, created_at, updated_at
 		FROM users
-		WHERE %s = $1
-	`, field)
+		WHERE ` + field + ` = $1`
 
 	user := &model.User{}
 	var mfaSecret sql.NullString
@@ -266,7 +291,8 @@ func (s *Store) ListUsers(ctx context.Context, offset, limit int) ([]*model.User
 	}
 	defer rows.Close()
 
-	users := make([]*model.User, 0)
+	// 预分配slice容量以减少内存重新分配
+	users := make([]*model.User, 0, limit)
 	for rows.Next() {
 		user := &model.User{}
 		var mfaSecret sql.NullString
@@ -463,11 +489,15 @@ func (s *Store) GetTokenByAccessToken(ctx context.Context, accessToken string) (
 
 // getTokenByField 通用Token查询函数
 func (s *Store) getTokenByField(ctx context.Context, field, value string) (*model.Token, error) {
-	query := fmt.Sprintf(`
+	// 验证字段名是否在白名单中
+	if !allowedTokenFields[field] {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidFieldName, field)
+	}
+
+	query := `
 		SELECT id, access_token, refresh_token, user_id, client_id, scopes, expires_at, created_at, revoked_at
 		FROM tokens
-		WHERE %s = $1
-	`, field)
+		WHERE ` + field + ` = $1`
 
 	token := &model.Token{}
 	err := s.db.QueryRowContext(ctx, query, value).Scan(
@@ -672,7 +702,8 @@ func (s *Store) ListAuditLogs(ctx context.Context, userID string, eventType stri
 	}
 	defer rows.Close()
 
-	logs := make([]*model.AuditLog, 0)
+	// 预分配slice容量以减少内存重新分配
+	logs := make([]*model.AuditLog, 0, limit)
 	for rows.Next() {
 		log := &model.AuditLog{}
 		err := rows.Scan(

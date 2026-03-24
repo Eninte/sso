@@ -5,8 +5,9 @@ package errors
 import (
 	"embed"
 	"encoding/json"
-	"strings"
 	"sync"
+
+	"github.com/your-org/sso/internal/common"
 )
 
 // ============================================================================
@@ -81,7 +82,7 @@ func GetMessage(code ErrorCode, lang string) string {
 	defer globalMessageManager.mu.RUnlock()
 
 	// 规范化语言代码
-	lang = normalizeLang(lang)
+	lang = common.NormalizeLanguage(lang)
 
 	// 尝试获取指定语言的消息
 	if msgs, ok := globalMessageManager.messages[lang]; ok {
@@ -99,32 +100,6 @@ func GetMessage(code ErrorCode, lang string) string {
 
 	// 返回错误码本身
 	return string(code)
-}
-
-// normalizeLang 规范化语言代码
-func normalizeLang(lang string) string {
-	lang = strings.ToLower(lang)
-
-	// 处理 Accept-Language 格式: "en-US,en;q=0.9,zh-CN;q=0.8"
-	if idx := strings.Index(lang, ","); idx != -1 {
-		lang = lang[:idx]
-	}
-	if idx := strings.Index(lang, ";"); idx != -1 {
-		lang = lang[:idx]
-	}
-
-	// 去除空格
-	lang = strings.TrimSpace(lang)
-
-	// 映射简化语言代码
-	switch {
-	case strings.HasPrefix(lang, "zh"):
-		return "zh-CN"
-	case strings.HasPrefix(lang, "en"):
-		return "en-US"
-	default:
-		return lang
-	}
 }
 
 // ============================================================================

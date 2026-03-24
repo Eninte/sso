@@ -4,15 +4,13 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
-
+	"github.com/your-org/sso/internal/common"
 	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/store"
@@ -89,7 +87,7 @@ func (s *OAuthService) CreateAuthorizationCode(
 		}
 	}
 
-	code, err := generateRandomString(32)
+	code, err := common.GenerateRandomString(32)
 	if err != nil {
 		return "", fmt.Errorf("生成授权码失败: %w", err)
 	}
@@ -166,24 +164,17 @@ func (s *OAuthService) ExchangeAuthorizationCode(
 		return nil, fmt.Errorf("更新授权码状态失败: %w", err)
 	}
 
+	// TODO: 实现完整的令牌生成逻辑
+	// 当前返回占位符，需要实现:
+	// 1. 生成 access_token 和 refresh_token
+	// 2. 存储 token 记录到数据库
+	// 3. 返回真实的令牌响应
 	user, err := s.store.GetByID(ctx, authCode.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("获取用户信息失败: %w", err)
 	}
 
-	tokenRecord := &model.Token{
-		ID:           uuid.New().String(),
-		AccessToken:  "",
-		RefreshToken: "",
-		UserID:       authCode.UserID,
-		ClientID:     authCode.ClientID,
-		Scopes:       authCode.Scopes,
-		ExpiresAt:    time.Now().Add(15 * time.Minute),
-		CreatedAt:    time.Now(),
-	}
-
-	_ = user
-	_ = tokenRecord
+	_ = user // TODO: 使用用户信息生成令牌
 
 	return &model.LoginResponse{
 		AccessToken:  "access_token_placeholder",
@@ -223,14 +214,6 @@ func verifyPKCE(challenge, method, verifier string) error {
 	}
 
 	return ErrInvalidCodeChallenge
-}
-
-func generateRandomString(length int) (string, error) {
-	bytes := make([]byte, length)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(bytes), nil
 }
 
 func compareClientSecret(stored, provided string) bool {

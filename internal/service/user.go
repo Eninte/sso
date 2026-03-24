@@ -4,11 +4,10 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"fmt"
 	"time"
 
+	"github.com/your-org/sso/internal/common"
 	"github.com/your-org/sso/internal/crypto"
 	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/store"
@@ -75,7 +74,7 @@ func (s *UserService) SendVerificationEmail(ctx context.Context, userID string) 
 		return ErrEmailAlreadyVerified
 	}
 
-	token, err := generateToken()
+	token, err := common.GenerateToken()
 	if err != nil {
 		return fmt.Errorf("生成验证令牌失败: %w", err)
 	}
@@ -140,7 +139,7 @@ func (s *UserService) ForgotPassword(ctx context.Context, email string) error {
 		return nil
 	}
 
-	token, err := generateToken()
+	token, err := common.GenerateToken()
 	if err != nil {
 		return nil
 	}
@@ -232,16 +231,4 @@ func (s *UserService) ChangePassword(ctx context.Context, userID, oldPassword, n
 	}
 
 	return nil
-}
-
-// ============================================================================
-// 辅助函数
-// ============================================================================
-
-func generateToken() (string, error) {
-	bytes := make([]byte, 32)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-	return base64.URLEncoding.EncodeToString(bytes), nil
 }

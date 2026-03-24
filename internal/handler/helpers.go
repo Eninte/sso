@@ -88,6 +88,7 @@ func decodeJSON(r *http.Request, v interface{}) error {
 }
 
 // writeOAuthError 统一处理OAuth相关错误，支持本地化
+// 这是一个通用的错误处理函数，可以处理所有类型的服务错误
 func writeOAuthError(w http.ResponseWriter, r *http.Request, err error) {
 	lang := middleware.GetLanguageFromContext(r.Context())
 
@@ -97,6 +98,7 @@ func writeOAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		return
 	}
 
+	// 处理服务层错误
 	switch {
 	case errors.Is(err, service.ErrInvalidClient):
 		writeJSON(w, http.StatusBadRequest, apperrors.ErrInvalidClient.ToLocalizedResponse(lang))

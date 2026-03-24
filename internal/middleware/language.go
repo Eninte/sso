@@ -5,7 +5,8 @@ package middleware
 import (
 	"context"
 	"net/http"
-	"strings"
+
+	"github.com/your-org/sso/internal/common"
 )
 
 // ============================================================================
@@ -38,42 +39,16 @@ func Language(next http.Handler) http.Handler {
 func detectLanguage(r *http.Request) string {
 	// 1. 从查询参数获取
 	if lang := r.URL.Query().Get("lang"); lang != "" {
-		return normalizeLanguage(lang)
+		return common.NormalizeLanguage(lang)
 	}
 
 	// 2. 从 Accept-Language 头获取
 	if acceptLang := r.Header.Get("Accept-Language"); acceptLang != "" {
-		return normalizeLanguage(acceptLang)
+		return common.NormalizeLanguage(acceptLang)
 	}
 
 	// 3. 默认中文
 	return "zh-CN"
-}
-
-// normalizeLanguage 规范化语言代码
-func normalizeLanguage(lang string) string {
-	lang = strings.ToLower(lang)
-
-	// 处理 Accept-Language 格式: "en-US,en;q=0.9,zh-CN;q=0.8"
-	if idx := strings.Index(lang, ","); idx != -1 {
-		lang = lang[:idx]
-	}
-	if idx := strings.Index(lang, ";"); idx != -1 {
-		lang = lang[:idx]
-	}
-
-	// 去除空格
-	lang = strings.TrimSpace(lang)
-
-	// 映射简化语言代码
-	switch {
-	case strings.HasPrefix(lang, "zh"):
-		return "zh-CN"
-	case strings.HasPrefix(lang, "en"):
-		return "en-US"
-	default:
-		return lang
-	}
 }
 
 // ============================================================================

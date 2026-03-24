@@ -4,6 +4,7 @@
 package config
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"strconv"
@@ -175,17 +176,52 @@ func (c *Config) validate() error {
 		slog.Warn("JWT公钥路径未设置，使用默认值", "path", c.JWTPublicKeyPath)
 	}
 
+	// 验证环境设置
+	if c.Env != "development" && c.Env != "production" {
+		slog.Warn("未知的运行环境，应为 development 或 production", "env", c.Env)
+	}
+
+	// 验证端口范围
+	if port, err := strconv.Atoi(c.ServerPort); err != nil || port < 1 || port > 65535 {
+		slog.Warn("服务器端口无效", "port", c.ServerPort)
+	}
+
+	// 验证bcrypt cost
+	if c.BcryptCost < 4 || c.BcryptCost > 31 {
+		slog.Warn("bcrypt cost 超出推荐范围 (4-31)", "cost", c.BcryptCost)
+	}
+
+	// 验证Token TTL
+	if c.AccessTokenTTL < 1*time.Minute {
+		slog.Warn("Access Token TTL 过短，建议至少1分钟", "ttl", c.AccessTokenTTL)
+	}
+	if c.RefreshTokenTTL < c.AccessTokenTTL {
+		slog.Warn("Refresh Token TTL 应大于 Access Token TTL",
+			"access_ttl", c.AccessTokenTTL,
+			"refresh_ttl", c.RefreshTokenTTL)
+	}
+
 	// 生产环境额外验证
 	if c.Env == "production" {
+		// 检查默认值
 		if c.CORSAllowedOrigins == "http://localhost:3000" {
-			slog.Warn("生产环境使用默认CORS配置，建议修改")
+			slog.Error("生产环境不能使用默认CORS配置")
+			return fmt.Errorf("生产环境必须设置 CORS_ALLOWED_ORIGINS")
 		}
 		if c.AdminEmails == "admin@example.com" {
-			slog.Warn("生产环境使用默认管理员邮箱，建议修改")
+			slog.Error("生产环境不能使用默认管理员邮箱")
+			return fmt.Errorf("生产环境必须设置 ADMIN_EMAILS")
 		}
 		if c.BcryptCost < 12 {
-			slog.Warn("生产环境bcrypt cost应至少为12", "current", c.BcryptCost)
+			slog.Error("生产环境bcrypt cost应至少为12", "current", c.BcryptCost)
 			return ErrBcryptCostTooLow
+		}
+		if c.JWTIssuer == "sso" {
+			slog.Warn("生产环境使用默认JWT Issuer，建议自定义")
+		}
+		// 检查SMTP配置
+		if c.SMTPHost == "localhost" {
+			slog.Warn("生产环境使用localhost作为SMTP服务器")
 		}
 	}
 

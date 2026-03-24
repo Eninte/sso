@@ -148,7 +148,8 @@ func TestLoginHandler_Handle(t *testing.T) {
 		var resp map[string]string
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
-		assert.Contains(t, resp["error"], "邮箱或密码错误")
+		// 统一错误处理返回的是 message 字段
+		assert.Contains(t, resp["message"], "邮箱或密码错误")
 	})
 
 	t.Run("用户不存在", func(t *testing.T) {

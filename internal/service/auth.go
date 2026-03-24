@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -202,6 +203,29 @@ func (s *AuthService) Login(ctx context.Context, req *model.LoginRequest) (*mode
 // Token刷新功能
 // ============================================================================
 
+// maxRevokeRetries Token撤销最大重试次数
+const maxRevokeRetries = 3
+
+// revokeTokenWithRetry 带重试的Token撤销
+func (s *AuthService) revokeTokenWithRetry(ctx context.Context, accessToken string) error {
+	var lastErr error
+	for i := 0; i < maxRevokeRetries; i++ {
+		if err := s.store.RevokeToken(ctx, accessToken); err != nil {
+			lastErr = err
+			slog.Warn("Token撤销失败，准备重试",
+				"error", err,
+				"attempt", i+1,
+				"max_retries", maxRevokeRetries,
+			)
+			// 等待一段时间后重试
+			time.Sleep(time.Duration(i+1) * 100 * time.Millisecond)
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf("Token撤销失败，已重试%d次: %w", maxRevokeRetries, lastErr)
+}
+
 // RefreshToken 刷新Token
 func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (*model.LoginResponse, error) {
 	tokenRecord, err := s.store.GetTokenByRefreshToken(ctx, refreshToken)
@@ -218,12 +242,15 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (*m
 		return nil, err
 	}
 
-	if revokeErr := s.store.RevokeToken(ctx, tokenRecord.AccessToken); revokeErr != nil {
-		slog.Warn("撤销旧Token失败，继续生成新Token",
+	// 使用带重试的Token撤销
+	if revokeErr := s.revokeTokenWithRetry(ctx, tokenRecord.AccessToken); revokeErr != nil {
+		slog.Error("撤销旧Token失败，已达到最大重试次数",
 			"error", revokeErr,
 			"user_id", tokenRecord.UserID,
 			"token_id", tokenRecord.ID,
 		)
+		// 记录错误但不阻止新Token生成，因为旧Token可能已经被撤销
+		// 在生产环境中，这里应该触发告警
 	}
 
 	s.incrementMetric("auth_token_refresh_total")

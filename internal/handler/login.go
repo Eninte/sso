@@ -3,7 +3,6 @@
 package handler
 
 import (
-	"errors"
 	"net/http"
 
 	apperrors "github.com/your-org/sso/internal/errors"
@@ -38,21 +37,8 @@ func (h *LoginHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// 2. 调用登录服务
 	resp, err := h.authSvc.Login(r.Context(), &req)
 	if err != nil {
-		// 处理已知错误
-		if errors.Is(err, service.ErrInvalidCredentials) {
-			writeError(w, http.StatusUnauthorized, getMessage(r, apperrors.ErrCodeInvalidCredentials))
-			return
-		}
-		if errors.Is(err, service.ErrAccountLocked) {
-			writeError(w, http.StatusForbidden, getMessage(r, apperrors.ErrCodeAccountLocked))
-			return
-		}
-		if errors.Is(err, service.ErrAccountDisabled) {
-			writeError(w, http.StatusForbidden, getMessage(r, apperrors.ErrCodeAccountDisabled))
-			return
-		}
-		// 未知错误
-		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeLoginFailed))
+		// 统一处理所有错误
+		writeOAuthError(w, r, err)
 		return
 	}
 
