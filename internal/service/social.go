@@ -57,6 +57,7 @@ type HTTPClient interface {
 type SocialLoginService struct {
 	store      store.Store
 	jwtSvc     *crypto.JWTService
+	tokenSvc   *TokenService
 	providers  map[string]*OAuthProvider
 	httpClient HTTPClient
 }
@@ -96,6 +97,7 @@ func NewSocialLoginService(
 	return &SocialLoginService{
 		store:      store,
 		jwtSvc:     jwtSvc,
+		tokenSvc:   NewTokenService(jwtSvc, store),
 		providers:  providers,
 		httpClient: http.DefaultClient,
 	}
@@ -115,6 +117,7 @@ func NewSocialLoginServiceWithProviders(
 	return &SocialLoginService{
 		store:      store,
 		jwtSvc:     jwtSvc,
+		tokenSvc:   NewTokenService(jwtSvc, store),
 		providers:  providers,
 		httpClient: httpClient,
 	}
@@ -294,34 +297,5 @@ func (s *SocialLoginService) findOrCreateUser(ctx context.Context, provider stri
 }
 
 func (s *SocialLoginService) generateTokenPair(ctx context.Context, user *model.User) (*model.LoginResponse, error) {
-	accessToken, err := s.jwtSvc.GenerateAccessToken(user.ID, user.Email, []string{"openid", "profile", "email"})
-	if err != nil {
-		return nil, err
-	}
-
-	refreshToken, err := s.jwtSvc.GenerateRefreshToken()
-	if err != nil {
-		return nil, err
-	}
-
-	tokenRecord := &model.Token{
-		ID:           uuid.New().String(),
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		UserID:       user.ID,
-		Scopes:       []string{"openid", "profile", "email"},
-		ExpiresAt:    time.Now().Add(s.jwtSvc.GetAccessTokenTTL()),
-		CreatedAt:    time.Now(),
-	}
-
-	if err := s.store.StoreToken(ctx, tokenRecord); err != nil {
-		return nil, err
-	}
-
-	return &model.LoginResponse{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		TokenType:    "Bearer",
-		ExpiresIn:    int(s.jwtSvc.GetAccessTokenTTL().Seconds()),
-	}, nil
+	return s.tokenSvc.GenerateTokenPair(ctx, user.ID, user.Email, []string{"openid", "profile", "email"}, "")
 }

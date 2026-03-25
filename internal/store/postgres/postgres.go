@@ -565,15 +565,27 @@ func (s *Store) CleanupExpired(ctx context.Context) error {
 // 验证令牌存储实现
 // ============================================================================
 
-// StoreVerificationToken 存储验证令牌
-func (s *Store) StoreVerificationToken(ctx context.Context, userID string, token string, expiresAt time.Time) error {
-	// 先删除旧的验证令牌
-	_, _ = s.db.ExecContext(ctx, `DELETE FROM verification_tokens WHERE user_id = $1`, userID)
+// storeToken 通用令牌存储函数
+// 先删除旧令牌，再插入新令牌
+func (s *Store) storeToken(ctx context.Context, tableName, userID, token string, expiresAt time.Time) error {
+	// 先删除旧令牌
+	_, _ = s.db.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE user_id = $1`, tableName), userID)
 
-	// 插入新的验证令牌
-	query := `INSERT INTO verification_tokens (user_id, token, expires_at, created_at) VALUES ($1, $2, $3, $4)`
+	// 插入新令牌
+	query := fmt.Sprintf(`INSERT INTO %s (user_id, token, expires_at, created_at) VALUES ($1, $2, $3, $4)`, tableName)
 	_, err := s.db.ExecContext(ctx, query, userID, token, expiresAt, time.Now())
 	return err
+}
+
+// deleteToken 通用令牌删除函数
+func (s *Store) deleteToken(ctx context.Context, tableName, userID string) error {
+	_, err := s.db.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE user_id = $1`, tableName), userID)
+	return err
+}
+
+// StoreVerificationToken 存储验证令牌
+func (s *Store) StoreVerificationToken(ctx context.Context, userID string, token string, expiresAt time.Time) error {
+	return s.storeToken(ctx, "verification_tokens", userID, token, expiresAt)
 }
 
 // GetVerificationToken 获取验证令牌
@@ -592,19 +604,12 @@ func (s *Store) GetVerificationToken(ctx context.Context, userID string) (*store
 
 // DeleteVerificationToken 删除验证令牌
 func (s *Store) DeleteVerificationToken(ctx context.Context, userID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM verification_tokens WHERE user_id = $1`, userID)
-	return err
+	return s.deleteToken(ctx, "verification_tokens", userID)
 }
 
 // StoreResetToken 存储重置令牌
 func (s *Store) StoreResetToken(ctx context.Context, userID string, token string, expiresAt time.Time) error {
-	// 先删除旧的重置令牌
-	_, _ = s.db.ExecContext(ctx, `DELETE FROM reset_tokens WHERE user_id = $1`, userID)
-
-	// 插入新的重置令牌
-	query := `INSERT INTO reset_tokens (user_id, token, expires_at, created_at) VALUES ($1, $2, $3, $4)`
-	_, err := s.db.ExecContext(ctx, query, userID, token, expiresAt, time.Now())
-	return err
+	return s.storeToken(ctx, "reset_tokens", userID, token, expiresAt)
 }
 
 // GetResetToken 获取重置令牌
@@ -623,8 +628,7 @@ func (s *Store) GetResetToken(ctx context.Context, userID string) (*store.ResetT
 
 // DeleteResetToken 删除重置令牌
 func (s *Store) DeleteResetToken(ctx context.Context, userID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM reset_tokens WHERE user_id = $1`, userID)
-	return err
+	return s.deleteToken(ctx, "reset_tokens", userID)
 }
 
 // ============================================================================

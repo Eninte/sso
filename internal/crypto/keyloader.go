@@ -30,8 +30,9 @@ var (
 // 密钥加载函数
 // ============================================================================
 
-// LoadPrivateKeyFromFile 从文件加载RSA私钥
-func LoadPrivateKeyFromFile(path string) (*rsa.PrivateKey, error) {
+// loadKeyFromFile 从文件加载密钥（通用函数）
+// 验证路径安全性，读取文件内容，调用相应的解析函数
+func loadKeyFromFile(path string, parseFunc func([]byte) (interface{}, error)) (interface{}, error) {
 	if err := validateKeyPath(path); err != nil {
 		return nil, err
 	}
@@ -44,24 +45,29 @@ func LoadPrivateKeyFromFile(path string) (*rsa.PrivateKey, error) {
 		return nil, fmt.Errorf("读取密钥文件失败: %w", err)
 	}
 
-	return ParsePrivateKey(data)
+	return parseFunc(data)
+}
+
+// LoadPrivateKeyFromFile 从文件加载RSA私钥
+func LoadPrivateKeyFromFile(path string) (*rsa.PrivateKey, error) {
+	key, err := loadKeyFromFile(path, func(data []byte) (interface{}, error) {
+		return ParsePrivateKey(data)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return key.(*rsa.PrivateKey), nil
 }
 
 // LoadPublicKeyFromFile 从文件加载RSA公钥
 func LoadPublicKeyFromFile(path string) (*rsa.PublicKey, error) {
-	if err := validateKeyPath(path); err != nil {
+	key, err := loadKeyFromFile(path, func(data []byte) (interface{}, error) {
+		return ParsePublicKey(data)
+	})
+	if err != nil {
 		return nil, err
 	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("%w: %s", ErrKeyNotFound, path)
-		}
-		return nil, fmt.Errorf("读取密钥文件失败: %w", err)
-	}
-
-	return ParsePublicKey(data)
+	return key.(*rsa.PublicKey), nil
 }
 
 // ParsePrivateKey 解析PEM格式的私钥

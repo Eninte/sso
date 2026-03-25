@@ -3,6 +3,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -133,10 +134,18 @@ func (h *AdminHandler) HandleGetUser(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HandleDisableUser 处理禁用用户请求
-// POST /admin/users/disable
-// 注意：管理员权限检查由 AdminMiddleware 处理
-func (h *AdminHandler) HandleDisableUser(w http.ResponseWriter, r *http.Request) {
+// ============================================================================
+// 用户状态管理（管理员权限）
+// ============================================================================
+
+// handleUserStatusChange 处理用户状态变更请求（通用方法）
+// 用于禁用/启用用户等操作
+func (h *AdminHandler) handleUserStatusChange(
+	w http.ResponseWriter,
+	r *http.Request,
+	action func(context.Context, string) error,
+	successMessage string,
+) {
 	var req struct {
 		UserID string `json:"user_id"`
 	}
@@ -145,34 +154,26 @@ func (h *AdminHandler) HandleDisableUser(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 通过Service禁用用户
-	if err := h.adminSvc.DisableUser(r.Context(), req.UserID); err != nil {
+	if err := action(r.Context(), req.UserID); err != nil {
 		writeError(w, http.StatusNotFound, getMessage(r, apperrors.ErrCodeNotFound))
 		return
 	}
 
-	writeSuccess(w, http.StatusOK, "用户已禁用", nil)
+	writeSuccess(w, http.StatusOK, successMessage, nil)
+}
+
+// HandleDisableUser 处理禁用用户请求
+// POST /admin/users/disable
+// 注意：管理员权限检查由 AdminMiddleware 处理
+func (h *AdminHandler) HandleDisableUser(w http.ResponseWriter, r *http.Request) {
+	h.handleUserStatusChange(w, r, h.adminSvc.DisableUser, "用户已禁用")
 }
 
 // HandleEnableUser 处理启用用户请求
 // POST /admin/users/enable
 // 注意：管理员权限检查由 AdminMiddleware 处理
 func (h *AdminHandler) HandleEnableUser(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		UserID string `json:"user_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
-		return
-	}
-
-	// 通过Service启用用户
-	if err := h.adminSvc.EnableUser(r.Context(), req.UserID); err != nil {
-		writeError(w, http.StatusNotFound, getMessage(r, apperrors.ErrCodeNotFound))
-		return
-	}
-
-	writeSuccess(w, http.StatusOK, "用户已启用", nil)
+	h.handleUserStatusChange(w, r, h.adminSvc.EnableUser, "用户已启用")
 }
 
 // ============================================================================

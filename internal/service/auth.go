@@ -40,6 +40,7 @@ type AuthService struct {
 	store           store.Store             // 数据存储
 	passwordSvc     *crypto.PasswordService // 密码服务
 	jwtSvc          *crypto.JWTService      // JWT服务
+	tokenSvc        *TokenService           // Token生成服务
 	maxAttempts     int                     // 最大登录尝试次数
 	lockoutDuration time.Duration           // 锁定时长
 	metricsSvc      *metrics.Service        // 指标服务（可选）
@@ -62,6 +63,7 @@ func NewAuthService(
 		store:           store,
 		passwordSvc:     passwordSvc,
 		jwtSvc:          jwtSvc,
+		tokenSvc:        NewTokenService(jwtSvc, store),
 		maxAttempts:     maxAttempts,
 		lockoutDuration: lockoutDuration,
 		metricsSvc:      m,
@@ -299,40 +301,12 @@ func (s *AuthService) ValidateToken(ctx context.Context, accessToken string) (*c
 // ============================================================================
 
 // generateTokenPair 生成Token对
+// 使用TokenService统一处理Token生成逻辑
 func (s *AuthService) generateTokenPair(
 	ctx context.Context,
 	userID, email string,
 	scopes []string,
 	clientID string,
 ) (*model.LoginResponse, error) {
-	accessToken, err := s.jwtSvc.GenerateAccessToken(userID, email, scopes)
-	if err != nil {
-		return nil, err
-	}
-
-	refreshToken, err := s.jwtSvc.GenerateRefreshToken()
-	if err != nil {
-		return nil, err
-	}
-
-	tokenRecord := &model.Token{
-		ID:           uuid.New().String(),
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		UserID:       userID,
-		ClientID:     clientID,
-		Scopes:       scopes,
-		ExpiresAt:    time.Now().Add(s.jwtSvc.GetAccessTokenTTL()),
-		CreatedAt:    time.Now(),
-	}
-	if err := s.store.StoreToken(ctx, tokenRecord); err != nil {
-		return nil, err
-	}
-
-	return &model.LoginResponse{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		TokenType:    "Bearer",
-		ExpiresIn:    int(s.jwtSvc.GetAccessTokenTTL().Seconds()),
-	}, nil
+	return s.tokenSvc.GenerateTokenPair(ctx, userID, email, scopes, clientID)
 }
