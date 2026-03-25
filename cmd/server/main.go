@@ -86,7 +86,7 @@ func main() {
 	emailSvc := service.NewEmailService(emailConfig)
 
 	// 7. 初始化指标服务
-	metricsSvc := metrics.NewMetricsService()
+	metricsSvc := metrics.NewService()
 
 	// 8. 初始化业务服务
 	authSvc := service.NewAuthService(

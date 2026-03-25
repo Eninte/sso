@@ -98,7 +98,7 @@ func TestUserInfoHandler_HandleFull(t *testing.T) {
 // ============================================================================
 
 func TestMetricsHandler_HandleMetrics(t *testing.T) {
-	metricsSvc := metrics.NewMetricsService()
+	metricsSvc := metrics.NewService()
 	h := handler.NewMetricsHandler(metricsSvc)
 
 	t.Run("返回Prometheus格式", func(t *testing.T) {

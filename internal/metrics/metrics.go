@@ -40,15 +40,15 @@ type Metric struct {
 // 指标服务
 // ============================================================================
 
-// MetricsService Prometheus指标服务
-type MetricsService struct {
+// Service Prometheus指标服务
+type Service struct {
 	mu      sync.RWMutex
 	metrics map[string]*Metric
 }
 
-// NewMetricsService 创建指标服务
-func NewMetricsService() *MetricsService {
-	svc := &MetricsService{
+// NewService 创建指标服务
+func NewService() *Service {
+	svc := &Service{
 		metrics: make(map[string]*Metric),
 	}
 
@@ -59,7 +59,7 @@ func NewMetricsService() *MetricsService {
 }
 
 // registerDefaults 注册默认指标
-func (s *MetricsService) registerDefaults() {
+func (s *Service) registerDefaults() {
 	// HTTP请求相关
 	s.Register("http_requests_total", "HTTP请求总数", Counter)
 	s.Register("http_request_duration_seconds", "HTTP请求耗时", Histogram)
@@ -95,7 +95,7 @@ func (s *MetricsService) registerDefaults() {
 // ============================================================================
 
 // Register 注册指标
-func (s *MetricsService) Register(name, help string, metricType MetricType) {
+func (s *Service) Register(name, help string, metricType MetricType) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -114,12 +114,12 @@ func (s *MetricsService) Register(name, help string, metricType MetricType) {
 // ============================================================================
 
 // Increment 增加计数器
-func (s *MetricsService) Increment(name string) {
+func (s *Service) Increment(name string) {
 	s.IncrementBy(name, 1)
 }
 
 // IncrementBy 增加指定值
-func (s *MetricsService) IncrementBy(name string, value float64) {
+func (s *Service) IncrementBy(name string, value float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -130,7 +130,7 @@ func (s *MetricsService) IncrementBy(name string, value float64) {
 }
 
 // Set 设置仪表盘值
-func (s *MetricsService) Set(name string, value float64) {
+func (s *Service) Set(name string, value float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -141,7 +141,7 @@ func (s *MetricsService) Set(name string, value float64) {
 }
 
 // Get 获取指标值
-func (s *MetricsService) Get(name string) float64 {
+func (s *Service) Get(name string) float64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -156,7 +156,7 @@ func (s *MetricsService) Get(name string) float64 {
 // ============================================================================
 
 // ToPrometheusFormat 输出Prometheus格式
-func (s *MetricsService) ToPrometheusFormat() string {
+func (s *Service) ToPrometheusFormat() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -185,7 +185,7 @@ func formatFloat(f float64) string {
 // ============================================================================
 
 // HTTPMiddleware HTTP请求指标中间件
-func (s *MetricsService) HTTPMiddleware(next http.Handler) http.Handler {
+func (s *Service) HTTPMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 

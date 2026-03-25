@@ -24,7 +24,7 @@ import (
 // ============================================================================
 
 // createTestAuthService 创建测试用的认证服务
-func createTestAuthService(t *testing.T) (*service.AuthService, *mock.MockStore) {
+func createTestAuthService(t *testing.T) (*service.AuthService, *mock.Store) {
 	// 创建Mock存储
 	store := mock.New()
 

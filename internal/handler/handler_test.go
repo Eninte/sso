@@ -27,7 +27,7 @@ import (
 // ============================================================================
 
 // createTestLoginHandler 创建测试用的登录处理器
-func createTestLoginHandler(t *testing.T) (*handler.LoginHandler, *mock.MockStore) {
+func createTestLoginHandler(t *testing.T) (*handler.LoginHandler, *mock.Store) {
 	// 创建Mock存储
 	store := mock.New()
 
@@ -56,7 +56,7 @@ func createTestLoginHandler(t *testing.T) (*handler.LoginHandler, *mock.MockStor
 }
 
 // createTestRegisterHandler 创建测试用的注册处理器
-func createTestRegisterHandler(t *testing.T) (*handler.RegisterHandler, *mock.MockStore) {
+func createTestRegisterHandler(t *testing.T) (*handler.RegisterHandler, *mock.Store) {
 	// 创建Mock存储
 	store := mock.New()
 
@@ -326,7 +326,7 @@ func TestUserInfoHandler_Handle(t *testing.T) {
 // ============================================================================
 
 // createTestTokenHandler 创建测试用的Token处理器
-func createTestTokenHandler(t *testing.T) (*handler.TokenHandler, *mock.MockStore) {
+func createTestTokenHandler(t *testing.T) (*handler.TokenHandler, *mock.Store) {
 	store := mock.New()
 
 	passwordSvc := crypto.NewPasswordService(10)

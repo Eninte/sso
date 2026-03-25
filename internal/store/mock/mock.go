@@ -12,12 +12,12 @@ import (
 )
 
 // ============================================================================
-// MockStore Mock存储实现
+// Store Mock存储实现
 // ============================================================================
 
-// MockStore Mock存储实现
+// Store Mock存储实现
 // 使用内存map存储数据，支持并发安全
-type MockStore struct {
+type Store struct {
 	mu sync.RWMutex
 
 	// 用户存储
@@ -66,9 +66,9 @@ type MockStore struct {
 	PingErr                      error
 }
 
-// New 创建MockStore实例
-func New() *MockStore {
-	return &MockStore{
+// New 创建Store实例
+func New() *Store {
+	return &Store{
 		users:              make(map[string]*model.User),
 		clients:            make(map[string]*model.Client),
 		tokens:             make(map[string]*model.Token),
@@ -84,7 +84,7 @@ func New() *MockStore {
 // ============================================================================
 
 // Create 创建新用户
-func (m *MockStore) Create(ctx context.Context, user *model.User) error {
+func (m *Store) Create(ctx context.Context, user *model.User) error {
 	if m.CreateUserErr != nil {
 		return m.CreateUserErr
 	}
@@ -104,7 +104,7 @@ func (m *MockStore) Create(ctx context.Context, user *model.User) error {
 }
 
 // GetByID 根据ID获取用户
-func (m *MockStore) GetByID(ctx context.Context, id string) (*model.User, error) {
+func (m *Store) GetByID(ctx context.Context, id string) (*model.User, error) {
 	if m.GetUserByIDErr != nil {
 		return nil, m.GetUserByIDErr
 	}
@@ -120,7 +120,7 @@ func (m *MockStore) GetByID(ctx context.Context, id string) (*model.User, error)
 }
 
 // GetByEmail 根据邮箱获取用户
-func (m *MockStore) GetByEmail(ctx context.Context, email string) (*model.User, error) {
+func (m *Store) GetByEmail(ctx context.Context, email string) (*model.User, error) {
 	if m.GetUserByEmailErr != nil {
 		return nil, m.GetUserByEmailErr
 	}
@@ -137,7 +137,7 @@ func (m *MockStore) GetByEmail(ctx context.Context, email string) (*model.User, 
 }
 
 // Update 更新用户信息
-func (m *MockStore) Update(ctx context.Context, user *model.User) error {
+func (m *Store) Update(ctx context.Context, user *model.User) error {
 	if m.UpdateUserErr != nil {
 		return m.UpdateUserErr
 	}
@@ -154,7 +154,7 @@ func (m *MockStore) Update(ctx context.Context, user *model.User) error {
 }
 
 // UpdateLoginAttempts 更新登录尝试次数
-func (m *MockStore) UpdateLoginAttempts(ctx context.Context, userID string, attempts int, lockedUntil *time.Time) error {
+func (m *Store) UpdateLoginAttempts(ctx context.Context, userID string, attempts int, lockedUntil *time.Time) error {
 	if m.UpdateLoginAttemptsErr != nil {
 		return m.UpdateLoginAttemptsErr
 	}
@@ -173,7 +173,7 @@ func (m *MockStore) UpdateLoginAttempts(ctx context.Context, userID string, atte
 }
 
 // Delete 删除用户
-func (m *MockStore) Delete(ctx context.Context, id string) error {
+func (m *Store) Delete(ctx context.Context, id string) error {
 	if m.DeleteUserErr != nil {
 		return m.DeleteUserErr
 	}
@@ -190,7 +190,7 @@ func (m *MockStore) Delete(ctx context.Context, id string) error {
 }
 
 // ListUsers 列出用户（支持分页）
-func (m *MockStore) ListUsers(ctx context.Context, offset, limit int) ([]*model.User, int, error) {
+func (m *Store) ListUsers(ctx context.Context, offset, limit int) ([]*model.User, int, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -220,7 +220,7 @@ func (m *MockStore) ListUsers(ctx context.Context, offset, limit int) ([]*model.
 // ============================================================================
 
 // GetByClientID 根据客户端ID获取客户端
-func (m *MockStore) GetByClientID(ctx context.Context, clientID string) (*model.Client, error) {
+func (m *Store) GetByClientID(ctx context.Context, clientID string) (*model.Client, error) {
 	if m.GetClientByClientIDErr != nil {
 		return nil, m.GetClientByClientIDErr
 	}
@@ -236,7 +236,7 @@ func (m *MockStore) GetByClientID(ctx context.Context, clientID string) (*model.
 }
 
 // CreateClient 创建新客户端
-func (m *MockStore) CreateClient(ctx context.Context, client *model.Client) error {
+func (m *Store) CreateClient(ctx context.Context, client *model.Client) error {
 	if m.CreateClientErr != nil {
 		return m.CreateClientErr
 	}
@@ -249,7 +249,7 @@ func (m *MockStore) CreateClient(ctx context.Context, client *model.Client) erro
 }
 
 // ValidateRedirectURI 验证重定向URI是否在允许列表中
-func (m *MockStore) ValidateRedirectURI(ctx context.Context, clientID string, redirectURI string) bool {
+func (m *Store) ValidateRedirectURI(ctx context.Context, clientID string, redirectURI string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -271,7 +271,7 @@ func (m *MockStore) ValidateRedirectURI(ctx context.Context, clientID string, re
 // ============================================================================
 
 // StoreAuthorizationCode 存储授权码
-func (m *MockStore) StoreAuthorizationCode(ctx context.Context, code *model.AuthorizationCode) error {
+func (m *Store) StoreAuthorizationCode(ctx context.Context, code *model.AuthorizationCode) error {
 	if m.StoreAuthorizationCodeErr != nil {
 		return m.StoreAuthorizationCodeErr
 	}
@@ -284,7 +284,7 @@ func (m *MockStore) StoreAuthorizationCode(ctx context.Context, code *model.Auth
 }
 
 // GetAuthorizationCode 获取授权码
-func (m *MockStore) GetAuthorizationCode(ctx context.Context, code string) (*model.AuthorizationCode, error) {
+func (m *Store) GetAuthorizationCode(ctx context.Context, code string) (*model.AuthorizationCode, error) {
 	if m.GetAuthorizationCodeErr != nil {
 		return nil, m.GetAuthorizationCodeErr
 	}
@@ -300,7 +300,7 @@ func (m *MockStore) GetAuthorizationCode(ctx context.Context, code string) (*mod
 }
 
 // MarkAuthorizationCodeUsed 标记授权码已使用
-func (m *MockStore) MarkAuthorizationCodeUsed(ctx context.Context, code string) error {
+func (m *Store) MarkAuthorizationCodeUsed(ctx context.Context, code string) error {
 	if m.MarkAuthorizationCodeUsedErr != nil {
 		return m.MarkAuthorizationCodeUsedErr
 	}
@@ -319,7 +319,7 @@ func (m *MockStore) MarkAuthorizationCodeUsed(ctx context.Context, code string) 
 }
 
 // UpdateAuthorizationCode 更新授权码
-func (m *MockStore) UpdateAuthorizationCode(ctx context.Context, code *model.AuthorizationCode) error {
+func (m *Store) UpdateAuthorizationCode(ctx context.Context, code *model.AuthorizationCode) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -328,7 +328,7 @@ func (m *MockStore) UpdateAuthorizationCode(ctx context.Context, code *model.Aut
 }
 
 // StoreToken 存储Token记录
-func (m *MockStore) StoreToken(ctx context.Context, token *model.Token) error {
+func (m *Store) StoreToken(ctx context.Context, token *model.Token) error {
 	if m.StoreTokenErr != nil {
 		return m.StoreTokenErr
 	}
@@ -341,7 +341,7 @@ func (m *MockStore) StoreToken(ctx context.Context, token *model.Token) error {
 }
 
 // GetTokenByRefreshToken 根据刷新令牌获取Token记录
-func (m *MockStore) GetTokenByRefreshToken(ctx context.Context, refreshToken string) (*model.Token, error) {
+func (m *Store) GetTokenByRefreshToken(ctx context.Context, refreshToken string) (*model.Token, error) {
 	if m.GetTokenByRefreshTokenErr != nil {
 		return nil, m.GetTokenByRefreshTokenErr
 	}
@@ -358,7 +358,7 @@ func (m *MockStore) GetTokenByRefreshToken(ctx context.Context, refreshToken str
 }
 
 // GetTokenByAccessToken 根据访问令牌获取Token记录
-func (m *MockStore) GetTokenByAccessToken(ctx context.Context, accessToken string) (*model.Token, error) {
+func (m *Store) GetTokenByAccessToken(ctx context.Context, accessToken string) (*model.Token, error) {
 	if m.GetTokenByAccessTokenErr != nil {
 		return nil, m.GetTokenByAccessTokenErr
 	}
@@ -374,7 +374,7 @@ func (m *MockStore) GetTokenByAccessToken(ctx context.Context, accessToken strin
 }
 
 // RevokeToken 撤销Token
-func (m *MockStore) RevokeToken(ctx context.Context, accessToken string) error {
+func (m *Store) RevokeToken(ctx context.Context, accessToken string) error {
 	if m.RevokeTokenErr != nil {
 		return m.RevokeTokenErr
 	}
@@ -393,7 +393,7 @@ func (m *MockStore) RevokeToken(ctx context.Context, accessToken string) error {
 }
 
 // RevokeAllUserTokens 撤销用户所有Token
-func (m *MockStore) RevokeAllUserTokens(ctx context.Context, userID string) error {
+func (m *Store) RevokeAllUserTokens(ctx context.Context, userID string) error {
 	if m.RevokeAllUserTokensErr != nil {
 		return m.RevokeAllUserTokensErr
 	}
@@ -411,7 +411,7 @@ func (m *MockStore) RevokeAllUserTokens(ctx context.Context, userID string) erro
 }
 
 // CleanupExpired 清理过期的Token和授权码
-func (m *MockStore) CleanupExpired(ctx context.Context) error {
+func (m *Store) CleanupExpired(ctx context.Context) error {
 	if m.CleanupExpiredErr != nil {
 		return m.CleanupExpiredErr
 	}
@@ -443,7 +443,7 @@ func (m *MockStore) CleanupExpired(ctx context.Context) error {
 // ============================================================================
 
 // StoreVerificationToken 存储验证令牌
-func (m *MockStore) StoreVerificationToken(ctx context.Context, userID string, token string, expiresAt time.Time) error {
+func (m *Store) StoreVerificationToken(ctx context.Context, userID string, token string, expiresAt time.Time) error {
 	if m.StoreVerificationTokenErr != nil {
 		return m.StoreVerificationTokenErr
 	}
@@ -459,7 +459,7 @@ func (m *MockStore) StoreVerificationToken(ctx context.Context, userID string, t
 }
 
 // GetVerificationToken 获取验证令牌
-func (m *MockStore) GetVerificationToken(ctx context.Context, userID string) (*store.VerificationToken, error) {
+func (m *Store) GetVerificationToken(ctx context.Context, userID string) (*store.VerificationToken, error) {
 	if m.GetVerificationTokenErr != nil {
 		return nil, m.GetVerificationTokenErr
 	}
@@ -475,7 +475,7 @@ func (m *MockStore) GetVerificationToken(ctx context.Context, userID string) (*s
 }
 
 // DeleteVerificationToken 删除验证令牌
-func (m *MockStore) DeleteVerificationToken(ctx context.Context, userID string) error {
+func (m *Store) DeleteVerificationToken(ctx context.Context, userID string) error {
 	if m.DeleteVerificationTokenErr != nil {
 		return m.DeleteVerificationTokenErr
 	}
@@ -488,7 +488,7 @@ func (m *MockStore) DeleteVerificationToken(ctx context.Context, userID string) 
 }
 
 // StoreResetToken 存储重置令牌
-func (m *MockStore) StoreResetToken(ctx context.Context, userID string, token string, expiresAt time.Time) error {
+func (m *Store) StoreResetToken(ctx context.Context, userID string, token string, expiresAt time.Time) error {
 	if m.StoreResetTokenErr != nil {
 		return m.StoreResetTokenErr
 	}
@@ -504,7 +504,7 @@ func (m *MockStore) StoreResetToken(ctx context.Context, userID string, token st
 }
 
 // GetResetToken 获取重置令牌
-func (m *MockStore) GetResetToken(ctx context.Context, userID string) (*store.ResetToken, error) {
+func (m *Store) GetResetToken(ctx context.Context, userID string) (*store.ResetToken, error) {
 	if m.GetResetTokenErr != nil {
 		return nil, m.GetResetTokenErr
 	}
@@ -520,7 +520,7 @@ func (m *MockStore) GetResetToken(ctx context.Context, userID string) (*store.Re
 }
 
 // DeleteResetToken 删除重置令牌
-func (m *MockStore) DeleteResetToken(ctx context.Context, userID string) error {
+func (m *Store) DeleteResetToken(ctx context.Context, userID string) error {
 	if m.DeleteResetTokenErr != nil {
 		return m.DeleteResetTokenErr
 	}
@@ -537,12 +537,12 @@ func (m *MockStore) DeleteResetToken(ctx context.Context, userID string) error {
 // ============================================================================
 
 // Close 关闭数据库连接
-func (m *MockStore) Close() error {
+func (m *Store) Close() error {
 	return m.CloseErr
 }
 
 // Ping 检查数据库连接
-func (m *MockStore) Ping(ctx context.Context) error {
+func (m *Store) Ping(ctx context.Context) error {
 	return m.PingErr
 }
 
@@ -551,28 +551,28 @@ func (m *MockStore) Ping(ctx context.Context) error {
 // ============================================================================
 
 // AddUser 添加用户（测试辅助）
-func (m *MockStore) AddUser(user *model.User) {
+func (m *Store) AddUser(user *model.User) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.users[user.ID] = user
 }
 
 // AddClient 添加客户端（测试辅助）
-func (m *MockStore) AddClient(client *model.Client) {
+func (m *Store) AddClient(client *model.Client) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.clients[client.ClientID] = client
 }
 
 // AddToken 添加Token（测试辅助）
-func (m *MockStore) AddToken(token *model.Token) {
+func (m *Store) AddToken(token *model.Token) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.tokens[token.AccessToken] = token
 }
 
 // Reset 重置所有数据（测试辅助）
-func (m *MockStore) Reset() {
+func (m *Store) Reset() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -590,7 +590,7 @@ func (m *MockStore) Reset() {
 // ============================================================================
 
 // StoreAuditLog 存储审计日志
-func (m *MockStore) StoreAuditLog(ctx context.Context, log *model.AuditLog) error {
+func (m *Store) StoreAuditLog(ctx context.Context, log *model.AuditLog) error {
 	if m.StoreAuditLogErr != nil {
 		return m.StoreAuditLogErr
 	}
@@ -603,7 +603,7 @@ func (m *MockStore) StoreAuditLog(ctx context.Context, log *model.AuditLog) erro
 }
 
 // ListAuditLogs 列出审计日志（支持分页和过滤）
-func (m *MockStore) ListAuditLogs(ctx context.Context, userID string, eventType string, offset, limit int) ([]*model.AuditLog, int, error) {
+func (m *Store) ListAuditLogs(ctx context.Context, userID string, eventType string, offset, limit int) ([]*model.AuditLog, int, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 

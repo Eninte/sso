@@ -554,21 +554,6 @@ func TestStore_NewFromConfig(t *testing.T) {
 }
 
 // ============================================================================
-// CleanupExpired 测试
-// ============================================================================
-
-func TestStore_CleanupExpired(t *testing.T) {
-	store, db := setupTestStore(t)
-	defer db.Close()
-	ctx := context.Background()
-
-	t.Run("清理过期数据", func(t *testing.T) {
-		err := store.CleanupExpired(ctx)
-		assert.NoError(t, err)
-	})
-}
-
-// ============================================================================
 // MarkAuthorizationCodeUsed 测试
 // ============================================================================
 
@@ -613,5 +598,185 @@ func TestStore_MarkAuthorizationCodeUsed(t *testing.T) {
 		retrieved, err := store.GetAuthorizationCode(ctx, code.Code)
 		require.NoError(t, err)
 		assert.NotNil(t, retrieved.UsedAt)
+	})
+}
+
+// ============================================================================
+// 分页边界条件测试
+// ============================================================================
+
+func TestStore_ListUsers_Pagination(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	defer cleanupTestData(t, db)
+	ctx := context.Background()
+
+	// 创建测试用户
+	for i := 0; i < 5; i++ {
+		user := newTestUser(fmt.Sprintf("pagination%d@example.com", i))
+		require.NoError(t, store.Create(ctx, user))
+	}
+
+	t.Run("第一页", func(t *testing.T) {
+		users, total, err := store.ListUsers(ctx, 0, 2)
+		assert.NoError(t, err)
+		assert.GreaterOrEqual(t, total, 5)
+		assert.LessOrEqual(t, len(users), 2)
+	})
+
+	t.Run("第二页", func(t *testing.T) {
+		users, total, err := store.ListUsers(ctx, 2, 2)
+		assert.NoError(t, err)
+		assert.GreaterOrEqual(t, total, 5)
+		assert.LessOrEqual(t, len(users), 2)
+	})
+
+	t.Run("超出范围", func(t *testing.T) {
+		users, total, err := store.ListUsers(ctx, 100, 10)
+		assert.NoError(t, err)
+		assert.GreaterOrEqual(t, total, 5)
+		assert.Empty(t, users)
+	})
+}
+
+// ============================================================================
+// 审计日志过滤测试
+// ============================================================================
+
+func TestStore_ListAuditLogs_Filter(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	defer cleanupTestData(t, db)
+	ctx := context.Background()
+
+	// 创建测试用户
+	user := newTestUser("auditfilter@example.com")
+	require.NoError(t, store.Create(ctx, user))
+
+	// 创建不同类型的审计日志
+	eventTypes := []string{"login", "logout", "register"}
+	for _, eventType := range eventTypes {
+		log := &model.AuditLog{
+			ID:        "test-audit-" + uuid.New().String(),
+			EventType: eventType,
+			UserID:    user.ID,
+			Success:   true,
+			Timestamp: time.Now(),
+		}
+		require.NoError(t, store.StoreAuditLog(ctx, log))
+	}
+
+	t.Run("按用户ID过滤", func(t *testing.T) {
+		logs, total, err := store.ListAuditLogs(ctx, user.ID, "", 0, 10)
+		assert.NoError(t, err)
+		assert.GreaterOrEqual(t, total, 3)
+		for _, log := range logs {
+			assert.Equal(t, user.ID, log.UserID)
+		}
+	})
+
+	t.Run("按事件类型过滤", func(t *testing.T) {
+		logs, total, err := store.ListAuditLogs(ctx, "", "login", 0, 10)
+		assert.NoError(t, err)
+		assert.GreaterOrEqual(t, total, 1)
+		for _, log := range logs {
+			assert.Equal(t, "login", log.EventType)
+		}
+	})
+
+	t.Run("联合过滤", func(t *testing.T) {
+		logs, total, err := store.ListAuditLogs(ctx, user.ID, "logout", 0, 10)
+		assert.NoError(t, err)
+		assert.GreaterOrEqual(t, total, 1)
+		for _, log := range logs {
+			assert.Equal(t, user.ID, log.UserID)
+			assert.Equal(t, "logout", log.EventType)
+		}
+	})
+}
+
+// ============================================================================
+// 过期数据清理测试
+// ============================================================================
+
+func TestStore_CleanupExpired(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	defer cleanupTestData(t, db)
+	ctx := context.Background()
+
+	// 创建测试用户
+	user := newTestUser("cleanup@example.com")
+	require.NoError(t, store.Create(ctx, user))
+
+	// 创建测试客户端
+	client := &model.Client{
+		ID:           uuid.New().String(),
+		ClientID:     "test-cleanup-client",
+		ClientSecret: "secret",
+		Name:         "Cleanup Test",
+		RedirectURIs: []string{"http://localhost"},
+		GrantTypes:   []string{"authorization_code"},
+		Scopes:       []string{"openid"},
+		CreatedAt:    time.Now(),
+	}
+	_ = store.CreateClient(ctx, client)
+
+	// 创建过期的Token
+	expiredToken := &model.Token{
+		ID:           "test-cleanup-token-" + uuid.New().String(),
+		AccessToken:  "test-cleanup-access-" + uuid.New().String(),
+		RefreshToken: "test-cleanup-refresh-" + uuid.New().String(),
+		UserID:       user.ID,
+		ClientID:     "test-cleanup-client",
+		Scopes:       []string{"openid"},
+		ExpiresAt:    time.Now().Add(-1 * time.Hour), // 已过期
+		CreatedAt:    time.Now().Add(-2 * time.Hour),
+	}
+	require.NoError(t, store.StoreToken(ctx, expiredToken))
+
+	// 创建过期的授权码
+	expiredCode := &model.AuthorizationCode{
+		Code:        "test-cleanup-code-" + uuid.New().String(),
+		ClientID:    "test-cleanup-client",
+		UserID:      user.ID,
+		RedirectURI: "http://localhost",
+		Scopes:      []string{"openid"},
+		ExpiresAt:   time.Now().Add(-1 * time.Hour), // 已过期
+		CreatedAt:   time.Now().Add(-2 * time.Hour),
+	}
+	require.NoError(t, store.StoreAuthorizationCode(ctx, expiredCode))
+
+	t.Run("清理过期数据", func(t *testing.T) {
+		err := store.CleanupExpired(ctx)
+		assert.NoError(t, err)
+
+		// 验证过期Token已被删除
+		_, err = store.GetTokenByAccessToken(ctx, expiredToken.AccessToken)
+		assert.Error(t, err)
+
+		// 验证过期授权码已被删除
+		_, err = store.GetAuthorizationCode(ctx, expiredCode.Code)
+		assert.Error(t, err)
+	})
+}
+
+// ============================================================================
+// 字段白名单验证测试
+// ============================================================================
+
+func TestStore_GetUserByField_InvalidField(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	t.Run("无效字段名", func(t *testing.T) {
+		// 由于getUserByField是私有方法，我们通过公共方法间接测试
+		// 验证GetByID和GetByEmail使用有效的字段名
+		_, err := store.GetByID(ctx, "nonexistent-id")
+		assert.Error(t, err) // 应该返回ErrNotFound而不是字段名错误
+
+		_, err = store.GetByEmail(ctx, "nonexistent@example.com")
+		assert.Error(t, err) // 应该返回ErrNotFound而不是字段名错误
 	})
 }

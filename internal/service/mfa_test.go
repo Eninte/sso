@@ -25,7 +25,7 @@ import (
 // ============================================================================
 
 // createTestMFAService 创建测试用的MFA服务
-func createTestMFAService() (*service.MFAService, *mock.MockStore) {
+func createTestMFAService() (*service.MFAService, *mock.Store) {
 	store := mock.New()
 	mfaSvc := service.NewMFAService(store)
 	return mfaSvc, store

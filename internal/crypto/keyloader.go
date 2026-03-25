@@ -168,12 +168,20 @@ func validateKeyPath(path string) error {
 		return ErrKeyPathInvalid
 	}
 
-	if !strings.HasPrefix(absPath, "/etc/sso/") &&
-		!strings.HasPrefix(absPath, "/keys/") &&
-		!strings.HasPrefix(absPath, "/home/") &&
-		!strings.HasPrefix(absPath, "/tmp/") {
-		return ErrKeyPathInvalid
+	// 允许的路径前缀
+	allowedPrefixes := []string{"/etc/sso/", "/keys/", "/home/"}
+
+	// 生产环境不允许/tmp/路径
+	env := os.Getenv("SERVER_ENV")
+	if env != "production" {
+		allowedPrefixes = append(allowedPrefixes, "/tmp/")
 	}
 
-	return nil
+	for _, prefix := range allowedPrefixes {
+		if strings.HasPrefix(absPath, prefix) {
+			return nil
+		}
+	}
+
+	return ErrKeyPathInvalid
 }

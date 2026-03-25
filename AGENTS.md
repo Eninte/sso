@@ -8,58 +8,40 @@
 
 ## 构建与测试命令
 
-### 构建命令
 ```bash
-# 构建二进制文件
+# 构建
 make build
 
-# 运行应用
+# 运行
 make run
 
 # 开发模式（启动依赖服务并运行）
 make dev
-```
 
-### 测试命令
-```bash
-# 运行所有测试
-make test
+# 测试
+make test                    # 运行所有测试
+make test-unit               # 运行单元测试（短测试）
+make test-integration        # 运行集成测试
+go test -v -run TestAuthService_Login ./internal/service/  # 运行单个测试
+make test-coverage           # 生成测试覆盖率报告
 
-# 运行单元测试（短测试）
-make test-unit
+# 代码质量
+make lint                    # 运行代码检查
+make fmt                     # 格式化代码
+make test-security           # 运行安全检查
 
-# 运行集成测试
-make test-integration
+# Docker
+make docker-build            # 构建Docker镜像
+make docker-up               # 启动所有服务
+make docker-down             # 停止服务
 
-# 运行单个测试
-go test -v -run TestAuthService_Login ./internal/service/
+# 数据库迁移
+make migrate-up              # 执行数据库迁移
+make migrate-down            # 回滚数据库迁移
+make migrate-create NAME=description  # 创建新的迁移文件
 
-# 运行测试并生成覆盖率报告
-make test-coverage
-```
-
-### 代码质量
-```bash
-# 运行代码检查
-make lint
-
-# 格式化代码
-make fmt
-
-# 安全检查
-make test-security
-```
-
-### Docker相关
-```bash
-# 构建Docker镜像
-make docker-build
-
-# 启动所有服务
-make docker-up
-
-# 停止服务
-make docker-down
+# 密钥管理
+make generate-keys           # 生成RSA密钥对
 ```
 
 ## 代码风格指南

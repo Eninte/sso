@@ -20,7 +20,7 @@ import (
 // ============================================================================
 
 // createTestAuditService 创建测试用的审计服务
-func createTestAuditService() (*service.AuditService, *mock.MockStore) {
+func createTestAuditService() (*service.AuditService, *mock.Store) {
 	store := mock.New()
 	auditSvc := service.NewAuditService(store)
 	return auditSvc, store

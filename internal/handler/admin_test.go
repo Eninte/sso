@@ -27,7 +27,7 @@ import (
 // ============================================================================
 
 // createTestAdminHandler 创建测试用的管理员处理器
-func createTestAdminHandler() (*handler.AdminHandler, *mock.MockStore) {
+func createTestAdminHandler() (*handler.AdminHandler, *mock.Store) {
 	store := mock.New()
 	adminSvc := service.NewAdminService(store)
 	adminHandler := handler.NewAdminHandler(adminSvc)

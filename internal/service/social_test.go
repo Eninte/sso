@@ -55,7 +55,7 @@ func (r *redirectHTTPClient) Do(req *http.Request) (*http.Response, error) {
 }
 
 // newMockSocialService 创建带有mock HTTP服务器的社交登录服务
-func newMockSocialService(t *testing.T, tokenResp, userInfoResp interface{}) (*service.SocialLoginService, *mock.MockStore) {
+func newMockSocialService(t *testing.T, tokenResp, userInfoResp interface{}) (*service.SocialLoginService, *mock.Store) {
 	t.Helper()
 
 	mux := http.NewServeMux()

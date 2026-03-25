@@ -42,7 +42,7 @@ type AuthService struct {
 	jwtSvc          *crypto.JWTService      // JWT服务
 	maxAttempts     int                     // 最大登录尝试次数
 	lockoutDuration time.Duration           // 锁定时长
-	metricsSvc      *metrics.MetricsService // 指标服务（可选）
+	metricsSvc      *metrics.Service        // 指标服务（可选）
 }
 
 // NewAuthService 创建认证服务
@@ -52,9 +52,9 @@ func NewAuthService(
 	jwtSvc *crypto.JWTService,
 	maxAttempts int,
 	lockoutDuration time.Duration,
-	metricsSvc ...*metrics.MetricsService,
+	metricsSvc ...*metrics.Service,
 ) *AuthService {
-	var m *metrics.MetricsService
+	var m *metrics.Service
 	if len(metricsSvc) > 0 {
 		m = metricsSvc[0]
 	}

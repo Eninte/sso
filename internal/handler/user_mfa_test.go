@@ -31,7 +31,7 @@ func createContextWithUserID(userID string) context.Context {
 }
 
 // createUserHandler 创建测试用的用户处理器
-func createUserHandler(t *testing.T) (*handler.UserHandler, *mock.MockStore) {
+func createUserHandler(t *testing.T) (*handler.UserHandler, *mock.Store) {
 	storeInst := mock.New()
 	passwordSvc := crypto.NewPasswordService(10)
 	emailSvc := service.NewEmailService(&service.EmailConfig{
@@ -44,7 +44,7 @@ func createUserHandler(t *testing.T) (*handler.UserHandler, *mock.MockStore) {
 }
 
 // createMFAHandler 创建测试用的MFA处理器
-func createMFAHandler(t *testing.T) (*handler.MFAHandler, *mock.MockStore) {
+func createMFAHandler(t *testing.T) (*handler.MFAHandler, *mock.Store) {
 	storeInst := mock.New()
 	mfaSvc := service.NewMFAService(storeInst)
 	return handler.NewMFAHandler(mfaSvc), storeInst

@@ -14,11 +14,11 @@ import (
 
 // MetricsHandler 指标处理器
 type MetricsHandler struct {
-	metrics *metrics.MetricsService
+	metrics *metrics.Service
 }
 
 // NewMetricsHandler 创建指标处理器
-func NewMetricsHandler(metrics *metrics.MetricsService) *MetricsHandler {
+func NewMetricsHandler(metrics *metrics.Service) *MetricsHandler {
 	return &MetricsHandler{metrics: metrics}
 }
 

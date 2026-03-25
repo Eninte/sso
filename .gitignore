@@ -14,6 +14,7 @@
 # IDE配置
 .idea/
 .vscode/
+.kilocode/
 *.swp
 *.swo
 *~

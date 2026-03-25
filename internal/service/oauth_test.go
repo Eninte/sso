@@ -21,7 +21,7 @@ import (
 // ============================================================================
 
 // createTestOAuthService 创建测试用的OAuth服务
-func createTestOAuthService(t *testing.T) (*service.OAuthService, *mock.MockStore) {
+func createTestOAuthService(t *testing.T) (*service.OAuthService, *mock.Store) {
 	store := mock.New()
 	oauthSvc := service.NewOAuthService(store)
 	return oauthSvc, store

@@ -381,18 +381,18 @@ func (s *Store) CreateClient(ctx context.Context, client *model.Client) error {
 }
 
 // ValidateRedirectURI 验证重定向URI是否在允许列表中
+// 优化：使用EXISTS子查询，避免加载整个客户端对象
 func (s *Store) ValidateRedirectURI(ctx context.Context, clientID string, redirectURI string) bool {
-	client, err := s.GetByClientID(ctx, clientID)
+	ctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+
+	query := `SELECT EXISTS(SELECT 1 FROM oauth_clients WHERE client_id = $1 AND $2 = ANY(redirect_uris))`
+	var exists bool
+	err := s.db.QueryRowContext(ctx, query, clientID, redirectURI).Scan(&exists)
 	if err != nil {
 		return false
 	}
-
-	for _, uri := range client.RedirectURIs {
-		if uri == redirectURI {
-			return true
-		}
-	}
-	return false
+	return exists
 }
 
 // ============================================================================

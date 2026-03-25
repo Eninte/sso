@@ -20,7 +20,7 @@ import (
 // ============================================================================
 
 // createTestUserService 创建测试用的用户服务
-func createTestUserService() (*service.UserService, *mock.MockStore) {
+func createTestUserService() (*service.UserService, *mock.Store) {
 	mockStore := mock.New()
 	passwordSvc := crypto.NewPasswordService(10)
 	// 使用nil的emailSvc，测试时不实际发送邮件
@@ -30,7 +30,7 @@ func createTestUserService() (*service.UserService, *mock.MockStore) {
 }
 
 // createTestUserServiceWithEmail 创建带mock邮件服务的用户服务
-func createTestUserServiceWithEmail() (*service.UserService, *mock.MockStore, *mockMailSender) {
+func createTestUserServiceWithEmail() (*service.UserService, *mock.Store, *mockMailSender) {
 	mockStore := mock.New()
 	passwordSvc := crypto.NewPasswordService(10)
 	mockSender := &mockMailSender{}
