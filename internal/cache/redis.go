@@ -151,6 +151,36 @@ func (c *MemoryCache) Set(ctx context.Context, key string, value interface{}, tt
 	return nil
 }
 
+// SetWithNilProtection 设置缓存值（带空值保护）
+// 如果value为nil，设置空值缓存（使用nilTTL），用于防止缓存穿透
+// 如果value不为nil，正常设置缓存（使用ttl）
+func (c *MemoryCache) SetWithNilProtection(ctx context.Context, key string, value interface{}, ttl time.Duration, nilTTL time.Duration) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if value == nil {
+		// 设置空值缓存，用于防止缓存穿透
+		c.data[key] = cacheItem{
+			value:     nilCacheValue,
+			expiresAt: time.Now().Add(nilTTL),
+		}
+		return nil
+	}
+
+	// 正常设置缓存
+	data, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("序列化缓存值失败: %w", err)
+	}
+
+	c.data[key] = cacheItem{
+		value:     data,
+		expiresAt: time.Now().Add(ttl),
+	}
+
+	return nil
+}
+
 // Delete 删除指定key的缓存
 func (c *MemoryCache) Delete(ctx context.Context, key string) error {
 	c.mu.Lock()
