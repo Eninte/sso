@@ -445,7 +445,8 @@ PASS ok github.com/your-org/sso/internal/validator
 - [x] 实现了PKCE支持
 - [x] 使用参数化查询防止SQL注入
 - [x] SQL查询使用白名单验证字段名
-- [x] Token撤销实现重试机制（最多3次）
+- [x] Token撤销实现重试机制（RefreshToken，最多3次）
+- [x] 私钥文件权限检查（强制0600）
 - [x] 实现了登录尝试限制
 - [x] 设置了完整的安全头
 - [x] 实现了请求限流
@@ -459,6 +460,8 @@ PASS ok github.com/your-org/sso/internal/validator
 - [x] 端到端测试完善（9个文件，76+个场景）
 
 ### 待实现
+- [ ] Logout添加Token撤销重试机制
+- [ ] 移除docker-compose默认密码
 - [ ] 实现RBAC权限系统
 - [ ] 集成漏洞扫描到CI/CD
 
