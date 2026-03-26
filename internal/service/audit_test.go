@@ -373,4 +373,69 @@ func TestAuditService_NewMethods(t *testing.T) {
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, len(logs), 1)
 	})
+
+	t.Run("LogTokenRevoke", func(t *testing.T) {
+		store.Reset()
+		auditSvc.LogTokenRevoke(ctx, "user-1", "client-1", "192.168.1.1")
+		time.Sleep(100 * time.Millisecond)
+		logs, _, err := store.ListAuditLogs(ctx, "user-1", string(model.EventTokenRevoke), 0, 10)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(logs), 1)
+	})
+
+	t.Run("LogUserLoginFailed", func(t *testing.T) {
+		store.Reset()
+		auditSvc.LogUserLoginFailed(ctx, "user-1", "test@example.com", "192.168.1.1", "Mozilla/5.0", "invalid password")
+		time.Sleep(100 * time.Millisecond)
+		logs, _, err := store.ListAuditLogs(ctx, "user-1", string(model.EventUserLoginFailed), 0, 10)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(logs), 1)
+	})
+
+	t.Run("LogAccountUnlocked", func(t *testing.T) {
+		store.Reset()
+		auditSvc.LogAccountUnlocked(ctx, "user-1", "192.168.1.1")
+		time.Sleep(100 * time.Millisecond)
+		logs, _, err := store.ListAuditLogs(ctx, "user-1", string(model.EventAccountUnlocked), 0, 10)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(logs), 1)
+	})
+
+	t.Run("LogAuthCodeUsed", func(t *testing.T) {
+		store.Reset()
+		auditSvc.LogAuthCodeUsed(ctx, "user-1", "client-1", "192.168.1.1")
+		time.Sleep(100 * time.Millisecond)
+		logs, _, err := store.ListAuditLogs(ctx, "user-1", string(model.EventAuthCodeUsed), 0, 10)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(logs), 1)
+	})
+
+	t.Run("LogAuthCodeInvalid", func(t *testing.T) {
+		store.Reset()
+		auditSvc.LogAuthCodeInvalid(ctx, "user-1", "client-1", "192.168.1.1", "invalid code")
+		time.Sleep(100 * time.Millisecond)
+		logs, _, err := store.ListAuditLogs(ctx, "user-1", string(model.EventAuthCodeInvalid), 0, 10)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(logs), 1)
+	})
+
+	t.Run("LogMFASetup", func(t *testing.T) {
+		store.Reset()
+		auditSvc.LogMFASetup(ctx, "user-1", "192.168.1.1")
+		time.Sleep(100 * time.Millisecond)
+		logs, _, err := store.ListAuditLogs(ctx, "user-1", string(model.EventMFASetup), 0, 10)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(logs), 1)
+	})
+}
+
+func TestAuditService_Close(t *testing.T) {
+	auditSvc, _ := createTestAuditService()
+
+	t.Run("关闭审计服务", func(t *testing.T) {
+		// Close应该不会panic
+		assert.NotPanics(t, func() {
+			auditSvc.Close()
+		})
+	})
 }

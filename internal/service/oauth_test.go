@@ -357,3 +357,33 @@ func TestOAuthService_RevokeToken(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+// ============================================================================
+// NewOAuthServiceWithAudit 测试
+// ============================================================================
+
+func TestOAuthService_NewOAuthServiceWithAudit(t *testing.T) {
+	store := mock.New()
+
+	t.Run("创建带审计的OAuth服务", func(t *testing.T) {
+		auditSvc := service.NewAuditService(store)
+		defer auditSvc.Close()
+
+		oauthSvc := service.NewOAuthServiceWithAudit(store, auditSvc)
+		assert.NotNil(t, oauthSvc)
+	})
+}
+
+// ============================================================================
+// NewOAuthServiceWithCache 测试
+// ============================================================================
+
+func TestOAuthService_NewOAuthServiceWithCache(t *testing.T) {
+	store := mock.New()
+
+	t.Run("创建带缓存的OAuth服务", func(t *testing.T) {
+		// 使用mock cache
+		oauthSvc := service.NewOAuthServiceWithCache(store, nil)
+		assert.NotNil(t, oauthSvc)
+	})
+}

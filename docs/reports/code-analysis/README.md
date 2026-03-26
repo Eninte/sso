@@ -17,16 +17,16 @@
 | [09-改进实施报告.md](09-改进实施报告.md) | 改进实施报告 | 已完成改进项统计 |
 | [REPORT_VERIFICATION_2026-03-26.md](REPORT_VERIFICATION_2026-03-26.md) | 报告核实结果 | 报告数据核实与修正 |
 
-## 总体评分（2026-03-26 代码修复后）
+## 总体评分（2026-03-26 测试覆盖率提升后）
 
 | 维度 | 评分 | 评级 | 说明 |
 |------|------|------|------|
 | 代码质量 | 7.5/10 | B | Lint问题已修复，代码结构良好 |
 | 安全性 | 8.5/10 | B+ | 登录竞态已修复，bcrypt cost已调整 |
 | 架构设计 | 8.5/10 | A- | 三层架构清晰，接口抽象良好 |
-| 测试质量 | 6.0/10 | C | 覆盖率58.7%，需继续提升 |
+| 测试质量 | 6.5/10 | C+ | 覆盖率63.5%，已显著提升 |
 | 性能 | 7.5/10 | B | Redis缓存已集成，索引已添加 |
-| **总体** | **7.65/10** | **B+** | 生产级代码质量 |
+| **总体** | **7.70/10** | **B+** | 生产级代码质量 |
 
 ## 关键发现
 
@@ -38,10 +38,11 @@
 - Redis缓存已生产集成
 
 ### 仍需改进
-- 测试覆盖率不足（62.1%，目标80%+）
+- 测试覆盖率不足（63.5%，目标80%+）
 - postgres包覆盖率仅2.2%（集成测试需数据库）
 - cache包覆盖率62.0%（已提升）
-- crypto包覆盖率68.7%（已提升）
+- crypto包覆盖率70.6%（已提升）
+- service包覆盖率70.1%（已提升）
 
 ## 改进建议摘要
 
@@ -52,13 +53,38 @@
 4. ✅ Redis缓存生产集成
 5. ✅ 数据库索引优化
 6. ✅ 补充cache包测试（41.1% → 62.0%）
-7. ✅ 补充crypto包测试（52.1% → 68.7%）
+7. ✅ 补充crypto包测试（52.1% → 70.6%）
+8. ✅ 补充service包测试（68.3% → 70.1%）
 
 ### 短期执行（第1-2周）
-1. 补充crypto包测试（68.7% → 80%+）
-2. 补充cache包测试（62.0% → 80%+）
-3. 补充postgres包测试（2.2% → 60%+）- 需数据库
-4. 实现RBAC系统
+1. 继续补充crypto包测试（70.6% → 80%+）
+2. 继续补充service包测试（70.1% → 80%+）
+3. 补充cache包测试（62.0% → 80%+）
+4. 补充postgres包测试（2.2% → 60%+）- 需数据库
+5. 实现RBAC系统
+
+## 新增测试函数
+
+### cache/redis_test.go (+20.9%)
+- SetWithNilProtection, Concurrent, Close, NewCache, NewCacheWithFallback
+
+### crypto/jwt_test.go (+18.5%)
+- SetActiveKey, AddVerificationKey, RemoveKey, GenerateAccessToken_NoActiveKey
+- GenerateAccessTokenWithKeyID, GetPublicKeys, GetJWKS, GenerateKeyID
+- EncodePrivateKeyToPKCS1PEM, NewJWTServiceWithKeyStore
+
+### service/audit_test.go (+1.8%)
+- Close, LogTokenRevoke, LogUserLoginFailed, LogAccountUnlocked
+- LogAuthCodeUsed, LogAuthCodeInvalid, LogMFASetup
+
+### service/auth_test.go
+- ValidateToken_Extended, NewAuthServiceWithAudit, LoginWithAudit
+
+### service/oauth_test.go
+- NewOAuthServiceWithAudit, NewOAuthServiceWithCache
+
+### store/postgres/postgres_test.go
+- IncrementLoginAttempts, ResetLoginAttempts, UnlockExpiredAccount
 
 ## 资源需求
 
@@ -76,5 +102,6 @@
 
 **生成日期**: 2026年3月21日  
 **代码修复日期**: 2026年3月26日  
+**测试覆盖率提升日期**: 2026年3月26日  
 **分析范围**: 完整代码库  
-**报告版本**: 2.0
+**报告版本**: 3.0

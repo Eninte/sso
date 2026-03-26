@@ -2,6 +2,7 @@
 package crypto_test
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/your-org/sso/internal/crypto"
+	"github.com/your-org/sso/internal/model"
 )
 
 // ============================================================================
@@ -471,4 +473,80 @@ func TestCreateKeyVersion(t *testing.T) {
 	assert.NotEmpty(t, keyVersion.ID)
 	assert.NotEmpty(t, keyVersion.PublicKey)
 	assert.NotEmpty(t, keyVersion.PrivateKey)
+}
+
+// ============================================================================
+// EncodePrivateKeyToPKCS1PEM 测试
+// ============================================================================
+
+func TestEncodePrivateKeyToPKCS1PEM(t *testing.T) {
+	key, err := crypto.GenerateRSAKeyPair(2048)
+	require.NoError(t, err)
+
+	pemData := crypto.EncodePrivateKeyToPKCS1PEM(key)
+	assert.NotEmpty(t, pemData)
+	assert.Contains(t, string(pemData), "BEGIN RSA PRIVATE KEY")
+}
+
+// ============================================================================
+// NewJWTServiceWithKeyStore 测试
+// ============================================================================
+
+func TestNewJWTServiceWithKeyStore(t *testing.T) {
+	t.Run("创建带KeyStore的JWT服务", func(t *testing.T) {
+		svc := crypto.NewJWTServiceWithKeyStore(
+			nil, // keyStore为nil
+			"test-issuer",
+			15*time.Minute,
+			7*24*time.Hour,
+		)
+		assert.NotNil(t, svc)
+	})
+}
+
+// ============================================================================
+// LoadKeysFromStore 测试
+// ============================================================================
+
+func TestJWTService_LoadKeysFromStore(t *testing.T) {
+	t.Run("keyStore为nil时正常返回", func(t *testing.T) {
+		svc := crypto.NewJWTServiceWithKeyStore(
+			nil,
+			"test-issuer",
+			15*time.Minute,
+			7*24*time.Hour,
+		)
+
+		err := svc.LoadKeysFromStore(context.Background())
+		assert.NoError(t, err)
+	})
+}
+
+// ============================================================================
+// KeyVersion 辅助函数测试
+// ============================================================================
+
+func TestKeyVersion_IsActive(t *testing.T) {
+	keyVersion := &model.KeyVersion{
+		ID:     "test-key",
+		Status: model.KeyStatusActive,
+	}
+	assert.True(t, keyVersion.IsActive())
+
+	keyVersion.Status = model.KeyStatusDeprecated
+	assert.False(t, keyVersion.IsActive())
+}
+
+func TestKeyVersion_CanVerify(t *testing.T) {
+	keyVersion := &model.KeyVersion{
+		ID:     "test-key",
+		Status: model.KeyStatusActive,
+	}
+	assert.True(t, keyVersion.CanVerify())
+
+	keyVersion.Status = model.KeyStatusDeprecated
+	assert.True(t, keyVersion.CanVerify())
+
+	keyVersion.Status = model.KeyStatusRevoked
+	assert.False(t, keyVersion.CanVerify())
 }

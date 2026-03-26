@@ -618,3 +618,81 @@ func TestTokenHandler_HandleRevoke(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 }
+
+// ============================================================================
+// RegisterHandler 测试
+// ============================================================================
+
+func TestRegisterHandler_InvalidJSON(t *testing.T) {
+	store := mock.New()
+	passwordSvc := crypto.NewPasswordService(10)
+	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test-issuer", 15*time.Minute, 7*24*time.Hour)
+	authSvc := service.NewAuthService(store, passwordSvc, jwtSvc, 5, 30*time.Minute)
+	registerHandler := handler.NewRegisterHandler(authSvc)
+
+	t.Run("无效的JSON请求体", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/register", bytes.NewReader([]byte("invalid json")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		registerHandler.Handle(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+// ============================================================================
+// LoginHandler 测试
+// ============================================================================
+
+func TestLoginHandler_InvalidJSON(t *testing.T) {
+	loginHandler, _ := createTestLoginHandler(t)
+
+	t.Run("无效的JSON请求体", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/login", bytes.NewReader([]byte("invalid json")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		loginHandler.Handle(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+// ============================================================================
+// AuthorizeHandler 测试
+// ============================================================================
+
+func TestAuthorizeHandler_InvalidRequest(t *testing.T) {
+	store := mock.New()
+	oauthSvc := service.NewOAuthService(store)
+	authorizeHandler := handler.NewAuthorizeHandler(oauthSvc)
+
+	t.Run("缺少client_id参数", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/authorize", nil)
+		w := httptest.NewRecorder()
+
+		authorizeHandler.HandleAuthorize(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("缺少redirect_uri参数", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/authorize?client_id=test", nil)
+		w := httptest.NewRecorder()
+
+		authorizeHandler.HandleAuthorize(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("无效的response_type", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/authorize?client_id=test&redirect_uri=http://localhost&response_type=token", nil)
+		w := httptest.NewRecorder()
+
+		authorizeHandler.HandleAuthorize(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}

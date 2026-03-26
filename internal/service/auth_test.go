@@ -469,3 +469,110 @@ func TestAuthService_LogoutAll(t *testing.T) {
 		}
 	})
 }
+
+// ============================================================================
+// ValidateToken 测试
+// ============================================================================
+
+func TestAuthService_ValidateToken_Extended(t *testing.T) {
+	authSvc, store := createTestAuthService(t)
+	ctx := context.Background()
+
+	t.Run("验证有效Token", func(t *testing.T) {
+		store.Reset()
+
+		// 创建测试用户
+		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
+		testUser := &model.User{
+			ID:           "test-user-validate",
+			Email:        "validate@example.com",
+			PasswordHash: hashedPassword,
+			Status:       model.UserStatusActive,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}
+		store.AddUser(testUser)
+
+		// 登录获取Token
+		loginResp, err := authSvc.Login(ctx, &model.LoginRequest{
+			Email:    "validate@example.com",
+			Password: "Password123!",
+		})
+		require.NoError(t, err)
+
+		// 验证Token
+		claims, err := authSvc.ValidateToken(ctx, loginResp.AccessToken)
+		require.NoError(t, err)
+		assert.Equal(t, testUser.ID, claims.Subject)
+		assert.Equal(t, testUser.Email, claims.Email)
+	})
+
+	t.Run("验证无效Token", func(t *testing.T) {
+		_, err := authSvc.ValidateToken(ctx, "invalid-token")
+		assert.ErrorIs(t, err, service.ErrInvalidToken)
+	})
+}
+
+// ============================================================================
+// NewAuthServiceWithAudit 测试
+// ============================================================================
+
+func TestAuthService_NewAuthServiceWithAudit(t *testing.T) {
+	store := mock.New()
+	passwordSvc := crypto.NewPasswordService(10)
+	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	jwtSvc := crypto.NewJWTService(
+		privateKey,
+		&privateKey.PublicKey,
+		"test-issuer",
+		15*time.Minute,
+		7*24*time.Hour,
+	)
+
+	t.Run("创建带审计的认证服务", func(t *testing.T) {
+		// 创建审计服务
+		auditSvc := service.NewAuditService(store)
+		defer auditSvc.Close()
+
+		authSvc := service.NewAuthServiceWithAudit(store, passwordSvc, jwtSvc, 5, 30*time.Minute, auditSvc)
+		assert.NotNil(t, authSvc)
+	})
+}
+
+// ============================================================================
+// LoginWithAudit 测试
+// ============================================================================
+
+func TestAuthService_LoginWithAudit(t *testing.T) {
+	authSvc, store := createTestAuthService(t)
+	ctx := context.Background()
+
+	t.Run("带审计上下文的登录", func(t *testing.T) {
+		store.Reset()
+
+		// 创建测试用户
+		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
+		testUser := &model.User{
+			ID:           "test-user-audit-login",
+			Email:        "auditlogin@example.com",
+			PasswordHash: hashedPassword,
+			Status:       model.UserStatusActive,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}
+		store.AddUser(testUser)
+
+		// 带审计上下文登录
+		auditCtx := &service.AuditContext{
+			IPAddress: "192.168.1.1",
+			UserAgent: "Mozilla/5.0",
+		}
+		loginResp, err := authSvc.LoginWithAudit(ctx, &model.LoginRequest{
+			Email:    "auditlogin@example.com",
+			Password: "Password123!",
+		}, auditCtx)
+
+		require.NoError(t, err)
+		assert.NotEmpty(t, loginResp.AccessToken)
+	})
+}
