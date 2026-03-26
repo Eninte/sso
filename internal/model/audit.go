@@ -43,14 +43,14 @@ const (
 	EventAuthCodeUsed    AuditEventType = "oauth.code_used"    // 授权码使用
 	EventAuthCodeInvalid AuditEventType = "oauth.code_invalid" // 授权码无效
 
-	EventRateLimitExceeded  AuditEventType = "security.rate_limit" // 限流触发
-	EventSuspiciousActivity AuditEventType = "security.suspicious" // 可疑活动
+	EventRateLimitExceeded  AuditEventType = "security.rate_limit"       // 限流触发
+	EventSuspiciousActivity AuditEventType = "security.suspicious"       // 可疑活动
 	EventPasswordChanged    AuditEventType = "security.password_changed" // 密码修改
 	EventPasswordReset      AuditEventType = "security.password_reset"   // 密码重置
 	EventAccountLocked      AuditEventType = "security.account_locked"   // 账户锁定
 	EventAccountUnlocked    AuditEventType = "security.account_unlocked" // 账户解锁
 
-	EventMFASetup  AuditEventType = "mfa.setup"  // MFA设置
+	EventMFASetup    AuditEventType = "mfa.setup"    // MFA设置
 	EventMFAEnabled  AuditEventType = "mfa.enabled"  // MFA启用
 	EventMFADisabled AuditEventType = "mfa.disabled" // MFA禁用
 

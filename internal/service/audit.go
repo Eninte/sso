@@ -162,6 +162,30 @@ func (s *AuditService) LogAuthCodeCreated(ctx context.Context, userID, clientID,
 	})
 }
 
+// LogAuthCodeUsed 记录授权码使用事件
+func (s *AuditService) LogAuthCodeUsed(ctx context.Context, userID, clientID, ipAddress string) {
+	s.Log(ctx, &model.AuditLog{
+		EventType: string(model.EventAuthCodeUsed),
+		UserID:    userID,
+		ClientID:  clientID,
+		IPAddress: ipAddress,
+		Success:   true,
+	})
+}
+
+// LogAuthCodeInvalid 记录授权码无效事件
+func (s *AuditService) LogAuthCodeInvalid(ctx context.Context, userID, clientID, ipAddress, reason string) {
+	details, _ := json.Marshal(map[string]interface{}{"reason": reason})
+	s.Log(ctx, &model.AuditLog{
+		EventType: string(model.EventAuthCodeInvalid),
+		UserID:    userID,
+		ClientID:  clientID,
+		IPAddress: ipAddress,
+		Details:   string(details),
+		Success:   false,
+	})
+}
+
 // ============================================================================
 // 辅助函数
 // ============================================================================
@@ -194,12 +218,26 @@ func (s *AuditService) LogTokenRefresh(ctx context.Context, userID, clientID, ip
 	})
 }
 
-func (s *AuditService) LogTokenRevoke(ctx context.Context, userID, ipAddress string) {
+func (s *AuditService) LogTokenRevoke(ctx context.Context, userID, clientID, ipAddress string) {
 	s.Log(ctx, &model.AuditLog{
 		EventType: string(model.EventTokenRevoke),
 		UserID:    userID,
+		ClientID:  clientID,
 		IPAddress: ipAddress,
 		Success:   true,
+	})
+}
+
+// LogUserLoginFailed 记录用户登录失败事件
+func (s *AuditService) LogUserLoginFailed(ctx context.Context, userID, email, ipAddress, userAgent, reason string) {
+	details, _ := json.Marshal(map[string]interface{}{"email": email, "reason": reason})
+	s.Log(ctx, &model.AuditLog{
+		EventType: string(model.EventUserLoginFailed),
+		UserID:    userID,
+		IPAddress: ipAddress,
+		UserAgent: userAgent,
+		Details:   string(details),
+		Success:   false,
 	})
 }
 

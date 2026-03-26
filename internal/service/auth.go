@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/your-org/sso/internal/cache"
 	"github.com/your-org/sso/internal/crypto"
 	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/metrics"
@@ -45,6 +46,7 @@ type AuthService struct {
 	lockoutDuration time.Duration           // 锁定时长
 	metricsSvc      *metrics.Service        // 指标服务（可选）
 	auditSvc        *AuditService           // 审计服务
+	cache           cache.Cache             // 缓存服务（可选）
 }
 
 func NewAuthService(
@@ -68,6 +70,33 @@ func NewAuthService(
 		lockoutDuration: lockoutDuration,
 		metricsSvc:      m,
 		auditSvc:        NewAuditService(store),
+	}
+}
+
+// NewAuthServiceWithCache 创建带缓存的AuthService实例
+func NewAuthServiceWithCache(
+	store store.Store,
+	passwordSvc *crypto.PasswordService,
+	jwtSvc *crypto.JWTService,
+	maxAttempts int,
+	lockoutDuration time.Duration,
+	cacheSvc cache.Cache,
+	metricsSvc ...*metrics.Service,
+) *AuthService {
+	var m *metrics.Service
+	if len(metricsSvc) > 0 {
+		m = metricsSvc[0]
+	}
+	return &AuthService{
+		store:           store,
+		passwordSvc:     passwordSvc,
+		jwtSvc:          jwtSvc,
+		tokenSvc:        NewTokenService(jwtSvc, store),
+		maxAttempts:     maxAttempts,
+		lockoutDuration: lockoutDuration,
+		metricsSvc:      m,
+		auditSvc:        NewAuditService(store),
+		cache:           cacheSvc,
 	}
 }
 
@@ -252,13 +281,19 @@ func (s *AuthService) revokeTokenWithRetry(ctx context.Context, accessToken stri
 				"attempt", i+1,
 				"max_retries", maxRevokeRetries,
 			)
-			// 等待一段时间后重试
 			time.Sleep(time.Duration(i+1) * 100 * time.Millisecond)
 			continue
 		}
+
+		// 清除缓存
+		if s.cache != nil {
+			cacheKey := cache.TokenKey(accessToken)
+			_ = s.cache.Delete(ctx, cacheKey)
+		}
+
 		return nil
 	}
-	return fmt.Errorf("Token撤销失败，已重试%d次: %w", maxRevokeRetries, lastErr)
+	return fmt.Errorf("token撤销失败，已重试%d次: %w", maxRevokeRetries, lastErr)
 }
 
 // RefreshToken 刷新Token
@@ -333,6 +368,12 @@ func (s *AuthService) LogoutAllWithAudit(ctx context.Context, userID string, aud
 		)
 		return fmt.Errorf("登出所有设备失败: %w", err)
 	}
+
+	// 清除该用户相关的缓存
+	if s.cache != nil {
+		_ = s.cache.DeletePattern(ctx, cache.TokenCachePrefix+"*")
+	}
+
 	s.incrementMetric("auth_logout_all_total")
 	if s.auditSvc != nil && auditCtx != nil {
 		s.auditSvc.LogLogoutAll(ctx, userID, auditCtx.IPAddress)
@@ -364,12 +405,31 @@ func (s *AuthService) ValidateToken(ctx context.Context, accessToken string) (*c
 		return nil, err
 	}
 
+	// 检查缓存
+	if s.cache != nil {
+		var cachedToken model.Token
+		cacheKey := cache.TokenKey(accessToken)
+		if err := s.cache.Get(ctx, cacheKey, &cachedToken); err == nil {
+			if cachedToken.RevokedAt != nil {
+				return nil, ErrInvalidToken
+			}
+			return claims, nil
+		}
+	}
+
+	// 缓存未命中，查询数据库
 	tokenRecord, err := s.store.GetTokenByAccessToken(ctx, accessToken)
 	if err != nil {
 		return nil, ErrInvalidToken
 	}
 	if tokenRecord.RevokedAt != nil {
 		return nil, ErrInvalidToken
+	}
+
+	// 缓存结果
+	if s.cache != nil {
+		cacheKey := cache.TokenKey(accessToken)
+		_ = s.cache.Set(ctx, cacheKey, tokenRecord, cache.TokenTTL)
 	}
 
 	return claims, nil

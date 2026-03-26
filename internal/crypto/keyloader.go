@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	apperrors "github.com/your-org/sso/internal/errors"
 )
@@ -190,4 +191,60 @@ func validateKeyPath(path string) error {
 	}
 
 	return ErrKeyPathInvalid
+}
+
+// LoadKeysForRotation 加载用于密钥轮换的密钥
+// 返回JWTService，已配置好签名密钥和验证密钥
+func LoadKeysForRotation(
+	privateKeyPath string,
+	publicKeyPath string,
+	rotationPublicKeyPaths []string,
+	issuer string,
+	accessTokenTTL time.Duration,
+	refreshTokenTTL time.Duration,
+) (*JWTService, error) {
+	// 加载签名私钥
+	privateKey, err := LoadPrivateKeyFromFile(privateKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("加载签名私钥失败: %w", err)
+	}
+
+	// 加载签名公钥
+	publicKey, err := LoadPublicKeyFromFile(publicKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("加载签名公钥失败: %w", err)
+	}
+
+	// 生成密钥ID
+	keyID, err := GenerateKeyID()
+	if err != nil {
+		return nil, fmt.Errorf("生成密钥ID失败: %w", err)
+	}
+
+	// 创建JWTService
+	svc := NewJWTService(privateKey, publicKey, issuer, accessTokenTTL, refreshTokenTTL)
+
+	// 设置活跃密钥
+	svc.SetActiveKey(keyID, privateKey, publicKey)
+
+	// 加载轮换公钥（用于验证旧Token）
+	for _, path := range rotationPublicKeyPaths {
+		if path == "" {
+			continue
+		}
+		rotKey, err := LoadPublicKeyFromFile(path)
+		if err != nil {
+			// 记录警告但继续加载其他密钥
+			fmt.Printf("警告: 加载轮换公钥失败 %s: %v\n", path, err)
+			continue
+		}
+		rotKeyID, err := GenerateKeyID()
+		if err != nil {
+			fmt.Printf("警告: 生成轮换密钥ID失败: %v\n", err)
+			continue
+		}
+		svc.AddVerificationKey(rotKeyID, rotKey)
+	}
+
+	return svc, nil
 }

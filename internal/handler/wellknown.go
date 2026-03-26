@@ -7,6 +7,8 @@ import (
 	"encoding/base64"
 	"math/big"
 	"net/http"
+
+	"github.com/your-org/sso/internal/crypto"
 )
 
 // ============================================================================
@@ -15,8 +17,9 @@ import (
 
 // WellKnownHandler OIDC Discovery处理器
 type WellKnownHandler struct {
-	baseURL   string         // 服务基础URL
-	publicKey *rsa.PublicKey // RSA公钥
+	baseURL   string             // 服务基础URL
+	publicKey *rsa.PublicKey     // RSA公钥（向后兼容）
+	jwtSvc    *crypto.JWTService // JWT服务（用于获取多密钥JWKS）
 }
 
 // NewWellKnownHandler 创建OIDC Discovery处理器
@@ -24,6 +27,14 @@ func NewWellKnownHandler(baseURL string, publicKey *rsa.PublicKey) *WellKnownHan
 	return &WellKnownHandler{
 		baseURL:   baseURL,
 		publicKey: publicKey,
+	}
+}
+
+// NewWellKnownHandlerWithJWTService 创建OIDC Discovery处理器（支持多密钥JWKS）
+func NewWellKnownHandlerWithJWTService(baseURL string, jwtSvc *crypto.JWTService) *WellKnownHandler {
+	return &WellKnownHandler{
+		baseURL: baseURL,
+		jwtSvc:  jwtSvc,
 	}
 }
 
@@ -95,7 +106,22 @@ func (h *WellKnownHandler) HandleDiscovery(w http.ResponseWriter, r *http.Reques
 // GET /.well-known/jwks.json
 // 返回公钥信息，供客户端验证JWT签名
 func (h *WellKnownHandler) HandleJWKS(w http.ResponseWriter, r *http.Request) {
-	// 构建JWK
+	// 如果有JWTService，使用它的GetJWKS方法获取多密钥JWKS
+	if h.jwtSvc != nil {
+		jwks := h.jwtSvc.GetJWKS()
+		writeJSON(w, http.StatusOK, jwks)
+		return
+	}
+
+	// 向后兼容：单密钥模式
+	if h.publicKey == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"keys": []interface{}{},
+		})
+		return
+	}
+
+	// 构建JWK（单密钥）
 	// 参考: https://datatracker.ietf.org/doc/html/rfc7517
 	jwk := map[string]interface{}{
 		"kty": "RSA",                                                     // 密钥类型

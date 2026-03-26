@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/your-org/sso/internal/cache"
 	"github.com/your-org/sso/internal/common"
 	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/model"
@@ -39,12 +40,60 @@ var (
 // OAuthService OAuth服务
 // 处理OAuth2授权码流程
 type OAuthService struct {
-	store store.Store // 数据存储
+	store    store.Store   // 数据存储
+	auditSvc *AuditService // 审计服务
+	cache    cache.Cache   // 缓存服务
 }
 
 // NewOAuthService 创建OAuth服务
 func NewOAuthService(store store.Store) *OAuthService {
-	return &OAuthService{store: store}
+	return &OAuthService{
+		store:    store,
+		auditSvc: NewAuditService(store),
+	}
+}
+
+// NewOAuthServiceWithAudit 创建OAuth服务（带审计服务注入）
+func NewOAuthServiceWithAudit(store store.Store, auditSvc *AuditService) *OAuthService {
+	return &OAuthService{
+		store:    store,
+		auditSvc: auditSvc,
+	}
+}
+
+// NewOAuthServiceWithCache 创建带缓存的OAuth服务
+func NewOAuthServiceWithCache(store store.Store, cacheSvc cache.Cache) *OAuthService {
+	return &OAuthService{
+		store:    store,
+		auditSvc: NewAuditService(store),
+		cache:    cacheSvc,
+	}
+}
+
+// getClient 获取客户端（带缓存）
+func (s *OAuthService) getClient(ctx context.Context, clientID string) (*model.Client, error) {
+	// 检查缓存
+	if s.cache != nil {
+		var cachedClient model.Client
+		cacheKey := cache.ClientKey(clientID)
+		if err := s.cache.Get(ctx, cacheKey, &cachedClient); err == nil {
+			return &cachedClient, nil
+		}
+	}
+
+	// 缓存未命中，查询数据库
+	client, err := s.store.GetByClientID(ctx, clientID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 缓存结果
+	if s.cache != nil {
+		cacheKey := cache.ClientKey(clientID)
+		_ = s.cache.Set(ctx, cacheKey, client, cache.ClientTTL)
+	}
+
+	return client, nil
 }
 
 // ============================================================================
@@ -61,7 +110,7 @@ func (s *OAuthService) CreateAuthorizationCode(
 	codeChallenge string,
 	codeChallengeMethod string,
 ) (string, error) {
-	client, err := s.store.GetByClientID(ctx, clientID)
+	client, err := s.getClient(ctx, clientID)
 	if err != nil {
 		return "", ErrInvalidClient
 	}
@@ -108,6 +157,11 @@ func (s *OAuthService) CreateAuthorizationCode(
 		return "", fmt.Errorf("存储授权码失败: %w", err)
 	}
 
+	// 记录授权码创建审计日志
+	if s.auditSvc != nil {
+		s.auditSvc.LogAuthCodeCreated(ctx, userID, clientID, "")
+	}
+
 	return code, nil
 }
 
@@ -122,38 +176,66 @@ func (s *OAuthService) ExchangeAuthorizationCode(
 ) (*model.LoginResponse, error) {
 	authCode, err := s.store.GetAuthorizationCode(ctx, code)
 	if err != nil {
+		// 记录无效授权码审计日志
+		if s.auditSvc != nil {
+			s.auditSvc.LogAuthCodeInvalid(ctx, "", clientID, "", "invalid_code")
+		}
 		return nil, ErrInvalidCode
 	}
 
 	if authCode.ClientID != clientID {
+		// 记录无效客户端审计日志
+		if s.auditSvc != nil {
+			s.auditSvc.LogAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "invalid_client")
+		}
 		return nil, ErrInvalidClient
 	}
 
 	if authCode.RedirectURI != redirectURI {
+		// 记录无效重定向URI审计日志
+		if s.auditSvc != nil {
+			s.auditSvc.LogAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "invalid_redirect_uri")
+		}
 		return nil, ErrInvalidRedirectURI
 	}
 
 	if authCode.ExpiresAt.Before(time.Now()) {
+		// 记录授权码过期审计日志
+		if s.auditSvc != nil {
+			s.auditSvc.LogAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "code_expired")
+		}
 		return nil, ErrCodeExpired
 	}
 
 	if authCode.UsedAt != nil {
+		// 记录授权码已使用审计日志
+		if s.auditSvc != nil {
+			s.auditSvc.LogAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "code_used")
+		}
 		return nil, ErrCodeUsed
 	}
 
-	client, err := s.store.GetByClientID(ctx, clientID)
+	client, err := s.getClient(ctx, clientID)
 	if err != nil {
 		return nil, ErrInvalidClient
 	}
 
 	if !client.PublicClient {
 		if !compareClientSecret(client.ClientSecret, clientSecret) {
+			// 记录无效客户端密钥审计日志
+			if s.auditSvc != nil {
+				s.auditSvc.LogAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "invalid_client_secret")
+			}
 			return nil, ErrInvalidClient
 		}
 	}
 
 	if authCode.CodeChallenge != "" {
 		if err := verifyPKCE(authCode.CodeChallenge, authCode.CodeChallengeMethod, codeVerifier); err != nil {
+			// 记录PKCE验证失败审计日志
+			if s.auditSvc != nil {
+				s.auditSvc.LogAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "pkce_verification_failed")
+			}
 			return nil, ErrInvalidCodeVerifier
 		}
 	}
@@ -162,6 +244,11 @@ func (s *OAuthService) ExchangeAuthorizationCode(
 	authCode.UsedAt = &now
 	if err := s.store.UpdateAuthorizationCode(ctx, authCode); err != nil {
 		return nil, fmt.Errorf("更新授权码状态失败: %w", err)
+	}
+
+	// 记录授权码使用审计日志
+	if s.auditSvc != nil {
+		s.auditSvc.LogAuthCodeUsed(ctx, authCode.UserID, clientID, "")
 	}
 
 	// TODO: 实现完整的令牌生成逻辑
@@ -186,7 +273,12 @@ func (s *OAuthService) ExchangeAuthorizationCode(
 
 // RevokeToken 撤销Token
 func (s *OAuthService) RevokeToken(ctx context.Context, token string) error {
-	return s.store.RevokeToken(ctx, token)
+	err := s.store.RevokeToken(ctx, token)
+	if err == nil && s.auditSvc != nil {
+		// 记录Token撤销审计日志
+		s.auditSvc.LogTokenRevoke(ctx, "", "", "")
+	}
+	return err
 }
 
 // ============================================================================

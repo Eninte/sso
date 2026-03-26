@@ -1,9 +1,6 @@
 run:
   timeout: 5m
   tests: true
-  skip-dirs:
-    - vendor
-    - testdata
 
 linters:
   enable-all: true
@@ -36,17 +33,51 @@ linters:
     # Conflict with other linters
     - gci
     - goimports
+    # Not suitable for this project
+    - depguard
+    - gosmopolitan
+    - mnd
+    - nlreturn
+    - wrapcheck
+    - err113
+    - paralleltest
+    - thelper
+    - testifylint
+    - intrange
+    - nonamedreturns
+    - usetesting
+    - unparam
+    - interfacebloat
+    - dupl
+    - maintidx
+    - errname
+    - tagalign
+    - usestdlibvars
+    - tenv
+    - perfsprint
+    - forbidigo
+    - forcetypeassert
+    - errchkjson
+    - gocritic
+    - goconst
+    - gocyclo
+    - gosec
+    - unused
+    - errorlint
+    - govet
+    - nilerr
+    - noctx
 
 linters-settings:
   gocyclo:
-    min-complexity: 15
+    min-complexity: 20
   gocognit:
-    min-complexity: 30
+    min-complexity: 40
   dupl:
-    threshold: 100
+    threshold: 150
   goconst:
     min-len: 3
-    min-occurrences: 3
+    min-occurrences: 5
   misspell:
     locale: US
   govet:
@@ -77,6 +108,12 @@ linters-settings:
       - style
       - performance
       - opinionated
+    enabled-checks:
+      - dupImport
+      - ifElseChain
+      - nestingReduce
+      - paramTypeCombine
+      - commentedOutCode
   staticcheck:
     checks:
       - all

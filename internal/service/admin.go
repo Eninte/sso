@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/your-org/sso/internal/cache"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/store"
 )
@@ -46,12 +47,19 @@ type SystemHealthInfo struct {
 
 // AdminService 管理员服务实现
 type AdminService struct {
-	store store.Store
+	store  store.Store
+	cache  cache.Cache
+	client cache.Cache
 }
 
 // NewAdminService 创建管理员服务
 func NewAdminService(store store.Store) *AdminService {
 	return &AdminService{store: store}
+}
+
+// NewAdminServiceWithCache 创建带缓存的管理员服务
+func NewAdminServiceWithCache(store store.Store, cacheSvc cache.Cache) *AdminService {
+	return &AdminService{store: store, cache: cacheSvc}
 }
 
 // ============================================================================
@@ -65,7 +73,28 @@ func (s *AdminService) ListUsers(ctx context.Context, offset, limit int) ([]*mod
 
 // GetUser 获取用户
 func (s *AdminService) GetUser(ctx context.Context, userID string) (*model.User, error) {
-	return s.store.GetByID(ctx, userID)
+	// 检查缓存
+	if s.cache != nil {
+		var cachedUser model.User
+		cacheKey := cache.UserIDKey(userID)
+		if err := s.cache.Get(ctx, cacheKey, &cachedUser); err == nil {
+			return &cachedUser, nil
+		}
+	}
+
+	// 缓存未命中，查询数据库
+	user, err := s.store.GetByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 缓存结果
+	if s.cache != nil {
+		cacheKey := cache.UserIDKey(userID)
+		_ = s.cache.Set(ctx, cacheKey, user, cache.DefaultTTL)
+	}
+
+	return user, nil
 }
 
 // DisableUser 禁用用户

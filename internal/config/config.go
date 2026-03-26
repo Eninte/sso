@@ -44,9 +44,14 @@ type Config struct {
 	DBQueryTimeout    time.Duration // 查询超时时间
 
 	// Redis配置
-	RedisHost     string // Redis主机
-	RedisPort     string // Redis端口
-	RedisPassword string // Redis密码
+	RedisEnable       bool          // 是否启用Redis缓存
+	RedisHost         string        // Redis主机
+	RedisPort         string        // Redis端口
+	RedisPassword     string        // Redis密码
+	RedisDB           int           // Redis数据库编号 (0-15)
+	RedisConnTimeout  time.Duration // Redis连接超时
+	RedisPoolSize     int           // Redis连接池大小
+	RedisMinIdleConns int           // Redis最小空闲连接数
 
 	// JWT配置
 	JWTPrivateKeyPath string        // JWT私钥路径
@@ -56,9 +61,10 @@ type Config struct {
 	JWTIssuer         string        // Token签发者标识
 
 	// 密钥轮换配置
-	KeyRotationEnabled  bool          // 是否启用密钥轮换
-	KeyRotationInterval time.Duration // 密钥轮换周期
-	KeyTransitionPeriod time.Duration // 密钥过渡期时长
+	KeyRotationEnabled       bool          // 是否启用密钥轮换
+	KeyRotationInterval      time.Duration // 密钥轮换周期
+	KeyTransitionPeriod      time.Duration // 密钥过渡期时长
+	JWTTransitionPubKeyPaths string        // 轮换期间的旧公钥路径（逗号分隔）
 
 	// 安全配置
 	BcryptCost        int           // bcrypt成本因子
@@ -113,9 +119,14 @@ func Load() (*Config, error) {
 		DBQueryTimeout:    getEnvDuration("DB_QUERY_TIMEOUT", 10*time.Second),
 
 		// Redis配置
-		RedisHost:     getEnv("REDIS_HOST", "localhost"),
-		RedisPort:     getEnv("REDIS_PORT", "6379"),
-		RedisPassword: os.Getenv("REDIS_PASSWORD"), // 可选，无默认值
+		RedisEnable:       getEnvBool("REDIS_ENABLE", true),
+		RedisHost:         getEnv("REDIS_HOST", "localhost"),
+		RedisPort:         getEnv("REDIS_PORT", "6379"),
+		RedisPassword:     os.Getenv("REDIS_PASSWORD"),
+		RedisDB:           getEnvInt("REDIS_DB", 0),
+		RedisConnTimeout:  getEnvDuration("REDIS_CONN_TIMEOUT", 5*time.Second),
+		RedisPoolSize:     getEnvInt("REDIS_POOL_SIZE", 10),
+		RedisMinIdleConns: getEnvInt("REDIS_MIN_IDLE_CONNS", 5),
 
 		// JWT配置
 		JWTPrivateKeyPath: os.Getenv("JWT_PRIVATE_KEY_PATH"), // 必须通过环境变量设置
@@ -125,9 +136,10 @@ func Load() (*Config, error) {
 		JWTIssuer:         getEnv("JWT_ISSUER", "sso"),
 
 		// 密钥轮换配置
-		KeyRotationEnabled:  getEnvBool("KEY_ROTATION_ENABLED", false),
-		KeyRotationInterval: getEnvDuration("KEY_ROTATION_INTERVAL", 2160*time.Hour), // 90天
-		KeyTransitionPeriod: getEnvDuration("KEY_TRANSITION_PERIOD", 24*time.Hour),   // 24小时
+		KeyRotationEnabled:       getEnvBool("KEY_ROTATION_ENABLED", false),
+		KeyRotationInterval:      getEnvDuration("KEY_ROTATION_INTERVAL", 2160*time.Hour), // 90天
+		KeyTransitionPeriod:      getEnvDuration("KEY_TRANSITION_PERIOD", 24*time.Hour),   // 24小时
+		JWTTransitionPubKeyPaths: os.Getenv("JWT_TRANSITION_PUBKEY_PATHS"),                // 轮换期间的旧公钥路径（逗号分隔）
 
 		// 安全配置
 		// BcryptCost: bcrypt成本因子，影响密码哈希性能
@@ -313,6 +325,11 @@ func (c *Config) GetAdminDomains() []string {
 // GetCORSAllowedOrigins 获取CORS允许的源列表
 func (c *Config) GetCORSAllowedOrigins() []string {
 	return splitAndTrim(c.CORSAllowedOrigins)
+}
+
+// GetJWTTransitionPubKeyPaths 获取轮换期间的旧公钥路径列表
+func (c *Config) GetJWTTransitionPubKeyPaths() []string {
+	return splitAndTrim(c.JWTTransitionPubKeyPaths)
 }
 
 // splitAndTrim 分割字符串并去除空格

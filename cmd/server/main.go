@@ -16,6 +16,7 @@ import (
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
 
+	"github.com/your-org/sso/internal/cache"
 	"github.com/your-org/sso/internal/config"
 	"github.com/your-org/sso/internal/crypto"
 	"github.com/your-org/sso/internal/handler"
@@ -54,25 +55,59 @@ func main() {
 	// 4. 初始化存储层
 	store := postgres.New(db)
 
+	// 5. 初始化缓存层
+	cacheSvc, err := initCache(cfg)
+	if err != nil {
+		slog.Warn("缓存初始化失败，使用内存缓存", "error", err)
+		cacheSvc = cache.NewMemoryCache()
+	}
+	defer cacheSvc.Close()
+	slog.Info("缓存层初始化完成")
+
 	// 5. 初始化加密服务
 	passwordSvc := crypto.NewPasswordService(cfg.BcryptCost)
-	privateKey, err := crypto.LoadPrivateKeyFromFile(cfg.JWTPrivateKeyPath)
-	if err != nil {
-		slog.Error("加载私钥失败", "error", err)
-		os.Exit(1)
+	var jwtSvc *crypto.JWTService
+
+	// 根据是否启用密钥轮换选择不同的初始化方式
+	if cfg.KeyRotationEnabled && cfg.JWTTransitionPubKeyPaths != "" {
+		// 使用密钥轮换模式
+		transitionPubKeyPaths := cfg.GetJWTTransitionPubKeyPaths()
+		jwtSvc, err = crypto.LoadKeysForRotation(
+			cfg.JWTPrivateKeyPath,
+			cfg.JWTPublicKeyPath,
+			transitionPubKeyPaths,
+			cfg.JWTIssuer,
+			cfg.AccessTokenTTL,
+			cfg.RefreshTokenTTL,
+		)
+		if err != nil {
+			slog.Error("加载密钥轮换配置失败", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("密钥轮换模式已启用",
+			"transition_keys_count", len(transitionPubKeyPaths),
+		)
+	} else {
+		// 标准模式（单密钥）
+		privateKey, err := crypto.LoadPrivateKeyFromFile(cfg.JWTPrivateKeyPath)
+		if err != nil {
+			slog.Error("加载私钥失败", "error", err)
+			os.Exit(1)
+		}
+		publicKey, err := crypto.LoadPublicKeyFromFile(cfg.JWTPublicKeyPath)
+		if err != nil {
+			slog.Error("加载公钥失败", "error", err)
+			os.Exit(1)
+		}
+		jwtSvc = crypto.NewJWTService(
+			privateKey,
+			publicKey,
+			cfg.JWTIssuer,
+			cfg.AccessTokenTTL,
+			cfg.RefreshTokenTTL,
+		)
 	}
-	publicKey, err := crypto.LoadPublicKeyFromFile(cfg.JWTPublicKeyPath)
-	if err != nil {
-		slog.Error("加载公钥失败", "error", err)
-		os.Exit(1)
-	}
-	jwtSvc := crypto.NewJWTService(
-		privateKey,
-		publicKey,
-		cfg.JWTIssuer,
-		cfg.AccessTokenTTL,
-		cfg.RefreshTokenTTL,
-	)
+
 	slog.Info("加密服务初始化完成")
 
 	// 6. 初始化邮件服务
@@ -88,20 +123,21 @@ func main() {
 	// 7. 初始化指标服务
 	metricsSvc := metrics.NewService()
 
-	// 8. 初始化业务服务
-	authSvc := service.NewAuthService(
+	// 8. 初始化业务服务（带缓存）
+	authSvc := service.NewAuthServiceWithCache(
 		store,
 		passwordSvc,
 		jwtSvc,
 		cfg.MaxLoginAttempts,
 		cfg.LockoutDuration,
+		cacheSvc,
 		metricsSvc,
 	)
-	oauthSvc := service.NewOAuthService(store)
+	oauthSvc := service.NewOAuthServiceWithCache(store, cacheSvc)
 	userSvc := service.NewUserService(store, passwordSvc, emailSvc, cfg.BaseURL())
 	auditSvc := service.NewAuditService(store)
 	mfaSvc := service.NewMFAService(store)
-	adminSvc := service.NewAdminService(store)
+	adminSvc := service.NewAdminServiceWithCache(store, cacheSvc)
 
 	// 8. 初始化第三方登录服务
 	socialSvc := service.NewSocialLoginService(store, jwtSvc, cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GitHubClientID, cfg.GitHubClientSecret)
@@ -121,7 +157,8 @@ func main() {
 	userHandler := handler.NewUserHandler(userSvc)
 	mfaHandler := handler.NewMFAHandler(mfaSvc)
 	socialHandler := handler.NewSocialLoginHandler(socialSvc)
-	wellKnownHandler := handler.NewWellKnownHandler(cfg.BaseURL(), publicKey)
+	// 使用支持多密钥JWKS的handler
+	wellKnownHandler := handler.NewWellKnownHandlerWithJWTService(cfg.BaseURL(), jwtSvc)
 	metricsHandler := handler.NewMetricsHandler(metricsSvc)
 	adminHandler := handler.NewAdminHandler(adminSvc)
 
@@ -236,6 +273,19 @@ func main() {
 // initLogger 初始化日志配置
 func initLogger(env string) {
 	logging.InitForEnv(env)
+}
+
+// initCache 初始化缓存层
+// 根据配置尝试连接Redis，失败时自动降级到内存缓存
+func initCache(cfg *config.Config) (cache.Cache, error) {
+	opt := &cache.Option{
+		RedisEnable:   cfg.RedisEnable,
+		RedisHost:     cfg.RedisHost,
+		RedisPassword: cfg.RedisPassword,
+		RedisDB:       cfg.RedisDB,
+		RedisPoolSize: cfg.RedisPoolSize,
+	}
+	return cache.NewCacheWithFallback(opt)
 }
 
 // connectDatabase 连接数据库

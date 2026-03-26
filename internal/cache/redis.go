@@ -6,8 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 
 	apperrors "github.com/your-org/sso/internal/errors"
 )
@@ -257,4 +260,173 @@ func matchesPattern(str, pattern string) bool {
 	}
 
 	return str == pattern
+}
+
+// ============================================================================
+// Redis缓存实现
+// ============================================================================
+
+var (
+	ErrRedisConnectionFailed = apperrors.New("ERR_REDIS_CONNECTION_FAILED", "Redis连接失败", 500)
+	ErrRedisPingFailed       = apperrors.New("ERR_REDIS_PING_FAILED", "Redis健康检查失败", 500)
+)
+
+// RedisCache Redis缓存实现
+// 使用go-redis客户端，封装常用缓存操作
+type RedisCache struct {
+	client *redis.Client
+}
+
+// NewRedisCache 创建Redis缓存实例
+// host: Redis主机地址 (如 "localhost")
+// password: Redis密码 (空字符串表示无需认证)
+// db: Redis数据库编号 (0-15)
+func NewRedisCache(host, password string, db int) (*RedisCache, error) {
+	client := redis.NewClient(&redis.Options{
+		Addr:         host + ":6379",
+		Password:     password,
+		DB:           db,
+		PoolSize:     10,
+		MinIdleConns: 5,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := client.Ping(ctx).Err(); err != nil {
+		return nil, fmt.Errorf("redis connection failed: %w", err)
+	}
+
+	return &RedisCache{client: client}, nil
+}
+
+// NewRedisCacheWithOptions 使用自定义选项创建Redis缓存实例
+func NewRedisCacheWithOptions(opts *redis.Options) (*RedisCache, error) {
+	client := redis.NewClient(opts)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := client.Ping(ctx).Err(); err != nil {
+		return nil, fmt.Errorf("redis connection failed: %w", err)
+	}
+
+	return &RedisCache{client: client}, nil
+}
+
+// Ping 检查Redis连接是否正常
+func (c *RedisCache) Ping(ctx context.Context) error {
+	return c.client.Ping(ctx).Err()
+}
+
+// Get 获取缓存值
+func (c *RedisCache) Get(ctx context.Context, key string, dest interface{}) error {
+	val, err := c.client.Get(ctx, key).Bytes()
+	if err != nil {
+		if err == redis.Nil {
+			return ErrCacheMiss
+		}
+		return err
+	}
+
+	if len(val) == len(nilCacheValue) && string(val) == string(nilCacheValue) {
+		return ErrCacheMiss
+	}
+
+	return json.Unmarshal(val, dest)
+}
+
+// Set 设置缓存值
+func (c *RedisCache) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("序列化缓存值失败: %w", err)
+	}
+
+	return c.client.Set(ctx, key, data, ttl).Err()
+}
+
+// SetWithNilProtection 设置缓存值（带空值保护）
+func (c *RedisCache) SetWithNilProtection(ctx context.Context, key string, value interface{}, ttl time.Duration, nilTTL time.Duration) error {
+	if value == nil {
+		return c.client.Set(ctx, key, nilCacheValue, nilTTL).Err()
+	}
+
+	data, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("序列化缓存值失败: %w", err)
+	}
+
+	return c.client.Set(ctx, key, data, ttl).Err()
+}
+
+// Delete 删除指定key的缓存
+func (c *RedisCache) Delete(ctx context.Context, key string) error {
+	return c.client.Del(ctx, key).Err()
+}
+
+// DeletePattern 按模式删除缓存
+func (c *RedisCache) DeletePattern(ctx context.Context, pattern string) error {
+	keys, err := c.client.Keys(ctx, pattern).Result()
+	if err != nil {
+		return err
+	}
+
+	if len(keys) == 0 {
+		return nil
+	}
+
+	return c.client.Del(ctx, keys...).Err()
+}
+
+// Close 关闭Redis连接
+func (c *RedisCache) Close() error {
+	return c.client.Close()
+}
+
+// ============================================================================
+// 缓存工厂函数
+// ============================================================================
+
+// Option 配置选项
+type Option struct {
+	RedisEnable      bool
+	RedisHost        string
+	RedisPassword    string
+	RedisDB          int
+	RedisPoolSize    int
+	RedisConnTimeout time.Duration
+}
+
+// NewCache 创建缓存实例
+// 如果Redis可用则使用Redis，否则回退到内存缓存
+func NewCache(opt *Option) (Cache, error) {
+	if !opt.RedisEnable {
+		return NewMemoryCache(), nil
+	}
+
+	redisCache, err := NewRedisCache(opt.RedisHost, opt.RedisPassword, opt.RedisDB)
+	if err != nil {
+		return nil, fmt.Errorf("create redis cache failed: %w", err)
+	}
+
+	return redisCache, nil
+}
+
+// NewCacheWithFallback 创建带降级功能的缓存实例
+// Redis连接失败时自动使用内存缓存
+func NewCacheWithFallback(opt *Option) (Cache, error) {
+	if !opt.RedisEnable {
+		slog.Info("using memory cache mode")
+		return NewMemoryCache(), nil
+	}
+
+	redisCache, err := NewRedisCache(opt.RedisHost, opt.RedisPassword, opt.RedisDB)
+	if err != nil {
+		slog.Warn("redis connection failed, fallback to memory cache", "error", err)
+		return NewMemoryCache(), nil
+	}
+
+	slog.Info("redis cache enabled")
+	return redisCache, nil
 }

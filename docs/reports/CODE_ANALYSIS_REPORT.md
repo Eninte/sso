@@ -458,10 +458,10 @@ PASS ok github.com/your-org/sso/internal/validator
 - [x] 生产环境禁止/tmp/密钥路径
 - [x] 配置测试覆盖
 - [x] 端到端测试完善（9个文件，76+个场景）
+- [x] 审计日志集成（所有Service已注入AuditService）
+- [x] 密钥轮换机制（支持多密钥JWKS）
 
 ### 待实现
-- [ ] Logout添加Token撤销重试机制
-- [ ] 移除docker-compose默认密码
 - [ ] 实现RBAC权限系统
 - [ ] 集成漏洞扫描到CI/CD
 
