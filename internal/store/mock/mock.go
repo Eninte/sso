@@ -20,24 +20,20 @@ import (
 type Store struct {
 	mu sync.RWMutex
 
-	// 用户存储
 	users map[string]*model.User
 
-	// 客户端存储
 	clients map[string]*model.Client
 
-	// Token存储
 	tokens             map[string]*model.Token
 	authorizationCodes map[string]*model.AuthorizationCode
 
-	// 验证令牌存储
 	verificationTokens map[string]*store.VerificationToken
 	resetTokens        map[string]*store.ResetToken
 
-	// 审计日志存储
 	auditLogs []*model.AuditLog
 
-	// 错误注入 - 用于测试错误场景
+	keys map[string]*model.KeyVersion
+
 	CreateUserErr                error
 	GetUserByIDErr               error
 	GetUserByEmailErr            error
@@ -62,6 +58,12 @@ type Store struct {
 	GetResetTokenErr             error
 	DeleteResetTokenErr          error
 	StoreAuditLogErr             error
+	StoreKeyErr                  error
+	GetActiveKeyErr              error
+	GetKeyByIDErr                error
+	DeprecateKeyErr              error
+	RevokeKeyErr                 error
+	DeleteKeyErr                 error
 	CloseErr                     error
 	PingErr                      error
 }
@@ -76,6 +78,7 @@ func New() *Store {
 		verificationTokens: make(map[string]*store.VerificationToken),
 		resetTokens:        make(map[string]*store.ResetToken),
 		auditLogs:          make([]*model.AuditLog, 0),
+		keys:               make(map[string]*model.KeyVersion),
 	}
 }
 
@@ -583,6 +586,7 @@ func (m *Store) Reset() {
 	m.verificationTokens = make(map[string]*store.VerificationToken)
 	m.resetTokens = make(map[string]*store.ResetToken)
 	m.auditLogs = make([]*model.AuditLog, 0)
+	m.keys = make(map[string]*model.KeyVersion)
 }
 
 // ============================================================================
@@ -632,4 +636,114 @@ func (m *Store) ListAuditLogs(ctx context.Context, userID string, eventType stri
 	}
 
 	return filtered[offset:end], total, nil
+}
+
+func (m *Store) StoreKey(ctx context.Context, key *model.KeyVersion) error {
+	if m.StoreKeyErr != nil {
+		return m.StoreKeyErr
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.keys[key.ID] = key
+	return nil
+}
+
+func (m *Store) GetActiveKey(ctx context.Context) (*model.KeyVersion, error) {
+	if m.GetActiveKeyErr != nil {
+		return nil, m.GetActiveKeyErr
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, key := range m.keys {
+		if key.Status == model.KeyStatusActive {
+			return key, nil
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
+func (m *Store) GetKeyByID(ctx context.Context, keyID string) (*model.KeyVersion, error) {
+	if m.GetKeyByIDErr != nil {
+		return nil, m.GetKeyByIDErr
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	key, ok := m.keys[keyID]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	return key, nil
+}
+
+func (m *Store) ListActiveKeys(ctx context.Context) ([]*model.KeyVersion, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	result := make([]*model.KeyVersion, 0)
+	for _, key := range m.keys {
+		if key.Status == model.KeyStatusActive || key.Status == model.KeyStatusDeprecated {
+			result = append(result, key)
+		}
+	}
+	return result, nil
+}
+
+func (m *Store) ListAllKeys(ctx context.Context) ([]*model.KeyVersion, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	result := make([]*model.KeyVersion, 0, len(m.keys))
+	for _, key := range m.keys {
+		result = append(result, key)
+	}
+	return result, nil
+}
+
+func (m *Store) DeprecateKey(ctx context.Context, keyID string, expiresAt time.Time) error {
+	if m.DeprecateKeyErr != nil {
+		return m.DeprecateKeyErr
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	key, ok := m.keys[keyID]
+	if !ok {
+		return store.ErrNotFound
+	}
+
+	key.Status = model.KeyStatusDeprecated
+	key.ExpiresAt = &expiresAt
+	return nil
+}
+
+func (m *Store) RevokeKey(ctx context.Context, keyID string) error {
+	if m.RevokeKeyErr != nil {
+		return m.RevokeKeyErr
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	key, ok := m.keys[keyID]
+	if !ok {
+		return store.ErrNotFound
+	}
+
+	key.Status = model.KeyStatusRevoked
+	return nil
+}
+
+func (m *Store) DeleteKey(ctx context.Context, keyID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	delete(m.keys, keyID)
+	return nil
 }

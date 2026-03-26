@@ -29,6 +29,7 @@ type Store interface {
 	ClientStore
 	TokenStore
 	AuditLogStore
+	KeyStore
 	Close() error
 	Ping(ctx context.Context) error
 }
@@ -86,6 +87,17 @@ type TokenStore interface {
 type AuditLogStore interface {
 	StoreAuditLog(ctx context.Context, log *model.AuditLog) error
 	ListAuditLogs(ctx context.Context, userID, eventType string, offset, limit int) ([]*model.AuditLog, int, error)
+}
+
+type KeyStore interface {
+	StoreKey(ctx context.Context, key *model.KeyVersion) error
+	GetActiveKey(ctx context.Context) (*model.KeyVersion, error)
+	GetKeyByID(ctx context.Context, keyID string) (*model.KeyVersion, error)
+	ListActiveKeys(ctx context.Context) ([]*model.KeyVersion, error)
+	ListAllKeys(ctx context.Context) ([]*model.KeyVersion, error)
+	DeprecateKey(ctx context.Context, keyID string, expiresAt time.Time) error
+	RevokeKey(ctx context.Context, keyID string) error
+	DeleteKey(ctx context.Context, keyID string) error
 }
 
 // ============================================================================

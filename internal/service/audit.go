@@ -170,8 +170,125 @@ func (s *AuditService) LogAuthCodeCreated(ctx context.Context, userID, clientID,
 func generateAuditID() string {
 	randomStr, err := common.GenerateRandomString(8)
 	if err != nil {
-		// 如果生成随机字符串失败，使用时间戳作为fallback
 		return time.Now().Format("20060102150405") + "-fallback"
 	}
 	return time.Now().Format("20060102150405") + "-" + randomStr
+}
+
+func (s *AuditService) LogUserLogout(ctx context.Context, userID, ipAddress string) {
+	s.Log(ctx, &model.AuditLog{
+		EventType: string(model.EventUserLogout),
+		UserID:    userID,
+		IPAddress: ipAddress,
+		Success:   true,
+	})
+}
+
+func (s *AuditService) LogTokenRefresh(ctx context.Context, userID, clientID, ipAddress string) {
+	s.Log(ctx, &model.AuditLog{
+		EventType: string(model.EventTokenRefresh),
+		UserID:    userID,
+		ClientID:  clientID,
+		IPAddress: ipAddress,
+		Success:   true,
+	})
+}
+
+func (s *AuditService) LogTokenRevoke(ctx context.Context, userID, ipAddress string) {
+	s.Log(ctx, &model.AuditLog{
+		EventType: string(model.EventTokenRevoke),
+		UserID:    userID,
+		IPAddress: ipAddress,
+		Success:   true,
+	})
+}
+
+func (s *AuditService) LogLogoutAll(ctx context.Context, userID, ipAddress string) {
+	s.Log(ctx, &model.AuditLog{
+		EventType: string(model.EventLogoutAll),
+		UserID:    userID,
+		IPAddress: ipAddress,
+		Success:   true,
+	})
+}
+
+func (s *AuditService) LogPasswordChanged(ctx context.Context, userID, ipAddress string, success bool) {
+	s.Log(ctx, &model.AuditLog{
+		EventType: string(model.EventPasswordChanged),
+		UserID:    userID,
+		IPAddress: ipAddress,
+		Success:   success,
+	})
+}
+
+func (s *AuditService) LogPasswordReset(ctx context.Context, userID, ipAddress string) {
+	s.Log(ctx, &model.AuditLog{
+		EventType: string(model.EventPasswordReset),
+		UserID:    userID,
+		IPAddress: ipAddress,
+		Success:   true,
+	})
+}
+
+func (s *AuditService) LogAccountLocked(ctx context.Context, userID, ipAddress string) {
+	s.Log(ctx, &model.AuditLog{
+		EventType: string(model.EventAccountLocked),
+		UserID:    userID,
+		IPAddress: ipAddress,
+		Success:   true,
+	})
+}
+
+func (s *AuditService) LogAccountUnlocked(ctx context.Context, userID, ipAddress string) {
+	s.Log(ctx, &model.AuditLog{
+		EventType: string(model.EventAccountUnlocked),
+		UserID:    userID,
+		IPAddress: ipAddress,
+		Success:   true,
+	})
+}
+
+func (s *AuditService) LogMFASetup(ctx context.Context, userID, ipAddress string) {
+	s.Log(ctx, &model.AuditLog{
+		EventType: string(model.EventMFASetup),
+		UserID:    userID,
+		IPAddress: ipAddress,
+		Success:   true,
+	})
+}
+
+func (s *AuditService) LogMFAEnabled(ctx context.Context, userID, ipAddress string) {
+	s.Log(ctx, &model.AuditLog{
+		EventType: string(model.EventMFAEnabled),
+		UserID:    userID,
+		IPAddress: ipAddress,
+		Success:   true,
+	})
+}
+
+func (s *AuditService) LogMFADisabled(ctx context.Context, userID, ipAddress string) {
+	s.Log(ctx, &model.AuditLog{
+		EventType: string(model.EventMFADisabled),
+		UserID:    userID,
+		IPAddress: ipAddress,
+		Success:   true,
+	})
+}
+
+func (s *AuditService) LogKeyRotated(ctx context.Context, keyID string) {
+	details, _ := json.Marshal(map[string]interface{}{"key_id": keyID})
+	s.Log(ctx, &model.AuditLog{
+		EventType: string(model.EventKeyRotated),
+		Details:   string(details),
+		Success:   true,
+	})
+}
+
+func (s *AuditService) LogKeyRevoked(ctx context.Context, keyID string) {
+	details, _ := json.Marshal(map[string]interface{}{"key_id": keyID})
+	s.Log(ctx, &model.AuditLog{
+		EventType: string(model.EventKeyRevoked),
+		Details:   string(details),
+		Success:   true,
+	})
 }

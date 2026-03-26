@@ -27,25 +27,33 @@ type AuditLog struct {
 type AuditEventType string
 
 const (
-	// 用户相关事件
 	EventUserRegister    AuditEventType = "user.register"     // 用户注册
 	EventUserLogin       AuditEventType = "user.login"        // 用户登录
 	EventUserLoginFailed AuditEventType = "user.login_failed" // 登录失败
 	EventUserLogout      AuditEventType = "user.logout"       // 用户登出
 	EventUserLocked      AuditEventType = "user.locked"       // 账户锁定
 	EventUserUnlocked    AuditEventType = "user.unlocked"     // 账户解锁
+	EventLogoutAll       AuditEventType = "user.logout_all"   // 登出所有设备
 
-	// Token相关事件
 	EventTokenIssued  AuditEventType = "token.issued"  // Token签发
 	EventTokenRefresh AuditEventType = "token.refresh" // Token刷新
 	EventTokenRevoke  AuditEventType = "token.revoke"  // Token撤销
 
-	// OAuth相关事件
 	EventAuthCodeCreated AuditEventType = "oauth.code_created" // 授权码创建
 	EventAuthCodeUsed    AuditEventType = "oauth.code_used"    // 授权码使用
 	EventAuthCodeInvalid AuditEventType = "oauth.code_invalid" // 授权码无效
 
-	// 安全相关事件
 	EventRateLimitExceeded  AuditEventType = "security.rate_limit" // 限流触发
 	EventSuspiciousActivity AuditEventType = "security.suspicious" // 可疑活动
+	EventPasswordChanged    AuditEventType = "security.password_changed" // 密码修改
+	EventPasswordReset      AuditEventType = "security.password_reset"   // 密码重置
+	EventAccountLocked      AuditEventType = "security.account_locked"   // 账户锁定
+	EventAccountUnlocked    AuditEventType = "security.account_unlocked" // 账户解锁
+
+	EventMFASetup  AuditEventType = "mfa.setup"  // MFA设置
+	EventMFAEnabled  AuditEventType = "mfa.enabled"  // MFA启用
+	EventMFADisabled AuditEventType = "mfa.disabled" // MFA禁用
+
+	EventKeyRotated AuditEventType = "key.rotated" // 密钥轮换
+	EventKeyRevoked AuditEventType = "key.revoked" // 密钥撤销
 )

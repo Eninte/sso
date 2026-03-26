@@ -3,41 +3,41 @@
 package crypto
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/pem"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 
 	apperrors "github.com/your-org/sso/internal/errors"
+	"github.com/your-org/sso/internal/model"
+	"github.com/your-org/sso/internal/store"
 )
-
-// ============================================================================
-// JWT相关错误
-// ============================================================================
 
 var (
 	ErrInvalidToken = apperrors.ErrInvalidToken
 	ErrTokenExpired = apperrors.ErrTokenExpired
+	ErrNoActiveKey  = errors.New("no active key available")
 )
 
-// ============================================================================
-// JWTService JWT服务
-// ============================================================================
-
-// JWTService JWT服务
-// 负责JWT Token的签发和验证
 type JWTService struct {
-	privateKey      *rsa.PrivateKey // RSA私钥，用于签名
-	publicKey       *rsa.PublicKey  // RSA公钥，用于验证
-	issuer          string          // 签发者标识
-	accessTokenTTL  time.Duration   // Access Token有效期
-	refreshTokenTTL time.Duration   // Refresh Token有效期
+	privateKey      *rsa.PrivateKey
+	publicKey       *rsa.PublicKey
+	keys            map[string]*rsa.PrivateKey
+	publicKeys      map[string]*rsa.PublicKey
+	activeKeyID     string
+	keyStore        store.KeyStore
+	issuer          string
+	accessTokenTTL  time.Duration
+	refreshTokenTTL time.Duration
 }
 
-// NewJWTService 创建JWT服务
 func NewJWTService(
 	privateKey *rsa.PrivateKey,
 	publicKey *rsa.PublicKey,
@@ -48,78 +48,169 @@ func NewJWTService(
 	return &JWTService{
 		privateKey:      privateKey,
 		publicKey:       publicKey,
+		keys:            make(map[string]*rsa.PrivateKey),
+		publicKeys:      make(map[string]*rsa.PublicKey),
 		issuer:          issuer,
 		accessTokenTTL:  accessTokenTTL,
 		refreshTokenTTL: refreshTokenTTL,
 	}
 }
 
-// ============================================================================
-// Token声明结构
-// ============================================================================
-
-// AccessTokenClaims Access Token声明
-// 包含用户身份信息和权限范围
-type AccessTokenClaims struct {
-	jwt.RegisteredClaims
-	Email  string   `json:"email"` // 用户邮箱
-	Scopes []string `json:"scope"` // 权限范围
+func NewJWTServiceWithKeyStore(
+	keyStore store.KeyStore,
+	issuer string,
+	accessTokenTTL time.Duration,
+	refreshTokenTTL time.Duration,
+) *JWTService {
+	return &JWTService{
+		keys:            make(map[string]*rsa.PrivateKey),
+		publicKeys:      make(map[string]*rsa.PublicKey),
+		keyStore:        keyStore,
+		issuer:          issuer,
+		accessTokenTTL:  accessTokenTTL,
+		refreshTokenTTL: refreshTokenTTL,
+	}
 }
 
-// ============================================================================
-// Token生成方法
-// ============================================================================
+func (s *JWTService) SetActiveKey(keyID string, privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey) {
+	s.keys[keyID] = privateKey
+	s.publicKeys[keyID] = publicKey
+	s.activeKeyID = keyID
+	s.privateKey = privateKey
+	s.publicKey = publicKey
+}
 
-// GenerateAccessToken 生成Access Token
-// 使用RS256算法签名，包含用户身份信息
+func (s *JWTService) AddVerificationKey(keyID string, publicKey *rsa.PublicKey) {
+	s.publicKeys[keyID] = publicKey
+}
+
+func (s *JWTService) RemoveKey(keyID string) {
+	delete(s.keys, keyID)
+	delete(s.publicKeys, keyID)
+	if s.activeKeyID == keyID {
+		s.activeKeyID = ""
+	}
+}
+
+func (s *JWTService) GetActiveKeyID() string {
+	return s.activeKeyID
+}
+
+func (s *JWTService) LoadKeysFromStore(ctx context.Context) error {
+	if s.keyStore == nil {
+		return nil
+	}
+
+	keys, err := s.keyStore.ListActiveKeys(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to load keys from store: %w", err)
+	}
+
+	for _, keyVersion := range keys {
+		if !keyVersion.CanVerify() {
+			continue
+		}
+
+		pubKey, err := ParsePublicKey(keyVersion.PublicKey)
+		if err != nil {
+			continue
+		}
+
+		s.publicKeys[keyVersion.ID] = pubKey
+
+		if keyVersion.IsActive() && len(keyVersion.PrivateKey) > 0 {
+			privKey, err := ParsePrivateKey(keyVersion.PrivateKey)
+			if err == nil {
+				s.keys[keyVersion.ID] = privKey
+				s.activeKeyID = keyVersion.ID
+				s.privateKey = privKey
+				s.publicKey = pubKey
+			}
+		}
+	}
+
+	return nil
+}
+
+type AccessTokenClaims struct {
+	jwt.RegisteredClaims
+	KeyID  string   `json:"kid,omitempty"`
+	Email  string   `json:"email"`
+	Scopes []string `json:"scope"`
+}
+
 func (s *JWTService) GenerateAccessToken(userID, email string, scopes []string) (string, error) {
+	return s.GenerateAccessTokenWithKeyID(userID, email, scopes, s.activeKeyID)
+}
+
+func (s *JWTService) GenerateAccessTokenWithKeyID(userID, email string, scopes []string, keyID string) (string, error) {
+	var privateKey *rsa.PrivateKey
+	if keyID != "" {
+		var ok bool
+		privateKey, ok = s.keys[keyID]
+		if !ok {
+			privateKey = s.privateKey
+			keyID = s.activeKeyID
+		}
+	} else {
+		privateKey = s.privateKey
+		keyID = s.activeKeyID
+	}
+
+	if privateKey == nil {
+		return "", ErrNoActiveKey
+	}
+
 	now := time.Now()
 	claims := AccessTokenClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    s.issuer,                                      // 签发者
-			Subject:   userID,                                        // 用户ID
-			ExpiresAt: jwt.NewNumericDate(now.Add(s.accessTokenTTL)), // 过期时间
-			IssuedAt:  jwt.NewNumericDate(now),                       // 签发时间
-			NotBefore: jwt.NewNumericDate(now),                       // 生效时间
+			Issuer:    s.issuer,
+			Subject:   userID,
+			ExpiresAt: jwt.NewNumericDate(now.Add(s.accessTokenTTL)),
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
 		},
+		KeyID:  keyID,
 		Email:  email,
 		Scopes: scopes,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-	return token.SignedString(s.privateKey)
+	if keyID != "" {
+		token.Header["kid"] = keyID
+	}
+	return token.SignedString(privateKey)
 }
 
-// GenerateRefreshToken 生成Refresh Token
-// 使用随机字符串，不包含用户信息
-// Refresh Token仅用于获取新的Access Token
 func (s *JWTService) GenerateRefreshToken() (string, error) {
-	// 生成32字节的随机数据
 	bytes := make([]byte, 32)
 	if _, err := rand.Read(bytes); err != nil {
 		return "", err
 	}
-	// 使用URL安全的Base64编码
 	return base64.URLEncoding.EncodeToString(bytes), nil
 }
 
-// ============================================================================
-// Token验证方法
-// ============================================================================
-
-// ValidateAccessToken 验证Access Token
-// 验证签名、过期时间和格式
 func (s *JWTService) ValidateAccessToken(tokenString string) (*AccessTokenClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &AccessTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
-		// 严格验证签名算法必须是RS256
 		if token.Method.Alg() != jwt.SigningMethodRS256.Alg() {
 			return nil, ErrInvalidToken
 		}
-		return s.publicKey, nil
+
+		kid, _ := token.Header["kid"].(string)
+		if kid != "" {
+			if pubKey, ok := s.publicKeys[kid]; ok {
+				return pubKey, nil
+			}
+		}
+
+		if s.publicKey != nil {
+			return s.publicKey, nil
+		}
+
+		return nil, ErrInvalidToken
 	})
 
 	if err != nil {
-		// 检查是否为过期错误
 		if errors.Is(err, jwt.ErrTokenExpired) {
 			return nil, ErrTokenExpired
 		}
@@ -134,16 +225,89 @@ func (s *JWTService) ValidateAccessToken(tokenString string) (*AccessTokenClaims
 	return claims, nil
 }
 
-// ============================================================================
-// 公钥方法
-// ============================================================================
-
-// GetPublicKey 获取公钥 (用于JWKS端点)
 func (s *JWTService) GetPublicKey() *rsa.PublicKey {
 	return s.publicKey
 }
 
-// GetAccessTokenTTL 获取Access Token有效期
+func (s *JWTService) GetPublicKeys() map[string]*rsa.PublicKey {
+	return s.publicKeys
+}
+
 func (s *JWTService) GetAccessTokenTTL() time.Duration {
 	return s.accessTokenTTL
+}
+
+func (s *JWTService) GetJWKS() map[string]interface{} {
+	keys := make([]map[string]interface{}, 0, len(s.publicKeys))
+	for kid, pubKey := range s.publicKeys {
+		keys = append(keys, map[string]interface{}{
+			"kid": kid,
+			"kty": "RSA",
+			"alg": "RS256",
+			"use": "sig",
+			"n":   base64.RawURLEncoding.EncodeToString(pubKey.N.Bytes()),
+			"e":   base64.RawURLEncoding.EncodeToString([]byte{1, 0, 1}),
+		})
+	}
+	return map[string]interface{}{
+		"keys": keys,
+	}
+}
+
+func GenerateKeyID() (string, error) {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(bytes), nil
+}
+
+func GenerateRSAKeyPair(bits int) (*rsa.PrivateKey, error) {
+	return rsa.GenerateKey(rand.Reader, bits)
+}
+
+func EncodePrivateKeyToPEM(key *rsa.PrivateKey) []byte {
+	return EncodePrivateKeyToPKCS8PEM(key)
+}
+
+func EncodePrivateKeyToPKCS1PEM(key *rsa.PrivateKey) []byte {
+	return pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	})
+}
+
+func EncodePrivateKeyToPKCS8PEM(key *rsa.PrivateKey) []byte {
+	der, _ := x509.MarshalPKCS8PrivateKey(key)
+	return pem.EncodeToMemory(&pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: der,
+	})
+}
+
+func EncodePublicKeyToPEM(key *rsa.PublicKey) []byte {
+	return EncodePublicKeyToPKIXPEM(key)
+}
+
+func EncodePublicKeyToPKIXPEM(key *rsa.PublicKey) []byte {
+	der, _ := x509.MarshalPKIXPublicKey(key)
+	return pem.EncodeToMemory(&pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: der,
+	})
+}
+
+func CreateKeyVersion(privateKey *rsa.PrivateKey) (*model.KeyVersion, error) {
+	keyID, err := GenerateKeyID()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate key ID: %w", err)
+	}
+
+	return &model.KeyVersion{
+		ID:         keyID,
+		PublicKey:  EncodePublicKeyToPEM(&privateKey.PublicKey),
+		PrivateKey: EncodePrivateKeyToPEM(privateKey),
+		Status:     model.KeyStatusActive,
+		CreatedAt:  time.Now(),
+	}, nil
 }

@@ -49,12 +49,37 @@ func (h *RegisterHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeEmailInvalid))
 			return
 		}
-		if errors.Is(err, validator.ErrPasswordTooShort) || errors.Is(err, validator.ErrPasswordTooLong) || errors.Is(err, validator.ErrPasswordRequired) {
-			writeError(w, http.StatusBadRequest, err.Error())
+		// 密码验证错误 - 使用本地化消息
+		if errors.Is(err, validator.ErrPasswordTooShort) {
+			writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodePasswordTooShort))
+			return
+		}
+		if errors.Is(err, validator.ErrPasswordTooLong) {
+			writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodePasswordTooLong))
+			return
+		}
+		if errors.Is(err, validator.ErrPasswordRequired) {
+			writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodePasswordRequired))
+			return
+		}
+		if errors.Is(err, validator.ErrPasswordNoUppercase) {
+			writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodePasswordNoUppercase))
+			return
+		}
+		if errors.Is(err, validator.ErrPasswordNoLowercase) {
+			writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodePasswordNoLowercase))
+			return
+		}
+		if errors.Is(err, validator.ErrPasswordNoDigit) {
+			writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodePasswordNoDigit))
+			return
+		}
+		if errors.Is(err, validator.ErrPasswordNoSpecial) {
+			writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodePasswordNoSpecial))
 			return
 		}
 		if errors.Is(err, service.ErrInvalidCredentials) {
-			writeError(w, http.StatusBadRequest, err.Error())
+			writeError(w, http.StatusUnauthorized, getMessage(r, apperrors.ErrCodeInvalidCredentials))
 			return
 		}
 		// 未知错误

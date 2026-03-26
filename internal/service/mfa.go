@@ -35,18 +35,29 @@ var (
 // ============================================================================
 
 type MFAService struct {
-	store store.Store
+	store    store.Store
+	auditSvc *AuditService
 }
 
 func NewMFAService(store store.Store) *MFAService {
-	return &MFAService{store: store}
+	return &MFAService{
+		store:    store,
+		auditSvc: NewAuditService(store),
+	}
+}
+
+func NewMFAServiceWithAudit(store store.Store, auditSvc *AuditService) *MFAService {
+	return &MFAService{
+		store:    store,
+		auditSvc: auditSvc,
+	}
 }
 
 // ============================================================================
 // MFA操作
 // ============================================================================
 
-func (s *MFAService) SetupMFA(ctx context.Context, userID string) (*model.MFASetupResponse, error) {
+func (s *MFAService) SetupMFAWithAudit(ctx context.Context, userID string, ipAddress string) (*model.MFASetupResponse, error) {
 	user, err := s.store.GetByID(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -70,13 +81,21 @@ func (s *MFAService) SetupMFA(ctx context.Context, userID string) (*model.MFASet
 
 	qrCodeURL := generateTOTPURL(secret, user.Email)
 
+	if s.auditSvc != nil {
+		s.auditSvc.LogMFASetup(ctx, userID, ipAddress)
+	}
+
 	return &model.MFASetupResponse{
 		Secret:    secret,
 		QRCodeURL: qrCodeURL,
 	}, nil
 }
 
-func (s *MFAService) VerifyAndEnableMFA(ctx context.Context, userID, code string) error {
+func (s *MFAService) SetupMFA(ctx context.Context, userID string) (*model.MFASetupResponse, error) {
+	return s.SetupMFAWithAudit(ctx, userID, "")
+}
+
+func (s *MFAService) VerifyAndEnableMFAWithAudit(ctx context.Context, userID, code string, ipAddress string) error {
 	user, err := s.store.GetByID(ctx, userID)
 	if err != nil {
 		return err
@@ -97,10 +116,22 @@ func (s *MFAService) VerifyAndEnableMFA(ctx context.Context, userID, code string
 	user.MFAEnabled = true
 	user.UpdatedAt = time.Now()
 
-	return s.store.Update(ctx, user)
+	if err := s.store.Update(ctx, user); err != nil {
+		return err
+	}
+
+	if s.auditSvc != nil {
+		s.auditSvc.LogMFAEnabled(ctx, userID, ipAddress)
+	}
+
+	return nil
 }
 
-func (s *MFAService) DisableMFA(ctx context.Context, userID, code string) error {
+func (s *MFAService) VerifyAndEnableMFA(ctx context.Context, userID, code string) error {
+	return s.VerifyAndEnableMFAWithAudit(ctx, userID, code, "")
+}
+
+func (s *MFAService) DisableMFAWithAudit(ctx context.Context, userID, code string, ipAddress string) error {
 	user, err := s.store.GetByID(ctx, userID)
 	if err != nil {
 		return err
@@ -118,7 +149,19 @@ func (s *MFAService) DisableMFA(ctx context.Context, userID, code string) error 
 	user.MFASecret = ""
 	user.UpdatedAt = time.Now()
 
-	return s.store.Update(ctx, user)
+	if err := s.store.Update(ctx, user); err != nil {
+		return err
+	}
+
+	if s.auditSvc != nil {
+		s.auditSvc.LogMFADisabled(ctx, userID, ipAddress)
+	}
+
+	return nil
+}
+
+func (s *MFAService) DisableMFA(ctx context.Context, userID, code string) error {
+	return s.DisableMFAWithAudit(ctx, userID, code, "")
 }
 
 func (s *MFAService) GetMFAStatus(ctx context.Context, userID string) (*model.MFAStatusResponse, error) {

@@ -55,6 +55,11 @@ type Config struct {
 	RefreshTokenTTL   time.Duration // Refresh Token有效期
 	JWTIssuer         string        // Token签发者标识
 
+	// 密钥轮换配置
+	KeyRotationEnabled  bool          // 是否启用密钥轮换
+	KeyRotationInterval time.Duration // 密钥轮换周期
+	KeyTransitionPeriod time.Duration // 密钥过渡期时长
+
 	// 安全配置
 	BcryptCost        int           // bcrypt成本因子
 	RateLimitRequests int           // 限流请求数
@@ -118,6 +123,11 @@ func Load() (*Config, error) {
 		AccessTokenTTL:    getEnvDuration("JWT_ACCESS_TOKEN_TTL", 15*time.Minute),
 		RefreshTokenTTL:   getEnvDuration("JWT_REFRESH_TOKEN_TTL", 168*time.Hour),
 		JWTIssuer:         getEnv("JWT_ISSUER", "sso"),
+
+		// 密钥轮换配置
+		KeyRotationEnabled:  getEnvBool("KEY_ROTATION_ENABLED", false),
+		KeyRotationInterval: getEnvDuration("KEY_ROTATION_INTERVAL", 2160*time.Hour), // 90天
+		KeyTransitionPeriod: getEnvDuration("KEY_TRANSITION_PERIOD", 24*time.Hour),   // 24小时
 
 		// 安全配置
 		// BcryptCost: bcrypt成本因子，影响密码哈希性能
@@ -279,6 +289,13 @@ func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
 		if duration, err := time.ParseDuration(value); err == nil {
 			return duration
 		}
+	}
+	return defaultValue
+}
+
+func getEnvBool(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		return strings.ToLower(value) == "true" || value == "1"
 	}
 	return defaultValue
 }

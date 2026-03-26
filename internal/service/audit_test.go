@@ -279,3 +279,98 @@ func TestAuditService_ListAuditLogs(t *testing.T) {
 		assert.NotEqual(t, logs1[0].ID, logs2[0].ID)
 	})
 }
+
+func TestAuditService_NewMethods(t *testing.T) {
+	auditSvc, store := createTestAuditService()
+	ctx := context.Background()
+
+	t.Run("LogUserLogout", func(t *testing.T) {
+		store.Reset()
+		auditSvc.LogUserLogout(ctx, "user-1", "192.168.1.1")
+		time.Sleep(100 * time.Millisecond)
+		logs, _, err := store.ListAuditLogs(ctx, "user-1", string(model.EventUserLogout), 0, 10)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(logs), 1)
+	})
+
+	t.Run("LogTokenRefresh", func(t *testing.T) {
+		store.Reset()
+		auditSvc.LogTokenRefresh(ctx, "user-1", "client-1", "192.168.1.1")
+		time.Sleep(100 * time.Millisecond)
+		logs, _, err := store.ListAuditLogs(ctx, "user-1", string(model.EventTokenRefresh), 0, 10)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(logs), 1)
+	})
+
+	t.Run("LogPasswordChanged", func(t *testing.T) {
+		store.Reset()
+		auditSvc.LogPasswordChanged(ctx, "user-1", "192.168.1.1", true)
+		time.Sleep(100 * time.Millisecond)
+		logs, _, err := store.ListAuditLogs(ctx, "user-1", string(model.EventPasswordChanged), 0, 10)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(logs), 1)
+	})
+
+	t.Run("LogPasswordReset", func(t *testing.T) {
+		store.Reset()
+		auditSvc.LogPasswordReset(ctx, "user-1", "192.168.1.1")
+		time.Sleep(100 * time.Millisecond)
+		logs, _, err := store.ListAuditLogs(ctx, "user-1", string(model.EventPasswordReset), 0, 10)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(logs), 1)
+	})
+
+	t.Run("LogAccountLocked", func(t *testing.T) {
+		store.Reset()
+		auditSvc.LogAccountLocked(ctx, "user-1", "192.168.1.1")
+		time.Sleep(100 * time.Millisecond)
+		logs, _, err := store.ListAuditLogs(ctx, "user-1", string(model.EventAccountLocked), 0, 10)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(logs), 1)
+	})
+
+	t.Run("LogMFAEnabled", func(t *testing.T) {
+		store.Reset()
+		auditSvc.LogMFAEnabled(ctx, "user-1", "192.168.1.1")
+		time.Sleep(100 * time.Millisecond)
+		logs, _, err := store.ListAuditLogs(ctx, "user-1", string(model.EventMFAEnabled), 0, 10)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(logs), 1)
+	})
+
+	t.Run("LogMFADisabled", func(t *testing.T) {
+		store.Reset()
+		auditSvc.LogMFADisabled(ctx, "user-1", "192.168.1.1")
+		time.Sleep(100 * time.Millisecond)
+		logs, _, err := store.ListAuditLogs(ctx, "user-1", string(model.EventMFADisabled), 0, 10)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(logs), 1)
+	})
+
+	t.Run("LogKeyRotated", func(t *testing.T) {
+		store.Reset()
+		auditSvc.LogKeyRotated(ctx, "key-123")
+		time.Sleep(100 * time.Millisecond)
+		logs, _, err := store.ListAuditLogs(ctx, "", string(model.EventKeyRotated), 0, 10)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(logs), 1)
+	})
+
+	t.Run("LogKeyRevoked", func(t *testing.T) {
+		store.Reset()
+		auditSvc.LogKeyRevoked(ctx, "key-123")
+		time.Sleep(100 * time.Millisecond)
+		logs, _, err := store.ListAuditLogs(ctx, "", string(model.EventKeyRevoked), 0, 10)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(logs), 1)
+	})
+
+	t.Run("LogLogoutAll", func(t *testing.T) {
+		store.Reset()
+		auditSvc.LogLogoutAll(ctx, "user-1", "192.168.1.1")
+		time.Sleep(100 * time.Millisecond)
+		logs, _, err := store.ListAuditLogs(ctx, "user-1", string(model.EventLogoutAll), 0, 10)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(logs), 1)
+	})
+}

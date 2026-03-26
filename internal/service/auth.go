@@ -44,9 +44,9 @@ type AuthService struct {
 	maxAttempts     int                     // 最大登录尝试次数
 	lockoutDuration time.Duration           // 锁定时长
 	metricsSvc      *metrics.Service        // 指标服务（可选）
+	auditSvc        *AuditService           // 审计服务
 }
 
-// NewAuthService 创建认证服务
 func NewAuthService(
 	store store.Store,
 	passwordSvc *crypto.PasswordService,
@@ -67,6 +67,32 @@ func NewAuthService(
 		maxAttempts:     maxAttempts,
 		lockoutDuration: lockoutDuration,
 		metricsSvc:      m,
+		auditSvc:        NewAuditService(store),
+	}
+}
+
+func NewAuthServiceWithAudit(
+	store store.Store,
+	passwordSvc *crypto.PasswordService,
+	jwtSvc *crypto.JWTService,
+	maxAttempts int,
+	lockoutDuration time.Duration,
+	auditSvc *AuditService,
+	metricsSvc ...*metrics.Service,
+) *AuthService {
+	var m *metrics.Service
+	if len(metricsSvc) > 0 {
+		m = metricsSvc[0]
+	}
+	return &AuthService{
+		store:           store,
+		passwordSvc:     passwordSvc,
+		jwtSvc:          jwtSvc,
+		tokenSvc:        NewTokenService(jwtSvc, store),
+		maxAttempts:     maxAttempts,
+		lockoutDuration: lockoutDuration,
+		metricsSvc:      m,
+		auditSvc:        auditSvc,
 	}
 }
 
@@ -138,13 +164,16 @@ func (s *AuthService) Register(ctx context.Context, req *model.RegisterRequest) 
 // 3. 检查账户状态
 // 4. 验证密码
 // 5. 生成Token
-func (s *AuthService) Login(ctx context.Context, req *model.LoginRequest) (*model.LoginResponse, error) {
-	// 1. 验证输入参数
+type AuditContext struct {
+	IPAddress string
+	UserAgent string
+}
+
+func (s *AuthService) LoginWithAudit(ctx context.Context, req *model.LoginRequest, auditCtx *AuditContext) (*model.LoginResponse, error) {
 	if err := validator.ValidateLoginRequest(req.Email, req.Password); err != nil {
 		return nil, err
 	}
 
-	// 2. 获取用户
 	user, err := s.store.GetByEmail(ctx, req.Email)
 	if err != nil {
 		if apperrors.Is(err, store.ErrNotFound) {
@@ -153,52 +182,56 @@ func (s *AuthService) Login(ctx context.Context, req *model.LoginRequest) (*mode
 		return nil, err
 	}
 
-	// 3. 检查账户状态
 	if user.Status == model.UserStatusDisabled {
 		return nil, ErrAccountDisabled
 	}
 	if user.Status == model.UserStatusLocked {
-		// 检查锁定是否已过期
 		if user.LockedUntil != nil && user.LockedUntil.After(time.Now()) {
 			return nil, ErrAccountLocked
 		}
-		// 锁定已过期，解锁账户
 		user.Status = model.UserStatusActive
 		user.LoginAttempts = 0
 	}
 
-	// 4. 验证密码
 	if err := s.passwordSvc.VerifyPassword(user.PasswordHash, req.Password); err != nil {
-		// 增加登录失败次数
 		user.LoginAttempts++
 		var lockedUntil *time.Time
 		if user.LoginAttempts >= s.maxAttempts {
 			t := time.Now().Add(s.lockoutDuration)
 			lockedUntil = &t
 			user.Status = model.UserStatusLocked
-			// 记录账户锁定指标
 			s.incrementMetric("auth_account_locked_total")
+			if s.auditSvc != nil && auditCtx != nil {
+				s.auditSvc.LogAccountLocked(ctx, user.ID, auditCtx.IPAddress)
+			}
 		}
 		if updateErr := s.store.UpdateLoginAttempts(ctx, user.ID, user.LoginAttempts, lockedUntil); updateErr != nil {
 			slog.Warn("更新登录尝试次数失败", "error", updateErr, "user_id", user.ID)
 		}
-		// 记录登录失败指标
 		s.incrementMetric("auth_login_failed_total")
+		if s.auditSvc != nil && auditCtx != nil {
+			s.auditSvc.LogUserLogin(ctx, user.ID, user.Email, auditCtx.IPAddress, auditCtx.UserAgent, false)
+		}
 		return nil, ErrInvalidCredentials
 	}
 
-	// 5. 登录成功，重置失败次数
 	user.LoginAttempts = 0
 	user.UpdatedAt = time.Now()
 	if err := s.store.Update(ctx, user); err != nil {
 		slog.Warn("更新用户登录状态失败", "error", err, "user_id", user.ID)
 	}
 
-	// 记录登录成功指标
 	s.incrementMetric("auth_login_total")
 
-	// 6. 生成Token
+	if s.auditSvc != nil && auditCtx != nil {
+		s.auditSvc.LogUserLogin(ctx, user.ID, user.Email, auditCtx.IPAddress, auditCtx.UserAgent, true)
+	}
+
 	return s.generateTokenPair(ctx, user.ID, user.Email, []string{"openid", "profile", "email"}, "")
+}
+
+func (s *AuthService) Login(ctx context.Context, req *model.LoginRequest) (*model.LoginResponse, error) {
+	return s.LoginWithAudit(ctx, req, nil)
 }
 
 // ============================================================================
@@ -229,7 +262,7 @@ func (s *AuthService) revokeTokenWithRetry(ctx context.Context, accessToken stri
 }
 
 // RefreshToken 刷新Token
-func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (*model.LoginResponse, error) {
+func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken string, auditCtx *AuditContext) (*model.LoginResponse, error) {
 	tokenRecord, err := s.store.GetTokenByRefreshToken(ctx, refreshToken)
 	if err != nil {
 		return nil, ErrInvalidToken
@@ -244,34 +277,80 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (*m
 		return nil, err
 	}
 
-	// 使用带重试的Token撤销
 	if revokeErr := s.revokeTokenWithRetry(ctx, tokenRecord.AccessToken); revokeErr != nil {
 		slog.Error("撤销旧Token失败，已达到最大重试次数",
 			"error", revokeErr,
 			"user_id", tokenRecord.UserID,
 			"token_id", tokenRecord.ID,
 		)
-		// 记录错误但不阻止新Token生成，因为旧Token可能已经被撤销
-		// 在生产环境中，这里应该触发告警
 	}
 
 	s.incrementMetric("auth_token_refresh_total")
+
+	if s.auditSvc != nil && auditCtx != nil {
+		s.auditSvc.LogTokenRefresh(ctx, user.ID, tokenRecord.ClientID, auditCtx.IPAddress)
+	}
+
 	return s.generateTokenPair(ctx, user.ID, user.Email, tokenRecord.Scopes, tokenRecord.ClientID)
+}
+
+func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (*model.LoginResponse, error) {
+	return s.RefreshTokenWithAudit(ctx, refreshToken, nil)
 }
 
 // ============================================================================
 // 登出功能
 // ============================================================================
 
+// LogoutWithAudit 用户登出（带审计日志）
+func (s *AuthService) LogoutWithAudit(ctx context.Context, accessToken string, auditCtx *AuditContext) error {
+	claims, err := s.jwtSvc.ValidateAccessToken(accessToken)
+	if err == nil && s.auditSvc != nil && auditCtx != nil {
+		s.auditSvc.LogUserLogout(ctx, claims.Subject, auditCtx.IPAddress)
+	}
+	if err := s.revokeTokenWithRetry(ctx, accessToken); err != nil {
+		slog.Error("登出时撤销Token失败",
+			"error", err,
+			"token_prefix", maskToken(accessToken),
+		)
+		return fmt.Errorf("登出失败: %w", err)
+	}
+	s.incrementMetric("auth_token_revoke_total")
+	return nil
+}
+
 // Logout 用户登出
 func (s *AuthService) Logout(ctx context.Context, accessToken string) error {
-	s.incrementMetric("auth_token_revoke_total")
-	return s.store.RevokeToken(ctx, accessToken)
+	return s.LogoutWithAudit(ctx, accessToken, nil)
+}
+
+// LogoutAllWithAudit 登出所有设备（带审计日志）
+func (s *AuthService) LogoutAllWithAudit(ctx context.Context, userID string, auditCtx *AuditContext) error {
+	if err := s.store.RevokeAllUserTokens(ctx, userID); err != nil {
+		slog.Error("撤销所有Token失败",
+			"error", err,
+			"user_id", userID,
+		)
+		return fmt.Errorf("登出所有设备失败: %w", err)
+	}
+	s.incrementMetric("auth_logout_all_total")
+	if s.auditSvc != nil && auditCtx != nil {
+		s.auditSvc.LogLogoutAll(ctx, userID, auditCtx.IPAddress)
+	}
+	return nil
 }
 
 // LogoutAll 登出所有设备
 func (s *AuthService) LogoutAll(ctx context.Context, userID string) error {
-	return s.store.RevokeAllUserTokens(ctx, userID)
+	return s.LogoutAllWithAudit(ctx, userID, nil)
+}
+
+// maskToken 掩盖Token用于日志记录（只显示前8位）
+func maskToken(token string) string {
+	if len(token) <= 8 {
+		return "***"
+	}
+	return token[:8] + "..."
 }
 
 // ============================================================================

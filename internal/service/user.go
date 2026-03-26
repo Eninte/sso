@@ -44,6 +44,7 @@ type UserService struct {
 	passwordSvc *crypto.PasswordService
 	emailSvc    *EmailService
 	baseURL     string
+	auditSvc    *AuditService
 }
 
 func NewUserService(
@@ -57,6 +58,23 @@ func NewUserService(
 		passwordSvc: passwordSvc,
 		emailSvc:    emailSvc,
 		baseURL:     baseURL,
+		auditSvc:    NewAuditService(store),
+	}
+}
+
+func NewUserServiceWithAudit(
+	store store.Store,
+	passwordSvc *crypto.PasswordService,
+	emailSvc *EmailService,
+	baseURL string,
+	auditSvc *AuditService,
+) *UserService {
+	return &UserService{
+		store:       store,
+		passwordSvc: passwordSvc,
+		emailSvc:    emailSvc,
+		baseURL:     baseURL,
+		auditSvc:    auditSvc,
 	}
 }
 
@@ -158,7 +176,7 @@ func (s *UserService) ForgotPassword(ctx context.Context, email string) error {
 	return nil
 }
 
-func (s *UserService) ResetPassword(ctx context.Context, userID, token, newPassword string) error {
+func (s *UserService) ResetPasswordWithAudit(ctx context.Context, userID, token, newPassword string, ipAddress string) error {
 	storedToken, err := s.store.GetResetToken(ctx, userID)
 	if err != nil {
 		if apperrors.Is(err, store.ErrNotFound) {
@@ -197,20 +215,31 @@ func (s *UserService) ResetPassword(ctx context.Context, userID, token, newPassw
 	_ = s.store.DeleteResetToken(ctx, userID)
 	_ = s.store.RevokeAllUserTokens(ctx, userID)
 
+	if s.auditSvc != nil {
+		s.auditSvc.LogPasswordReset(ctx, userID, ipAddress)
+	}
+
 	return nil
+}
+
+func (s *UserService) ResetPassword(ctx context.Context, userID, token, newPassword string) error {
+	return s.ResetPasswordWithAudit(ctx, userID, token, newPassword, "")
 }
 
 // ============================================================================
 // 密码修改
 // ============================================================================
 
-func (s *UserService) ChangePassword(ctx context.Context, userID, oldPassword, newPassword string) error {
+func (s *UserService) ChangePasswordWithAudit(ctx context.Context, userID, oldPassword, newPassword string, ipAddress string) error {
 	user, err := s.store.GetByID(ctx, userID)
 	if err != nil {
 		return err
 	}
 
 	if err := s.passwordSvc.VerifyPassword(user.PasswordHash, oldPassword); err != nil {
+		if s.auditSvc != nil {
+			s.auditSvc.LogPasswordChanged(ctx, userID, ipAddress, false)
+		}
 		return apperrors.ErrInvalidCredentials
 	}
 
@@ -230,5 +259,13 @@ func (s *UserService) ChangePassword(ctx context.Context, userID, oldPassword, n
 		return err
 	}
 
+	if s.auditSvc != nil {
+		s.auditSvc.LogPasswordChanged(ctx, userID, ipAddress, true)
+	}
+
 	return nil
+}
+
+func (s *UserService) ChangePassword(ctx context.Context, userID, oldPassword, newPassword string) error {
+	return s.ChangePasswordWithAudit(ctx, userID, oldPassword, newPassword, "")
 }
