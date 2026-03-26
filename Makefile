@@ -134,3 +134,48 @@ help: ## 显示帮助信息
 	@echo ""
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
+
+# ============================================================================
+# 性能基准测试
+# ============================================================================
+.PHONY: bench
+bench: ## 运行所有基准测试
+	go test -bench=. -benchmem ./...
+
+.PHONY: bench-db
+bench-db: ## 运行数据库基准测试 (需要DATABASE_URL)
+	@test -n "$$DATABASE_URL" || (echo "错误: 请设置DATABASE_URL环境变量" && exit 1)
+	DATABASE_URL=$$DATABASE_URL go test -bench=BenchmarkStore -benchmem -count=3 ./internal/store/postgres/...
+
+.PHONY: bench-cache
+bench-cache: ## 运行缓存基准测试
+	go test -bench=Benchmark.*Cache -benchmem -count=3 ./internal/cache/...
+
+.PHONY: bench-service
+bench-service: ## 运行服务基准测试
+	go test -bench=BenchmarkAuthService -benchmem -count=3 ./internal/service/...
+
+.PHONY: bench-password
+bench-password: ## 运行密码服务基准测试
+	go test -bench=BenchmarkPasswordService -benchmem -count=3 ./internal/service/...
+
+.PHONY: bench-jwt
+bench-jwt: ## 运行JWT服务基准测试
+	go test -bench=BenchmarkJWTService -benchmem -count=3 ./internal/service/...
+
+.PHONY: bench-report
+bench-report: ## 生成基准测试报告
+	@echo "# 性能基准测试报告" > docs/reports/performance-benchmark.md
+	@echo "" >> docs/reports/performance-benchmark.md
+	@echo "生成时间: $$(date)" >> docs/reports/performance-benchmark.md
+	@echo "" >> docs/reports/performance-benchmark.md
+	@echo "## 缓存性能" >> docs/reports/performance-benchmark.md
+	@echo '```' >> docs/reports/performance-benchmark.md
+	go test -bench=Benchmark.*Cache -benchmem ./internal/cache/... 2>&1 | tee -a docs/reports/performance-benchmark.md
+	@echo '```' >> docs/reports/performance-benchmark.md
+	@echo "" >> docs/reports/performance-benchmark.md
+	@echo "## 服务性能" >> docs/reports/performance-benchmark.md
+	@echo '```' >> docs/reports/performance-benchmark.md
+	go test -bench=BenchmarkAuthService -benchmem ./internal/service/... 2>&1 | tee -a docs/reports/performance-benchmark.md
+	@echo '```' >> docs/reports/performance-benchmark.md
+	@echo "报告已生成: docs/reports/performance-benchmark.md"
