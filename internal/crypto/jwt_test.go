@@ -301,3 +301,174 @@ func TestJWTService_ValidateMalformedClaims(t *testing.T) {
 		})
 	}
 }
+
+// ============================================================================
+// 密钥管理测试
+// ============================================================================
+
+func TestJWTService_SetActiveKey(t *testing.T) {
+	svc := createTestJWTService(t)
+
+	// 生成新的密钥对
+	newPrivateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	// 设置新的活跃密钥
+	newKeyID := "new-key-123"
+	svc.SetActiveKey(newKeyID, newPrivateKey, &newPrivateKey.PublicKey)
+
+	// 验证活跃密钥ID已更新
+	assert.Equal(t, newKeyID, svc.GetActiveKeyID())
+}
+
+func TestJWTService_AddVerificationKey(t *testing.T) {
+	svc := createTestJWTService(t)
+
+	// 生成新的公钥
+	newPrivateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	// 添加验证密钥
+	newKeyID := "verify-key-123"
+	svc.AddVerificationKey(newKeyID, &newPrivateKey.PublicKey)
+
+	// 验证公钥已添加
+	publicKeys := svc.GetPublicKeys()
+	assert.Contains(t, publicKeys, newKeyID)
+}
+
+func TestJWTService_RemoveKey(t *testing.T) {
+	svc := createTestJWTService(t)
+
+	// 先设置一个活跃密钥
+	keyID := "test-key-123"
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	svc.SetActiveKey(keyID, privateKey, &privateKey.PublicKey)
+
+	// 删除密钥
+	svc.RemoveKey(keyID)
+
+	// 验证密钥已删除
+	assert.Empty(t, svc.GetActiveKeyID())
+	publicKeys := svc.GetPublicKeys()
+	assert.NotContains(t, publicKeys, keyID)
+}
+
+func TestJWTService_GenerateAccessToken_NoActiveKey(t *testing.T) {
+	// 使用NewJWTService但不设置活跃密钥
+	svc := crypto.NewJWTService(
+		nil, // 没有私钥
+		nil, // 没有公钥
+		"test-issuer",
+		15*time.Minute,
+		7*24*time.Hour,
+	)
+
+	// 尝试生成Token应该失败
+	_, err := svc.GenerateAccessToken("user-123", "test@example.com", []string{"openid"})
+	assert.ErrorIs(t, err, crypto.ErrNoActiveKey)
+}
+
+func TestJWTService_GenerateAccessTokenWithKeyID(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	svc := crypto.NewJWTService(
+		privateKey,
+		&privateKey.PublicKey,
+		"test-issuer",
+		15*time.Minute,
+		7*24*time.Hour,
+	)
+
+	keyID := "custom-key-123"
+	svc.SetActiveKey(keyID, privateKey, &privateKey.PublicKey)
+
+	// 使用指定的keyID生成Token
+	token, err := svc.GenerateAccessTokenWithKeyID("user-123", "test@example.com", []string{"openid"}, keyID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, token)
+
+	// 验证Token可以被验证
+	claims, err := svc.ValidateAccessToken(token)
+	require.NoError(t, err)
+	assert.Equal(t, "user-123", claims.Subject)
+}
+
+func TestJWTService_GetPublicKeys(t *testing.T) {
+	svc := createTestJWTService(t)
+
+	// 添加多个公钥
+	key1, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	key2, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	svc.AddVerificationKey("key1", &key1.PublicKey)
+	svc.AddVerificationKey("key2", &key2.PublicKey)
+
+	publicKeys := svc.GetPublicKeys()
+	assert.Len(t, publicKeys, 2)
+}
+
+func TestJWTService_GetJWKS(t *testing.T) {
+	svc := createTestJWTService(t)
+
+	jwks := svc.GetJWKS()
+	assert.NotNil(t, jwks)
+	assert.Contains(t, jwks, "keys")
+}
+
+// ============================================================================
+// 工具函数测试
+// ============================================================================
+
+func TestGenerateKeyID(t *testing.T) {
+	// 生成多个KeyID，验证唯一性
+	ids := make(map[string]bool)
+	for i := 0; i < 100; i++ {
+		id, err := crypto.GenerateKeyID()
+		require.NoError(t, err)
+		assert.NotEmpty(t, id)
+		assert.False(t, ids[id], "生成了重复的KeyID")
+		ids[id] = true
+	}
+}
+
+func TestGenerateRSAKeyPair(t *testing.T) {
+	key, err := crypto.GenerateRSAKeyPair(2048)
+	require.NoError(t, err)
+	assert.NotNil(t, key)
+	assert.Equal(t, 2048, key.N.BitLen())
+}
+
+func TestEncodePrivateKeyToPEM(t *testing.T) {
+	key, err := crypto.GenerateRSAKeyPair(2048)
+	require.NoError(t, err)
+
+	pemData := crypto.EncodePrivateKeyToPEM(key)
+	assert.NotEmpty(t, pemData)
+	assert.Contains(t, string(pemData), "BEGIN PRIVATE KEY")
+}
+
+func TestEncodePublicKeyToPEM(t *testing.T) {
+	key, err := crypto.GenerateRSAKeyPair(2048)
+	require.NoError(t, err)
+
+	pemData := crypto.EncodePublicKeyToPEM(&key.PublicKey)
+	assert.NotEmpty(t, pemData)
+	assert.Contains(t, string(pemData), "BEGIN PUBLIC KEY")
+}
+
+func TestCreateKeyVersion(t *testing.T) {
+	key, err := crypto.GenerateRSAKeyPair(2048)
+	require.NoError(t, err)
+
+	keyVersion, err := crypto.CreateKeyVersion(key)
+	require.NoError(t, err)
+	assert.NotNil(t, keyVersion)
+	assert.NotEmpty(t, keyVersion.ID)
+	assert.NotEmpty(t, keyVersion.PublicKey)
+	assert.NotEmpty(t, keyVersion.PrivateKey)
+}

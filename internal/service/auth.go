@@ -218,24 +218,26 @@ func (s *AuthService) LoginWithAudit(ctx context.Context, req *model.LoginReques
 		if user.LockedUntil != nil && user.LockedUntil.After(time.Now()) {
 			return nil, ErrAccountLocked
 		}
-		user.Status = model.UserStatusActive
-		user.LoginAttempts = 0
+		// 使用原子操作解锁过期账户，避免竞态条件
+		if unlockErr := s.store.UnlockExpiredAccount(ctx, user.ID); unlockErr != nil {
+			if !apperrors.Is(unlockErr, store.ErrNotFound) {
+				slog.Warn("解锁过期账户失败", "error", unlockErr, "user_id", user.ID)
+			}
+			// 即使解锁失败也继续尝试登录（可能是并发解锁）
+		}
 	}
 
 	if err := s.passwordSvc.VerifyPassword(user.PasswordHash, req.Password); err != nil {
-		user.LoginAttempts++
-		var lockedUntil *time.Time
-		if user.LoginAttempts >= s.maxAttempts {
-			t := time.Now().Add(s.lockoutDuration)
-			lockedUntil = &t
-			user.Status = model.UserStatusLocked
+		// 使用原子操作递增登录尝试次数，避免竞态条件
+		attempts, locked, _, incErr := s.store.IncrementLoginAttempts(ctx, user.ID, s.maxAttempts, s.lockoutDuration)
+		if incErr != nil {
+			slog.Warn("更新登录尝试次数失败", "error", incErr, "user_id", user.ID)
+		} else if locked {
 			s.incrementMetric("auth_account_locked_total")
 			if s.auditSvc != nil && auditCtx != nil {
 				s.auditSvc.LogAccountLocked(ctx, user.ID, auditCtx.IPAddress)
 			}
-		}
-		if updateErr := s.store.UpdateLoginAttempts(ctx, user.ID, user.LoginAttempts, lockedUntil); updateErr != nil {
-			slog.Warn("更新登录尝试次数失败", "error", updateErr, "user_id", user.ID)
+			slog.Warn("账户因多次登录失败被锁定", "user_id", user.ID, "attempts", attempts)
 		}
 		s.incrementMetric("auth_login_failed_total")
 		if s.auditSvc != nil && auditCtx != nil {
@@ -244,10 +246,9 @@ func (s *AuthService) LoginWithAudit(ctx context.Context, req *model.LoginReques
 		return nil, ErrInvalidCredentials
 	}
 
-	user.LoginAttempts = 0
-	user.UpdatedAt = time.Now()
-	if err := s.store.Update(ctx, user); err != nil {
-		slog.Warn("更新用户登录状态失败", "error", err, "user_id", user.ID)
+	// 登录成功，重置登录尝试次数
+	if err := s.store.ResetLoginAttempts(ctx, user.ID); err != nil {
+		slog.Warn("重置登录尝试次数失败", "error", err, "user_id", user.ID)
 	}
 
 	s.incrementMetric("auth_login_total")

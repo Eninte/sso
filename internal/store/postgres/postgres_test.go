@@ -169,6 +169,131 @@ func TestStore_UpdateUser(t *testing.T) {
 	})
 }
 
+func TestStore_IncrementLoginAttempts(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	defer cleanupTestData(t, db)
+	ctx := context.Background()
+
+	t.Run("递增登录尝试次数", func(t *testing.T) {
+		user := newTestUser("increment@example.com")
+		require.NoError(t, store.Create(ctx, user))
+
+		// 递增登录尝试次数
+		attempts, locked, lockedUntil, err := store.IncrementLoginAttempts(ctx, user.ID, 5, 30*time.Minute)
+		require.NoError(t, err)
+		assert.Equal(t, 1, attempts)
+		assert.False(t, locked)
+		assert.Nil(t, lockedUntil)
+	})
+
+	t.Run("达到最大次数触发锁定", func(t *testing.T) {
+		user := newTestUser("lock@example.com")
+		require.NoError(t, store.Create(ctx, user))
+
+		// 递增4次（未达到锁定阈值）
+		for i := 0; i < 4; i++ {
+			_, _, _, err := store.IncrementLoginAttempts(ctx, user.ID, 5, 30*time.Minute)
+			require.NoError(t, err)
+		}
+
+		// 第5次应该触发锁定
+		attempts, locked, lockedUntil, err := store.IncrementLoginAttempts(ctx, user.ID, 5, 30*time.Minute)
+		require.NoError(t, err)
+		assert.Equal(t, 5, attempts)
+		assert.True(t, locked)
+		assert.NotNil(t, lockedUntil)
+	})
+
+	t.Run("用户不存在返回错误", func(t *testing.T) {
+		_, _, _, err := store.IncrementLoginAttempts(ctx, "nonexistent-id", 5, 30*time.Minute)
+		assert.Error(t, err)
+	})
+}
+
+func TestStore_ResetLoginAttempts(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	defer cleanupTestData(t, db)
+	ctx := context.Background()
+
+	t.Run("重置登录尝试次数", func(t *testing.T) {
+		user := newTestUser("reset@example.com")
+		require.NoError(t, store.Create(ctx, user))
+
+		// 先设置登录尝试次数
+		lockedUntil := time.Now().Add(30 * time.Minute)
+		require.NoError(t, store.UpdateLoginAttempts(ctx, user.ID, 5, &lockedUntil))
+
+		// 重置
+		err := store.ResetLoginAttempts(ctx, user.ID)
+		require.NoError(t, err)
+
+		// 验证已重置
+		retrieved, err := store.GetByID(ctx, user.ID)
+		require.NoError(t, err)
+		assert.Equal(t, 0, retrieved.LoginAttempts)
+		assert.Nil(t, retrieved.LockedUntil)
+	})
+
+	t.Run("用户不存在返回错误", func(t *testing.T) {
+		err := store.ResetLoginAttempts(ctx, "nonexistent-id")
+		assert.Error(t, err)
+	})
+}
+
+func TestStore_UnlockExpiredAccount(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	defer cleanupTestData(t, db)
+	ctx := context.Background()
+
+	t.Run("解锁过期账户", func(t *testing.T) {
+		user := newTestUser("unlock@example.com")
+		user.Status = model.UserStatusLocked
+		pastTime := time.Now().Add(-1 * time.Hour)
+		user.LockedUntil = &pastTime
+		require.NoError(t, store.Create(ctx, user))
+
+		// 解锁过期账户
+		err := store.UnlockExpiredAccount(ctx, user.ID)
+		require.NoError(t, err)
+
+		// 验证已解锁
+		retrieved, err := store.GetByID(ctx, user.ID)
+		require.NoError(t, err)
+		assert.Equal(t, model.UserStatusActive, retrieved.Status)
+		assert.Equal(t, 0, retrieved.LoginAttempts)
+	})
+
+	t.Run("未过期账户不解锁", func(t *testing.T) {
+		user := newTestUser("notexpired@example.com")
+		user.Status = model.UserStatusLocked
+		futureTime := time.Now().Add(1 * time.Hour)
+		user.LockedUntil = &futureTime
+		require.NoError(t, store.Create(ctx, user))
+
+		// 尝试解锁未过期账户应该返回ErrNotFound
+		err := store.UnlockExpiredAccount(ctx, user.ID)
+		assert.Error(t, err)
+	})
+
+	t.Run("非锁定账户不解锁", func(t *testing.T) {
+		user := newTestUser("active@example.com")
+		user.Status = model.UserStatusActive
+		require.NoError(t, store.Create(ctx, user))
+
+		// 尝试解锁活跃账户应该返回ErrNotFound
+		err := store.UnlockExpiredAccount(ctx, user.ID)
+		assert.Error(t, err)
+	})
+
+	t.Run("用户不存在返回错误", func(t *testing.T) {
+		err := store.UnlockExpiredAccount(ctx, "nonexistent-id")
+		assert.Error(t, err)
+	})
+}
+
 func TestStore_DeleteUser(t *testing.T) {
 	store, db := setupTestStore(t)
 	defer db.Close()

@@ -175,6 +175,71 @@ func (m *Store) UpdateLoginAttempts(ctx context.Context, userID string, attempts
 	return nil
 }
 
+// IncrementLoginAttempts 原子递增登录尝试次数
+func (m *Store) IncrementLoginAttempts(ctx context.Context, userID string, maxAttempts int, lockoutDuration time.Duration) (attempts int, locked bool, lockedUntil *time.Time, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	user, ok := m.users[userID]
+	if !ok {
+		return 0, false, nil, store.ErrNotFound
+	}
+
+	user.LoginAttempts++
+	attempts = user.LoginAttempts
+
+	if attempts >= maxAttempts {
+		t := time.Now().Add(lockoutDuration)
+		user.LockedUntil = &t
+		user.Status = model.UserStatusLocked
+		locked = true
+		lockedUntil = &t
+	}
+
+	return attempts, locked, lockedUntil, nil
+}
+
+// ResetLoginAttempts 重置登录尝试次数
+func (m *Store) ResetLoginAttempts(ctx context.Context, userID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	user, ok := m.users[userID]
+	if !ok {
+		return store.ErrNotFound
+	}
+
+	user.LoginAttempts = 0
+	user.LockedUntil = nil
+	if user.Status == model.UserStatusLocked {
+		user.Status = model.UserStatusActive
+	}
+	return nil
+}
+
+// UnlockExpiredAccount 解锁已过期的锁定账户
+func (m *Store) UnlockExpiredAccount(ctx context.Context, userID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	user, ok := m.users[userID]
+	if !ok {
+		return store.ErrNotFound
+	}
+
+	if user.Status != model.UserStatusLocked {
+		return store.ErrNotFound
+	}
+
+	if user.LockedUntil == nil || user.LockedUntil.After(time.Now()) {
+		return store.ErrNotFound
+	}
+
+	user.LoginAttempts = 0
+	user.Status = model.UserStatusActive
+	return nil
+}
+
 // Delete 删除用户
 func (m *Store) Delete(ctx context.Context, id string) error {
 	if m.DeleteUserErr != nil {

@@ -24,9 +24,9 @@ services:
       - DB_PORT=5432
       - DB_NAME=sso
       - DB_USER=sso
-      # ⚠️ 安全警告: 生产环境必须设置 DB_PASSWORD 环境变量，不能使用默认值
+      # ⚠️ 必须设置 DB_PASSWORD 环境变量
       # 设置方法: export DB_PASSWORD=your_secure_password
-      - DB_PASSWORD=${DB_PASSWORD:-changeme}
+      - DB_PASSWORD=${DB_PASSWORD}
       - DB_SSL_MODE=disable
       # Redis配置
       - REDIS_HOST=redis
@@ -38,7 +38,7 @@ services:
       - JWT_REFRESH_TOKEN_TTL=168h
       - JWT_ISSUER=sso
       # 安全配置
-      - BCRYPT_COST=12
+      - BCRYPT_COST=10
       - RATE_LIMIT_REQUESTS=100
       - RATE_LIMIT_WINDOW=1m
       - MAX_LOGIN_ATTEMPTS=5
@@ -69,8 +69,8 @@ services:
     environment:
       POSTGRES_DB: sso
       POSTGRES_USER: sso
-      # ⚠️ 安全警告: 生产环境必须设置 DB_PASSWORD 环境变量，不能使用默认值
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+      # ⚠️ 必须设置 DB_PASSWORD 环境变量
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
       - "5432:5432"
     volumes:

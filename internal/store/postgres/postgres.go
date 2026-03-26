@@ -257,6 +257,92 @@ func (s *Store) UpdateLoginAttempts(ctx context.Context, userID string, attempts
 	return err
 }
 
+// IncrementLoginAttempts 原子递增登录尝试次数
+// 使用数据库原子操作避免竞态条件
+func (s *Store) IncrementLoginAttempts(ctx context.Context, userID string, maxAttempts int, lockoutDuration time.Duration) (attempts int, locked bool, lockedUntil *time.Time, err error) {
+	ctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+
+	query := `
+		UPDATE users
+		SET login_attempts = login_attempts + 1,
+			locked_until = CASE
+				WHEN login_attempts + 1 >= $2 THEN NOW() + $3::INTERVAL
+				ELSE locked_until
+			END,
+			status = CASE
+				WHEN login_attempts + 1 >= $2 THEN 'locked'
+				ELSE status
+			END,
+			updated_at = NOW()
+		WHERE id = $1
+		RETURNING login_attempts, status, locked_until
+	`
+
+	var status string
+	err = s.db.QueryRowContext(ctx, query, userID, maxAttempts, lockoutDuration.String()).Scan(&attempts, &status, &lockedUntil)
+	if err != nil {
+		return 0, false, nil, err
+	}
+
+	locked = status == "locked"
+	return attempts, locked, lockedUntil, nil
+}
+
+// ResetLoginAttempts 重置登录尝试次数
+func (s *Store) ResetLoginAttempts(ctx context.Context, userID string) error {
+	ctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+
+	query := `
+		UPDATE users
+		SET login_attempts = 0,
+			locked_until = NULL,
+			status = CASE
+				WHEN status = 'locked' THEN 'active'
+				ELSE status
+			END,
+			updated_at = NOW()
+		WHERE id = $1
+	`
+	_, err := s.db.ExecContext(ctx, query, userID)
+	return err
+}
+
+// UnlockExpiredAccount 解锁已过期的锁定账户
+// 仅当locked_until < NOW()时才解锁，避免竞态条件
+func (s *Store) UnlockExpiredAccount(ctx context.Context, userID string) error {
+	ctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+
+	query := `
+		UPDATE users
+		SET login_attempts = 0,
+			status = 'active',
+			updated_at = NOW()
+		WHERE id = $1
+			AND status = 'locked'
+			AND locked_until IS NOT NULL
+			AND locked_until < NOW()
+	`
+	result, err := s.db.ExecContext(ctx, query, userID)
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	// 如果没有行被更新，说明账户未锁定或锁定时间未过期
+	if rows == 0 {
+		return store.ErrNotFound
+	}
+
+	return nil
+}
+
 // Delete 删除用户
 func (s *Store) Delete(ctx context.Context, id string) error {
 	query := `DELETE FROM users WHERE id = $1`

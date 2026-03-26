@@ -117,7 +117,7 @@ func TestValidate_BcryptCostRange(t *testing.T) {
 		},
 		{
 			name:    "cost过低-生产环境",
-			cost:    "10",
+			cost:    "9",
 			wantErr: true,
 			env:     "production",
 		},

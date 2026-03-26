@@ -46,6 +46,9 @@ type UserStore interface {
 	Delete(ctx context.Context, id string) error
 	ListUsers(ctx context.Context, offset, limit int) ([]*model.User, int, error)
 	UpdateLoginAttempts(ctx context.Context, userID string, attempts int, lockedUntil *time.Time) error
+	IncrementLoginAttempts(ctx context.Context, userID string, maxAttempts int, lockoutDuration time.Duration) (attempts int, locked bool, lockedUntil *time.Time, err error)
+	ResetLoginAttempts(ctx context.Context, userID string) error
+	UnlockExpiredAccount(ctx context.Context, userID string) error
 }
 
 // ============================================================================

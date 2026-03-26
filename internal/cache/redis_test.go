@@ -3,6 +3,7 @@ package cache_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -262,6 +263,192 @@ func TestMemoryCache_DeletePattern_Wildcard(t *testing.T) {
 		assert.ErrorIs(t, err, cache.ErrCacheMiss)
 
 		err = c.Get(ctx, "token:abc", &result)
+		assert.NoError(t, err)
+	})
+}
+
+// ============================================================================
+// SetWithNilProtection 测试
+// ============================================================================
+
+func TestMemoryCache_SetWithNilProtection(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("设置nil值使用nilTTL", func(t *testing.T) {
+		c := cache.NewMemoryCache()
+		defer c.Close()
+
+		key := "nil-key"
+		// 设置nil值，使用很短的nilTTL
+		err := c.SetWithNilProtection(ctx, key, nil, 5*time.Minute, 1*time.Millisecond)
+		require.NoError(t, err)
+
+		// 等待过期
+		time.Sleep(10 * time.Millisecond)
+
+		// 应该返回cache miss
+		var result string
+		err = c.Get(ctx, key, &result)
+		assert.ErrorIs(t, err, cache.ErrCacheMiss)
+	})
+
+	t.Run("设置非nil值使用ttl", func(t *testing.T) {
+		c := cache.NewMemoryCache()
+		defer c.Close()
+
+		key := "non-nil-key"
+		value := "test-value"
+		// 设置非nil值
+		err := c.SetWithNilProtection(ctx, key, value, 5*time.Minute, 1*time.Minute)
+		require.NoError(t, err)
+
+		// 应该能获取到值
+		var result string
+		err = c.Get(ctx, key, &result)
+		require.NoError(t, err)
+		assert.Equal(t, value, result)
+	})
+
+	t.Run("序列化失败返回错误", func(t *testing.T) {
+		c := cache.NewMemoryCache()
+		defer c.Close()
+
+		// channel类型无法JSON序列化
+		ch := make(chan int)
+		err := c.SetWithNilProtection(ctx, "bad-key", ch, 5*time.Minute, 1*time.Minute)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "序列化")
+	})
+}
+
+// ============================================================================
+// MemoryCache 并发测试
+// ============================================================================
+
+func TestMemoryCache_Concurrent(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("并发读写安全", func(t *testing.T) {
+		c := cache.NewMemoryCache()
+		defer c.Close()
+
+		// 并发写入
+		done := make(chan struct{})
+		for i := 0; i < 10; i++ {
+			go func(i int) {
+				key := fmt.Sprintf("key-%d", i)
+				c.Set(ctx, key, i, 5*time.Minute)
+				done <- struct{}{}
+			}(i)
+		}
+
+		// 等待所有写入完成
+		for i := 0; i < 10; i++ {
+			<-done
+		}
+
+		// 验证所有值都存在
+		for i := 0; i < 10; i++ {
+			var result int
+			key := fmt.Sprintf("key-%d", i)
+			err := c.Get(ctx, key, &result)
+			assert.NoError(t, err)
+			assert.Equal(t, i, result)
+		}
+	})
+}
+
+// ============================================================================
+// MemoryCache Close 测试
+// ============================================================================
+
+func TestMemoryCache_Close(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("多次调用Close安全", func(t *testing.T) {
+		c := cache.NewMemoryCache()
+		c.Set(ctx, "key", "value", 5*time.Minute)
+
+		// 第一次Close
+		err := c.Close()
+		assert.NoError(t, err)
+
+		// 第二次Close应该也是安全的
+		err = c.Close()
+		assert.NoError(t, err)
+	})
+}
+
+// ============================================================================
+// NewCache 工厂函数测试
+// ============================================================================
+
+func TestNewCache(t *testing.T) {
+	t.Run("禁用Redis返回MemoryCache", func(t *testing.T) {
+		opt := &cache.Option{
+			RedisEnable: false,
+		}
+
+		c, err := cache.NewCache(opt)
+		require.NoError(t, err)
+		defer c.Close()
+
+		// 验证是MemoryCache
+		ctx := context.Background()
+		err = c.Set(ctx, "key", "value", 5*time.Minute)
+		assert.NoError(t, err)
+
+		var result string
+		err = c.Get(ctx, "key", &result)
+		assert.NoError(t, err)
+		assert.Equal(t, "value", result)
+	})
+
+	t.Run("启用Redis但连接失败返回错误", func(t *testing.T) {
+		opt := &cache.Option{
+			RedisEnable:   true,
+			RedisHost:     "invalid-host",
+			RedisPassword: "",
+			RedisDB:       0,
+		}
+
+		_, err := cache.NewCache(opt)
+		assert.Error(t, err)
+	})
+}
+
+func TestNewCacheWithFallback(t *testing.T) {
+	t.Run("禁用Redis返回MemoryCache", func(t *testing.T) {
+		opt := &cache.Option{
+			RedisEnable: false,
+		}
+
+		c, err := cache.NewCacheWithFallback(opt)
+		require.NoError(t, err)
+		defer c.Close()
+
+		// 验证是MemoryCache
+		ctx := context.Background()
+		err = c.Set(ctx, "key", "value", 5*time.Minute)
+		assert.NoError(t, err)
+	})
+
+	t.Run("启用Redis但连接失败降级到MemoryCache", func(t *testing.T) {
+		opt := &cache.Option{
+			RedisEnable:   true,
+			RedisHost:     "invalid-host",
+			RedisPassword: "",
+			RedisDB:       0,
+		}
+
+		// 应该不返回错误，而是降级到MemoryCache
+		c, err := cache.NewCacheWithFallback(opt)
+		require.NoError(t, err)
+		defer c.Close()
+
+		// 验证可以使用（说明是MemoryCache）
+		ctx := context.Background()
+		err = c.Set(ctx, "key", "value", 5*time.Minute)
 		assert.NoError(t, err)
 	})
 }

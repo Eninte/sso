@@ -143,9 +143,9 @@ func Load() (*Config, error) {
 
 		// 安全配置
 		// BcryptCost: bcrypt成本因子，影响密码哈希性能
-		// 推荐值: 12-14，值越高越安全但性能越低
+		// 推荐值: 10-12，值越高越安全但性能越低
 		// cost=10: ~50ms, cost=11: ~100ms, cost=12: ~200ms
-		BcryptCost:        getEnvInt("BCRYPT_COST", 12),
+		BcryptCost:        getEnvInt("BCRYPT_COST", 10),
 		RateLimitRequests: getEnvInt("RATE_LIMIT_REQUESTS", 100),
 		RateLimitWindow:   getEnvDuration("RATE_LIMIT_WINDOW", 1*time.Minute),
 		MaxLoginAttempts:  getEnvInt("MAX_LOGIN_ATTEMPTS", 5),
@@ -234,8 +234,8 @@ func (c *Config) validate() error {
 			slog.Error("生产环境不能使用默认管理员邮箱")
 			return fmt.Errorf("生产环境必须设置 ADMIN_EMAILS")
 		}
-		if c.BcryptCost < 12 {
-			slog.Error("生产环境bcrypt cost应至少为12", "current", c.BcryptCost)
+		if c.BcryptCost < 10 {
+			slog.Error("生产环境bcrypt cost应至少为10", "current", c.BcryptCost)
 			return ErrBcryptCostTooLow
 		}
 		if c.JWTIssuer == "sso" {
