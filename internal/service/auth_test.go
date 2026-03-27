@@ -13,6 +13,7 @@ import (
 
 	"github.com/your-org/sso/internal/cache"
 	"github.com/your-org/sso/internal/crypto"
+	"github.com/your-org/sso/internal/metrics"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/service"
 	"github.com/your-org/sso/internal/store/mock"
@@ -621,4 +622,222 @@ func TestNewAuthServiceWithCache(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "cache-test@example.com", user.Email)
+}
+
+// ============================================================================
+// LogoutWithAudit 测试
+// ============================================================================
+
+func TestAuthService_LogoutWithAudit(t *testing.T) {
+	authSvc, store := createTestAuthService(t)
+	ctx := context.Background()
+
+	t.Run("带审计上下文的登出", func(t *testing.T) {
+		store.Reset()
+
+		// 创建测试用户
+		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
+		testUser := &model.User{
+			ID:           "test-user-logout",
+			Email:        "logout@example.com",
+			PasswordHash: hashedPassword,
+			Role:         model.UserRoleUser,
+			Status:       model.UserStatusActive,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}
+		store.AddUser(testUser)
+
+		// 登录获取token
+		loginResp, err := authSvc.Login(ctx, &model.LoginRequest{
+			Email:    "logout@example.com",
+			Password: "Password123!",
+		})
+		require.NoError(t, err)
+		require.NotEmpty(t, loginResp.AccessToken)
+
+		// 带审计上下文登出
+		auditCtx := &service.AuditContext{
+			IPAddress: "192.168.1.1",
+			UserAgent: "Mozilla/5.0",
+		}
+		err = authSvc.LogoutWithAudit(ctx, loginResp.AccessToken, auditCtx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("无效token登出", func(t *testing.T) {
+		auditCtx := &service.AuditContext{
+			IPAddress: "192.168.1.1",
+		}
+		err := authSvc.LogoutWithAudit(ctx, "invalid-token", auditCtx)
+		// 应该返回错误（token无效）
+		assert.Error(t, err)
+	})
+}
+
+// ============================================================================
+// LogoutAllWithAudit 测试
+// ============================================================================
+
+func TestAuthService_LogoutAllWithAudit(t *testing.T) {
+	authSvc, store := createTestAuthService(t)
+	ctx := context.Background()
+
+	t.Run("带审计上下文的登出所有设备", func(t *testing.T) {
+		store.Reset()
+
+		// 创建测试用户
+		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
+		testUser := &model.User{
+			ID:           "test-user-logoutall",
+			Email:        "logoutall@example.com",
+			PasswordHash: hashedPassword,
+			Role:         model.UserRoleUser,
+			Status:       model.UserStatusActive,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}
+		store.AddUser(testUser)
+
+		// 带审计上下文登出所有设备
+		auditCtx := &service.AuditContext{
+			IPAddress: "192.168.1.1",
+			UserAgent: "Mozilla/5.0",
+		}
+		err := authSvc.LogoutAllWithAudit(ctx, testUser.ID, auditCtx)
+		assert.NoError(t, err)
+	})
+}
+
+// ============================================================================
+// RefreshTokenWithAudit 测试
+// ============================================================================
+
+func TestAuthService_RefreshTokenWithAudit(t *testing.T) {
+	authSvc, store := createTestAuthService(t)
+	ctx := context.Background()
+
+	t.Run("带审计上下文的刷新token", func(t *testing.T) {
+		store.Reset()
+
+		// 创建测试用户
+		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
+		testUser := &model.User{
+			ID:           "test-user-refresh",
+			Email:        "refresh@example.com",
+			PasswordHash: hashedPassword,
+			Role:         model.UserRoleUser,
+			Status:       model.UserStatusActive,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}
+		store.AddUser(testUser)
+
+		// 登录获取token
+		loginResp, err := authSvc.Login(ctx, &model.LoginRequest{
+			Email:    "refresh@example.com",
+			Password: "Password123!",
+		})
+		require.NoError(t, err)
+		require.NotEmpty(t, loginResp.RefreshToken)
+
+		// 带审计上下文刷新token
+		auditCtx := &service.AuditContext{
+			IPAddress: "192.168.1.1",
+			UserAgent: "Mozilla/5.0",
+		}
+		newTokenResp, err := authSvc.RefreshTokenWithAudit(ctx, loginResp.RefreshToken, auditCtx)
+		require.NoError(t, err)
+		assert.NotEmpty(t, newTokenResp.AccessToken)
+		assert.NotEmpty(t, newTokenResp.RefreshToken)
+	})
+
+	t.Run("无效refresh token", func(t *testing.T) {
+		auditCtx := &service.AuditContext{
+			IPAddress: "192.168.1.1",
+		}
+		_, err := authSvc.RefreshTokenWithAudit(ctx, "invalid-refresh-token", auditCtx)
+		assert.Error(t, err)
+	})
+}
+
+// ============================================================================
+// AuthService with metrics 测试
+// ============================================================================
+
+func TestAuthService_WithMetrics(t *testing.T) {
+	// 创建Mock存储
+	store := mock.New()
+
+	// 创建密码服务
+	passwordSvc := crypto.NewPasswordService(10)
+
+	// 创建JWT服务
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	jwtSvc := crypto.NewJWTService(
+		privateKey,
+		&privateKey.PublicKey,
+		"test-issuer",
+		15*time.Minute,
+		7*24*time.Hour,
+	)
+
+	// 创建metrics服务
+	metricsSvc := metrics.NewService()
+
+	// 创建带metrics的认证服务
+	authSvc := service.NewAuthService(store, passwordSvc, jwtSvc, 5, 30*time.Minute, metricsSvc)
+
+	ctx := context.Background()
+
+	t.Run("登录触发metrics", func(t *testing.T) {
+		store.Reset()
+
+		// 创建测试用户
+		hashedPassword, _ := passwordSvc.HashPassword("Password123!")
+		testUser := &model.User{
+			ID:           "test-user-metrics",
+			Email:        "metrics@example.com",
+			PasswordHash: hashedPassword,
+			Role:         model.UserRoleUser,
+			Status:       model.UserStatusActive,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}
+		store.AddUser(testUser)
+
+		// 登录应该触发metrics
+		loginResp, err := authSvc.Login(ctx, &model.LoginRequest{
+			Email:    "metrics@example.com",
+			Password: "Password123!",
+		})
+		require.NoError(t, err)
+		assert.NotEmpty(t, loginResp.AccessToken)
+	})
+
+	t.Run("登录失败触发metrics", func(t *testing.T) {
+		store.Reset()
+
+		// 创建测试用户
+		hashedPassword, _ := passwordSvc.HashPassword("Password123!")
+		testUser := &model.User{
+			ID:           "test-user-metrics-fail",
+			Email:        "metricsfail@example.com",
+			PasswordHash: hashedPassword,
+			Role:         model.UserRoleUser,
+			Status:       model.UserStatusActive,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}
+		store.AddUser(testUser)
+
+		// 错误密码登录应该触发metrics
+		_, err := authSvc.Login(ctx, &model.LoginRequest{
+			Email:    "metricsfail@example.com",
+			Password: "WrongPassword!",
+		})
+		assert.Error(t, err)
+	})
 }

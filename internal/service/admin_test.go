@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/your-org/sso/internal/cache"
 	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/service"
@@ -185,5 +186,57 @@ func TestAdminService_CleanupExpired(t *testing.T) {
 	t.Run("清理过期数据", func(t *testing.T) {
 		err := adminSvc.CleanupExpired(ctx)
 		assert.NoError(t, err)
+	})
+}
+
+// ============================================================================
+// DisableUser 不存在测试
+// ============================================================================
+
+func TestAdminService_DisableUser_NotFound(t *testing.T) {
+	store := mock.New()
+	adminSvc := service.NewAdminService(store)
+	ctx := context.Background()
+
+	t.Run("禁用不存在的用户", func(t *testing.T) {
+		err := adminSvc.DisableUser(ctx, "nonexistent-id")
+		assert.Error(t, err)
+	})
+}
+
+// ============================================================================
+// AdminService with cache 测试
+// ============================================================================
+
+func TestAdminService_GetUser_WithCache(t *testing.T) {
+	store := mock.New()
+	memCache := cache.NewMemoryCache()
+	defer memCache.Close()
+
+	adminSvc := service.NewAdminServiceWithCache(store, memCache)
+	ctx := context.Background()
+
+	// 添加测试用户
+	user := &model.User{
+		ID:           "cache-user-id",
+		Email:        "cacheuser@example.com",
+		PasswordHash: "hash",
+		Role:         model.UserRoleUser,
+		Status:       model.UserStatusActive,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	_ = store.Create(ctx, user)
+
+	t.Run("首次获取用户（缓存未命中）", func(t *testing.T) {
+		result, err := adminSvc.GetUser(ctx, "cache-user-id")
+		require.NoError(t, err)
+		assert.Equal(t, "cache-user-id", result.ID)
+	})
+
+	t.Run("再次获取用户（缓存命中）", func(t *testing.T) {
+		result, err := adminSvc.GetUser(ctx, "cache-user-id")
+		require.NoError(t, err)
+		assert.Equal(t, "cache-user-id", result.ID)
 	})
 }

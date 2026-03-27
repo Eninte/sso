@@ -118,8 +118,8 @@ func (s *Store) Create(ctx context.Context, user *model.User) error {
 	defer cancel()
 
 	query := `
-		INSERT INTO users (id, email, password_hash, email_verified, mfa_enabled, role, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO users (id, email, password_hash, email_verified, mfa_enabled, role, status, login_attempts, locked_until, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`
 	_, err := s.db.ExecContext(ctx, query,
 		user.ID,
@@ -129,6 +129,8 @@ func (s *Store) Create(ctx context.Context, user *model.User) error {
 		user.MFAEnabled,
 		user.Role,
 		user.Status,
+		user.LoginAttempts,
+		user.LockedUntil,
 		user.CreatedAt,
 		user.UpdatedAt,
 	)
@@ -1005,8 +1007,18 @@ func (s *Store) DeprecateKey(ctx context.Context, keyID string, expiresAt time.T
 	defer cancel()
 
 	query := `UPDATE key_versions SET status = 'deprecated', expires_at = $2 WHERE id = $1`
-	_, err := s.db.ExecContext(ctx, query, keyID, expiresAt)
-	return err
+	result, err := s.db.ExecContext(ctx, query, keyID, expiresAt)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return store.ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) RevokeKey(ctx context.Context, keyID string) error {
@@ -1014,8 +1026,18 @@ func (s *Store) RevokeKey(ctx context.Context, keyID string) error {
 	defer cancel()
 
 	query := `UPDATE key_versions SET status = 'revoked' WHERE id = $1`
-	_, err := s.db.ExecContext(ctx, query, keyID)
-	return err
+	result, err := s.db.ExecContext(ctx, query, keyID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return store.ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) DeleteKey(ctx context.Context, keyID string) error {
@@ -1023,6 +1045,16 @@ func (s *Store) DeleteKey(ctx context.Context, keyID string) error {
 	defer cancel()
 
 	query := `DELETE FROM key_versions WHERE id = $1`
-	_, err := s.db.ExecContext(ctx, query, keyID)
-	return err
+	result, err := s.db.ExecContext(ctx, query, keyID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return store.ErrNotFound
+	}
+	return nil
 }

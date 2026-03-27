@@ -60,6 +60,7 @@ func newTestUser(email string) *model.User {
 		PasswordHash:  "$2a$10$testhashvalue0123456789abc",
 		EmailVerified: false,
 		MFASecret:     "",
+		Role:          model.UserRoleUser,
 		Status:        model.UserStatusActive,
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
@@ -251,7 +252,8 @@ func TestStore_UnlockExpiredAccount(t *testing.T) {
 	t.Run("解锁过期账户", func(t *testing.T) {
 		user := newTestUser("unlock@example.com")
 		user.Status = model.UserStatusLocked
-		pastTime := time.Now().Add(-1 * time.Hour)
+		// 使用UTC时间避免时区问题
+		pastTime := time.Now().UTC().Add(-2 * time.Hour)
 		user.LockedUntil = &pastTime
 		require.NoError(t, store.Create(ctx, user))
 
@@ -785,6 +787,7 @@ func TestStore_ListAuditLogs_Filter(t *testing.T) {
 			ID:        "test-audit-" + uuid.New().String(),
 			EventType: eventType,
 			UserID:    user.ID,
+			Details:   "{}",
 			Success:   true,
 			Timestamp: time.Now(),
 		}
@@ -903,5 +906,181 @@ func TestStore_GetUserByField_InvalidField(t *testing.T) {
 
 		_, err = store.GetByEmail(ctx, "nonexistent@example.com")
 		assert.Error(t, err) // 应该返回ErrNotFound而不是字段名错误
+	})
+}
+
+// ============================================================================
+// 密钥版本测试
+// ============================================================================
+
+func TestStore_KeyOperations(t *testing.T) {
+	store, db := setupTestStore(t)
+	defer db.Close()
+	defer cleanupTestData(t, db)
+	ctx := context.Background()
+
+	t.Run("存储密钥", func(t *testing.T) {
+		key := &model.KeyVersion{
+			ID:         "test-key-" + uuid.New().String(),
+			PublicKey:  []byte("-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----"),
+			PrivateKey: []byte("-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----"),
+			Status:     model.KeyStatusActive,
+			CreatedAt:  time.Now(),
+		}
+		err := store.StoreKey(ctx, key)
+		assert.NoError(t, err)
+	})
+
+	t.Run("获取活跃密钥", func(t *testing.T) {
+		// 先存储一个活跃密钥
+		keyID := "test-active-key-" + uuid.New().String()
+		key := &model.KeyVersion{
+			ID:         keyID,
+			PublicKey:  []byte("-----BEGIN PUBLIC KEY-----\nactive\n-----END PUBLIC KEY-----"),
+			PrivateKey: []byte("-----BEGIN PRIVATE KEY-----\nactive\n-----END PRIVATE KEY-----"),
+			Status:     model.KeyStatusActive,
+			CreatedAt:  time.Now(),
+		}
+		require.NoError(t, store.StoreKey(ctx, key))
+
+		// 获取活跃密钥
+		activeKey, err := store.GetActiveKey(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, model.KeyStatusActive, activeKey.Status)
+	})
+
+	t.Run("获取不存在的活跃密钥", func(t *testing.T) {
+		// 清除所有密钥
+		_, _ = db.ExecContext(ctx, "DELETE FROM key_versions WHERE id LIKE 'test-%'")
+
+		_, err := store.GetActiveKey(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("按ID获取密钥", func(t *testing.T) {
+		keyID := "test-byid-key-" + uuid.New().String()
+		key := &model.KeyVersion{
+			ID:         keyID,
+			PublicKey:  []byte("-----BEGIN PUBLIC KEY-----\nbyid\n-----END PUBLIC KEY-----"),
+			PrivateKey: []byte("-----BEGIN PRIVATE KEY-----\nbyid\n-----END PRIVATE KEY-----"),
+			Status:     model.KeyStatusActive,
+			CreatedAt:  time.Now(),
+		}
+		require.NoError(t, store.StoreKey(ctx, key))
+
+		// 按ID获取
+		retrievedKey, err := store.GetKeyByID(ctx, keyID)
+		require.NoError(t, err)
+		assert.Equal(t, keyID, retrievedKey.ID)
+	})
+
+	t.Run("获取不存在的密钥", func(t *testing.T) {
+		_, err := store.GetKeyByID(ctx, "nonexistent-key")
+		assert.Error(t, err)
+	})
+
+	t.Run("列出活跃密钥", func(t *testing.T) {
+		// 存储活跃和弃用密钥
+		activeKey := &model.KeyVersion{
+			ID:        "test-list-active-" + uuid.New().String(),
+			PublicKey: []byte("active"),
+			Status:    model.KeyStatusActive,
+			CreatedAt: time.Now(),
+		}
+		deprecatedKey := &model.KeyVersion{
+			ID:        "test-list-deprecated-" + uuid.New().String(),
+			PublicKey: []byte("deprecated"),
+			Status:    model.KeyStatusDeprecated,
+			CreatedAt: time.Now(),
+		}
+		require.NoError(t, store.StoreKey(ctx, activeKey))
+		require.NoError(t, store.StoreKey(ctx, deprecatedKey))
+
+		// 列出活跃密钥
+		keys, err := store.ListActiveKeys(ctx)
+		require.NoError(t, err)
+		// 应该包含活跃和弃用密钥（非撤销）
+		assert.GreaterOrEqual(t, len(keys), 1)
+	})
+
+	t.Run("列出所有密钥", func(t *testing.T) {
+		keys, err := store.ListAllKeys(ctx)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(keys), 1)
+	})
+
+	t.Run("弃用密钥", func(t *testing.T) {
+		keyID := "test-deprecate-" + uuid.New().String()
+		key := &model.KeyVersion{
+			ID:        keyID,
+			PublicKey: []byte("deprecate"),
+			Status:    model.KeyStatusActive,
+			CreatedAt: time.Now(),
+		}
+		require.NoError(t, store.StoreKey(ctx, key))
+
+		// 弃用密钥
+		expiresAt := time.Now().Add(24 * time.Hour)
+		err := store.DeprecateKey(ctx, keyID, expiresAt)
+		require.NoError(t, err)
+
+		// 验证状态
+		retrievedKey, err := store.GetKeyByID(ctx, keyID)
+		require.NoError(t, err)
+		assert.Equal(t, model.KeyStatusDeprecated, retrievedKey.Status)
+	})
+
+	t.Run("弃用不存在的密钥", func(t *testing.T) {
+		err := store.DeprecateKey(ctx, "nonexistent-key", time.Now())
+		assert.Error(t, err)
+	})
+
+	t.Run("撤销密钥", func(t *testing.T) {
+		keyID := "test-revoke-" + uuid.New().String()
+		key := &model.KeyVersion{
+			ID:        keyID,
+			PublicKey: []byte("revoke"),
+			Status:    model.KeyStatusDeprecated,
+			CreatedAt: time.Now(),
+		}
+		require.NoError(t, store.StoreKey(ctx, key))
+
+		// 撤销密钥
+		err := store.RevokeKey(ctx, keyID)
+		require.NoError(t, err)
+
+		// 验证状态
+		retrievedKey, err := store.GetKeyByID(ctx, keyID)
+		require.NoError(t, err)
+		assert.Equal(t, model.KeyStatusRevoked, retrievedKey.Status)
+	})
+
+	t.Run("撤销不存在的密钥", func(t *testing.T) {
+		err := store.RevokeKey(ctx, "nonexistent-key")
+		assert.Error(t, err)
+	})
+
+	t.Run("删除密钥", func(t *testing.T) {
+		keyID := "test-delete-" + uuid.New().String()
+		key := &model.KeyVersion{
+			ID:        keyID,
+			PublicKey: []byte("delete"),
+			Status:    model.KeyStatusRevoked,
+			CreatedAt: time.Now(),
+		}
+		require.NoError(t, store.StoreKey(ctx, key))
+
+		// 删除密钥
+		err := store.DeleteKey(ctx, keyID)
+		require.NoError(t, err)
+
+		// 验证已删除
+		_, err = store.GetKeyByID(ctx, keyID)
+		assert.Error(t, err)
+	})
+
+	t.Run("删除不存在的密钥", func(t *testing.T) {
+		err := store.DeleteKey(ctx, "nonexistent-key")
+		assert.Error(t, err)
 	})
 }

@@ -88,10 +88,6 @@ type Config struct {
 
 	// CORS配置
 	CORSAllowedOrigins string // 允许的跨域源 (逗号分隔)
-
-	// 管理员配置
-	AdminEmails  string // 管理员邮箱白名单 (逗号分隔)
-	AdminDomains string // 管理员域名白名单 (逗号分隔)
 }
 
 // Load 从环境变量加载配置
@@ -166,10 +162,6 @@ func Load() (*Config, error) {
 
 		// CORS配置
 		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000"),
-
-		// 管理员配置
-		AdminEmails:  getEnv("ADMIN_EMAILS", "admin@example.com"),
-		AdminDomains: getEnv("ADMIN_DOMAINS", "admin.com"),
 	}
 
 	// 验证必需的配置
@@ -229,10 +221,6 @@ func (c *Config) validate() error {
 		if c.CORSAllowedOrigins == "http://localhost:3000" {
 			slog.Error("生产环境不能使用默认CORS配置")
 			return fmt.Errorf("生产环境必须设置 CORS_ALLOWED_ORIGINS")
-		}
-		if c.AdminEmails == "admin@example.com" {
-			slog.Error("生产环境不能使用默认管理员邮箱")
-			return fmt.Errorf("生产环境必须设置 ADMIN_EMAILS")
 		}
 		if c.BcryptCost < 10 {
 			slog.Error("生产环境bcrypt cost应至少为10", "current", c.BcryptCost)
@@ -310,16 +298,6 @@ func getEnvBool(key string, defaultValue bool) bool {
 		return strings.ToLower(value) == "true" || value == "1"
 	}
 	return defaultValue
-}
-
-// GetAdminEmails 获取管理员邮箱列表
-func (c *Config) GetAdminEmails() []string {
-	return splitAndTrim(c.AdminEmails)
-}
-
-// GetAdminDomains 获取管理员域名列表
-func (c *Config) GetAdminDomains() []string {
-	return splitAndTrim(c.AdminDomains)
 }
 
 // GetCORSAllowedOrigins 获取CORS允许的源列表

@@ -157,25 +157,16 @@ func TestValidate_ProductionDefaults(t *testing.T) {
 	tests := []struct {
 		name        string
 		corsOrigins string
-		adminEmails string
 		wantErr     bool
 	}{
 		{
 			name:        "默认CORS配置",
 			corsOrigins: "http://localhost:3000",
-			adminEmails: "admin@example.com",
-			wantErr:     true,
-		},
-		{
-			name:        "默认管理员邮箱",
-			corsOrigins: "https://example.com",
-			adminEmails: "admin@example.com",
 			wantErr:     true,
 		},
 		{
 			name:        "有效生产配置",
 			corsOrigins: "https://example.com",
-			adminEmails: "real-admin@company.com",
 			wantErr:     false,
 		},
 	}
@@ -183,7 +174,6 @@ func TestValidate_ProductionDefaults(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			os.Setenv("CORS_ALLOWED_ORIGINS", tt.corsOrigins)
-			os.Setenv("ADMIN_EMAILS", tt.adminEmails)
 
 			cfg, err := config.Load()
 			if tt.wantErr {
@@ -202,7 +192,6 @@ func TestValidate_TokenTTL(t *testing.T) {
 
 	os.Setenv("SERVER_ENV", "development")
 	os.Setenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
-	os.Setenv("ADMIN_EMAILS", "admin@example.com")
 
 	tests := []struct {
 		name       string
@@ -343,42 +332,6 @@ func TestIsDevelopment(t *testing.T) {
 // 辅助方法测试
 // ============================================================================
 
-func TestGetAdminEmails(t *testing.T) {
-	cleanup := setupTestEnv(t)
-	defer cleanup()
-
-	tests := []struct {
-		name     string
-		input    string
-		expected []string
-	}{
-		{
-			name:     "单个邮箱",
-			input:    "admin@example.com",
-			expected: []string{"admin@example.com"},
-		},
-		{
-			name:     "多个邮箱",
-			input:    "admin@example.com, support@example.com",
-			expected: []string{"admin@example.com", "support@example.com"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			os.Setenv("ADMIN_EMAILS", tt.input)
-			// 为每个测试设置其他必需的环境变量
-			os.Setenv("SERVER_ENV", "development")
-
-			cfg, err := config.Load()
-			assert.NoError(t, err)
-
-			emails := cfg.GetAdminEmails()
-			assert.Equal(t, tt.expected, emails)
-		})
-	}
-}
-
 func TestGetCORSAllowedOrigins(t *testing.T) {
 	cleanup := setupTestEnv(t)
 	defer cleanup()
@@ -411,19 +364,6 @@ func TestGetCORSAllowedOrigins(t *testing.T) {
 			assert.Equal(t, tt.expected, origins)
 		})
 	}
-}
-
-func TestGetAdminDomains(t *testing.T) {
-	cleanup := setupTestEnv(t)
-	defer cleanup()
-
-	os.Setenv("ADMIN_DOMAINS", "admin.com, example.com")
-
-	cfg, err := config.Load()
-	assert.NoError(t, err)
-
-	domains := cfg.GetAdminDomains()
-	assert.Equal(t, []string{"admin.com", "example.com"}, domains)
 }
 
 // ============================================================================
