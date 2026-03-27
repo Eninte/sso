@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -436,4 +437,180 @@ func TestParsePrivateKey_1024bit_Rejected(t *testing.T) {
 	_, err = crypto.ParsePrivateKey(privateKeyPEM)
 
 	assert.ErrorIs(t, err, crypto.ErrKeyTooShort)
+}
+
+// ============================================================================
+// 空路径测试
+// ============================================================================
+
+func TestLoadPrivateKeyFromFile_EmptyPath(t *testing.T) {
+	_, err := crypto.LoadPrivateKeyFromFile("")
+
+	assert.ErrorIs(t, err, crypto.ErrKeyPathInvalid)
+}
+
+func TestLoadPublicKeyFromFile_EmptyPath(t *testing.T) {
+	_, err := crypto.LoadPublicKeyFromFile("")
+
+	assert.ErrorIs(t, err, crypto.ErrKeyPathInvalid)
+}
+
+// ============================================================================
+// LoadKeysForRotation 测试
+// ============================================================================
+
+func TestLoadKeysForRotation_Success(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// 生成密钥对
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	privateKeyBytes := x509.MarshalPKCS1PrivateKey(privateKey)
+	privateKeyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: privateKeyBytes,
+	})
+
+	publicKeyBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+	require.NoError(t, err)
+	publicKeyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: publicKeyBytes,
+	})
+
+	// 写入私钥文件
+	privateKeyPath := filepath.Join(tmpDir, "private.pem")
+	err = os.WriteFile(privateKeyPath, privateKeyPEM, 0600)
+	require.NoError(t, err)
+
+	// 写入公钥文件
+	publicKeyPath := filepath.Join(tmpDir, "public.pem")
+	err = os.WriteFile(publicKeyPath, publicKeyPEM, 0600)
+	require.NoError(t, err)
+
+	// 加载密钥轮换服务
+	svc, err := crypto.LoadKeysForRotation(
+		privateKeyPath,
+		publicKeyPath,
+		nil, // 无轮换公钥
+		"test-issuer",
+		15*time.Minute,
+		7*24*time.Hour,
+	)
+
+	require.NoError(t, err)
+	assert.NotNil(t, svc)
+
+	// 验证可以生成和验证Token
+	token, err := svc.GenerateAccessToken("user-123", "test@example.com", "user", []string{"openid"})
+	require.NoError(t, err)
+	assert.NotEmpty(t, token)
+
+	claims, err := svc.ValidateAccessToken(token)
+	require.NoError(t, err)
+	assert.Equal(t, "user-123", claims.Subject)
+}
+
+func TestLoadKeysForRotation_WithRotationKeys(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// 生成主密钥对
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	privateKeyBytes := x509.MarshalPKCS1PrivateKey(privateKey)
+	privateKeyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: privateKeyBytes,
+	})
+
+	publicKeyBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+	require.NoError(t, err)
+	publicKeyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: publicKeyBytes,
+	})
+
+	// 写入主密钥文件
+	privateKeyPath := filepath.Join(tmpDir, "private.pem")
+	err = os.WriteFile(privateKeyPath, privateKeyPEM, 0600)
+	require.NoError(t, err)
+
+	publicKeyPath := filepath.Join(tmpDir, "public.pem")
+	err = os.WriteFile(publicKeyPath, publicKeyPEM, 0600)
+	require.NoError(t, err)
+
+	// 生成轮换密钥对
+	rotPrivateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	rotPublicKeyBytes, err := x509.MarshalPKIXPublicKey(&rotPrivateKey.PublicKey)
+	require.NoError(t, err)
+	rotPublicKeyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: rotPublicKeyBytes,
+	})
+
+	// 写入轮换公钥文件
+	rotPublicKeyPath := filepath.Join(tmpDir, "rot_public.pem")
+	err = os.WriteFile(rotPublicKeyPath, rotPublicKeyPEM, 0600)
+	require.NoError(t, err)
+
+	// 加载密钥轮换服务（带轮换公钥）
+	svc, err := crypto.LoadKeysForRotation(
+		privateKeyPath,
+		publicKeyPath,
+		[]string{rotPublicKeyPath, ""}, // 包含一个空路径应被忽略
+		"test-issuer",
+		15*time.Minute,
+		7*24*time.Hour,
+	)
+
+	require.NoError(t, err)
+	assert.NotNil(t, svc)
+}
+
+func TestLoadKeysForRotation_PrivateKeyNotFound(t *testing.T) {
+	_, err := crypto.LoadKeysForRotation(
+		"/nonexistent/private.pem",
+		"/nonexistent/public.pem",
+		nil,
+		"test-issuer",
+		15*time.Minute,
+		7*24*time.Hour,
+	)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "加载签名私钥失败")
+}
+
+func TestLoadKeysForRotation_PublicKeyNotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// 只创建私钥
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	privateKeyBytes := x509.MarshalPKCS1PrivateKey(privateKey)
+	privateKeyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: privateKeyBytes,
+	})
+
+	privateKeyPath := filepath.Join(tmpDir, "private.pem")
+	err = os.WriteFile(privateKeyPath, privateKeyPEM, 0600)
+	require.NoError(t, err)
+
+	_, err = crypto.LoadKeysForRotation(
+		privateKeyPath,
+		"/nonexistent/public.pem",
+		nil,
+		"test-issuer",
+		15*time.Minute,
+		7*24*time.Hour,
+	)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "加载签名公钥失败")
 }

@@ -849,7 +849,7 @@ func TestStore_CleanupExpired(t *testing.T) {
 
 	// 创建过期的Token
 	expiredToken := &model.Token{
-		ID:           "test-cleanup-token-" + uuid.New().String(),
+		ID:           uuid.New().String(),
 		AccessToken:  "test-cleanup-access-" + uuid.New().String(),
 		RefreshToken: "test-cleanup-refresh-" + uuid.New().String(),
 		UserID:       user.ID,
@@ -862,7 +862,7 @@ func TestStore_CleanupExpired(t *testing.T) {
 
 	// 创建过期的授权码
 	expiredCode := &model.AuthorizationCode{
-		Code:        "test-cleanup-code-" + uuid.New().String(),
+		Code:        uuid.New().String(),
 		ClientID:    "test-cleanup-client",
 		UserID:      user.ID,
 		RedirectURI: "http://localhost",

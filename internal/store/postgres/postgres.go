@@ -118,8 +118,8 @@ func (s *Store) Create(ctx context.Context, user *model.User) error {
 	defer cancel()
 
 	query := `
-		INSERT INTO users (id, email, password_hash, email_verified, mfa_enabled, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO users (id, email, password_hash, email_verified, mfa_enabled, role, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`
 	_, err := s.db.ExecContext(ctx, query,
 		user.ID,
@@ -127,6 +127,7 @@ func (s *Store) Create(ctx context.Context, user *model.User) error {
 		user.PasswordHash,
 		user.EmailVerified,
 		user.MFAEnabled,
+		user.Role,
 		user.Status,
 		user.CreatedAt,
 		user.UpdatedAt,
@@ -186,7 +187,7 @@ func (s *Store) getUserByField(ctx context.Context, field, value string) (*model
 
 	query := `
 		SELECT id, email, password_hash, email_verified, mfa_enabled, mfa_secret, 
-		       status, login_attempts, locked_until, created_at, updated_at
+		       role, status, login_attempts, locked_until, created_at, updated_at
 		FROM users
 		WHERE ` + field + ` = $1`
 
@@ -199,6 +200,7 @@ func (s *Store) getUserByField(ctx context.Context, field, value string) (*model
 		&user.EmailVerified,
 		&user.MFAEnabled,
 		&mfaSecret,
+		&user.Role,
 		&user.Status,
 		&user.LoginAttempts,
 		&user.LockedUntil,
@@ -228,7 +230,7 @@ func (s *Store) Update(ctx context.Context, user *model.User) error {
 	query := `
 		UPDATE users
 		SET email = $2, password_hash = $3, email_verified = $4, mfa_enabled = $5,
-		    mfa_secret = $6, status = $7, login_attempts = $8, locked_until = $9, updated_at = $10
+		    mfa_secret = $6, role = $7, status = $8, login_attempts = $9, locked_until = $10, updated_at = $11
 		WHERE id = $1
 	`
 	_, err := s.db.ExecContext(ctx, query,
@@ -238,6 +240,7 @@ func (s *Store) Update(ctx context.Context, user *model.User) error {
 		user.EmailVerified,
 		user.MFAEnabled,
 		user.MFASecret,
+		user.Role,
 		user.Status,
 		user.LoginAttempts,
 		user.LockedUntil,
@@ -365,7 +368,7 @@ func (s *Store) ListUsers(ctx context.Context, offset, limit int) ([]*model.User
 	// 获取分页数据
 	query := `
 		SELECT id, email, password_hash, email_verified, mfa_enabled, mfa_secret,
-		       status, login_attempts, locked_until, created_at, updated_at
+		       role, status, login_attempts, locked_until, created_at, updated_at
 		FROM users
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2
@@ -389,6 +392,7 @@ func (s *Store) ListUsers(ctx context.Context, offset, limit int) ([]*model.User
 			&user.EmailVerified,
 			&user.MFAEnabled,
 			&mfaSecret,
+			&user.Role,
 			&user.Status,
 			&user.LoginAttempts,
 			&user.LockedUntil,

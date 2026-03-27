@@ -18,6 +18,7 @@ type User struct {
 	EmailVerified bool       `json:"email_verified" db:"email_verified"`
 	MFAEnabled    bool       `json:"mfa_enabled" db:"mfa_enabled"`
 	MFASecret     string     `json:"-" db:"mfa_secret"`
+	Role          string     `json:"role" db:"role"`
 	Status        string     `json:"status" db:"status"`
 	LoginAttempts int        `json:"-" db:"login_attempts"`
 	LockedUntil   *time.Time `json:"locked_until,omitempty" db:"locked_until"`
@@ -29,6 +30,12 @@ const (
 	UserStatusActive   = "active"
 	UserStatusLocked   = "locked"
 	UserStatusDisabled = "disabled"
+)
+
+// 用户角色常量
+const (
+	UserRoleUser  = "user"
+	UserRoleAdmin = "admin"
 )
 
 type RegisterRequest struct {

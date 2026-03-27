@@ -29,6 +29,9 @@ const (
 	// UserScopesKey 用户权限范围上下文键
 	UserScopesKey contextKey = "userScopes"
 
+	// UserRoleKey 用户角色上下文键
+	UserRoleKey contextKey = "userRole"
+
 	// IsAdminKey 管理员标识上下文键
 	IsAdminKey contextKey = "isAdmin"
 )
@@ -69,6 +72,7 @@ func AuthMiddleware(jwtSvc *crypto.JWTService) func(http.Handler) http.Handler {
 			ctx := context.WithValue(r.Context(), UserIDKey, claims.RegisteredClaims.Subject)
 			ctx = context.WithValue(ctx, UserEmailKey, claims.Email)
 			ctx = context.WithValue(ctx, UserScopesKey, claims.Scopes)
+			ctx = context.WithValue(ctx, UserRoleKey, claims.Role)
 
 			// 5. 继续处理请求
 			next.ServeHTTP(w, r.WithContext(ctx))
@@ -77,57 +81,37 @@ func AuthMiddleware(jwtSvc *crypto.JWTService) func(http.Handler) http.Handler {
 }
 
 // ============================================================================
-// 管理员权限中间件
+// 基于角色的权限中间件
 // ============================================================================
 
-// AdminMiddleware 管理员权限中间件
-// 检查用户是否为管理员（基于邮箱白名单）
-func AdminMiddleware(adminEmails []string, adminDomains []string) func(http.Handler) http.Handler {
+// RequireRole 要求特定角色的中间件
+// 检查用户JWT中的角色是否在允许的角色列表中
+func RequireRole(roles ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// 从上下文获取用户邮箱
-			email := GetUserEmailFromContext(r.Context())
-			if email == "" {
+			// 从上下文获取用户角色
+			userRole := GetUserRoleFromContext(r.Context())
+			if userRole == "" {
 				writeAdminError(w, http.StatusUnauthorized, "未认证")
 				return
 			}
 
-			// 检查是否为管理员
-			if !isAdminUser(email, adminEmails, adminDomains) {
-				writeAdminError(w, http.StatusForbidden, "需要管理员权限")
-				return
+			// 检查角色是否匹配
+			for _, role := range roles {
+				if userRole == role {
+					next.ServeHTTP(w, r)
+					return
+				}
 			}
 
-			// 将管理员标识添加到上下文
-			ctx := context.WithValue(r.Context(), IsAdminKey, true)
-			next.ServeHTTP(w, r.WithContext(ctx))
+			writeAdminError(w, http.StatusForbidden, "需要管理员权限")
 		})
 	}
 }
 
-// isAdminUser 检查用户是否为管理员
-func isAdminUser(email string, adminEmails []string, adminDomains []string) bool {
-	email = strings.ToLower(email)
-
-	// 检查是否在管理员邮箱白名单中
-	for _, adminEmail := range adminEmails {
-		if strings.ToLower(adminEmail) == email {
-			return true
-		}
-	}
-
-	// 检查邮箱域名是否在管理员域名白名单中
-	parts := strings.Split(email, "@")
-	if len(parts) == 2 {
-		domain := parts[1]
-		for _, adminDomain := range adminDomains {
-			if strings.ToLower(adminDomain) == domain {
-				return true
-			}
-		}
-	}
-
-	return false
+// RequireAdmin 要求管理员角色的中间件（便捷函数）
+func RequireAdmin() func(http.Handler) http.Handler {
+	return RequireRole("admin")
 }
 
 // writeAdminError 写入管理员权限错误响应
@@ -165,6 +149,14 @@ func GetUserScopesFromContext(ctx context.Context) []string {
 		return scopes
 	}
 	return nil
+}
+
+// GetUserRoleFromContext 从上下文获取用户角色
+func GetUserRoleFromContext(ctx context.Context) string {
+	if role, ok := ctx.Value(UserRoleKey).(string); ok {
+		return role
+	}
+	return ""
 }
 
 // GetIsAdminFromContext 从上下文获取管理员标识

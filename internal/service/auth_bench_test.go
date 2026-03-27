@@ -126,7 +126,7 @@ func BenchmarkJWTService_GenerateAccessToken(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := jwtSvc.GenerateAccessToken("user-123", "test@example.com", []string{"openid", "profile"})
+		_, err := jwtSvc.GenerateAccessToken("user-123", "test@example.com", "user", []string{"openid", "profile"})
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -147,7 +147,7 @@ func BenchmarkJWTService_GenerateRefreshToken(b *testing.B) {
 
 func BenchmarkJWTService_ValidateAccessToken(b *testing.B) {
 	jwtSvc := setupBenchJWTService(b)
-	token, _ := jwtSvc.GenerateAccessToken("user-123", "test@example.com", []string{"openid"})
+	token, _ := jwtSvc.GenerateAccessToken("user-123", "test@example.com", "user", []string{"openid"})
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -163,7 +163,7 @@ func BenchmarkJWTService_GenerateAndValidate(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		token, _ := jwtSvc.GenerateAccessToken("user-123", "test@example.com", []string{"openid"})
+		token, _ := jwtSvc.GenerateAccessToken("user-123", "test@example.com", "user", []string{"openid"})
 		jwtSvc.ValidateAccessToken(token)
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -450,5 +452,233 @@ func TestNewCacheWithFallback(t *testing.T) {
 		ctx := context.Background()
 		err = c.Set(ctx, "key", "value", 5*time.Minute)
 		assert.NoError(t, err)
+	})
+}
+
+// ============================================================================
+// RedisCache 测试（使用 miniredis）
+// ============================================================================
+
+// setupRedisCache 创建带有 miniredis 的 RedisCache 用于测试
+func setupRedisCache(t *testing.T) (*cache.RedisCache, *miniredis.Miniredis) {
+	t.Helper()
+	mr := miniredis.RunT(t)
+
+	client := redis.NewClient(&redis.Options{
+		Addr: mr.Addr(),
+	})
+
+	ctx := context.Background()
+	require.NoError(t, client.Ping(ctx).Err())
+
+	return &cache.RedisCache{}, mr
+}
+
+func TestRedisCache_GetSet(t *testing.T) {
+	mr := miniredis.RunT(t)
+	defer mr.Close()
+
+	c, err := cache.NewRedisCacheWithOptions(&redis.Options{
+		Addr: mr.Addr(),
+	})
+	require.NoError(t, err)
+	defer c.Close()
+
+	ctx := context.Background()
+
+	t.Run("设置和获取缓存", func(t *testing.T) {
+		type TestData struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+
+		key := "redis-test-key"
+		value := TestData{ID: "123", Name: "test"}
+
+		err := c.Set(ctx, key, value, 5*time.Minute)
+		require.NoError(t, err)
+
+		var result TestData
+		err = c.Get(ctx, key, &result)
+		require.NoError(t, err)
+		assert.Equal(t, value.ID, result.ID)
+		assert.Equal(t, value.Name, result.Name)
+	})
+
+	t.Run("缓存未命中", func(t *testing.T) {
+		var result string
+		err := c.Get(ctx, "nonexistent-key", &result)
+		assert.ErrorIs(t, err, cache.ErrCacheMiss)
+	})
+}
+
+func TestRedisCache_Delete(t *testing.T) {
+	mr := miniredis.RunT(t)
+	defer mr.Close()
+
+	c, err := cache.NewRedisCacheWithOptions(&redis.Options{
+		Addr: mr.Addr(),
+	})
+	require.NoError(t, err)
+	defer c.Close()
+
+	ctx := context.Background()
+
+	t.Run("删除缓存", func(t *testing.T) {
+		key := "redis-delete-key"
+		value := "test-value"
+
+		err := c.Set(ctx, key, value, 5*time.Minute)
+		require.NoError(t, err)
+
+		err = c.Delete(ctx, key)
+		require.NoError(t, err)
+
+		var result string
+		err = c.Get(ctx, key, &result)
+		assert.ErrorIs(t, err, cache.ErrCacheMiss)
+	})
+}
+
+func TestRedisCache_DeletePattern(t *testing.T) {
+	mr := miniredis.RunT(t)
+	defer mr.Close()
+
+	c, err := cache.NewRedisCacheWithOptions(&redis.Options{
+		Addr: mr.Addr(),
+	})
+	require.NoError(t, err)
+	defer c.Close()
+
+	ctx := context.Background()
+
+	t.Run("按模式删除缓存", func(t *testing.T) {
+		c.Set(ctx, "user:123", "user1", 5*time.Minute)
+		c.Set(ctx, "user:456", "user2", 5*time.Minute)
+		c.Set(ctx, "token:abc", "token1", 5*time.Minute)
+
+		err := c.DeletePattern(ctx, "user:*")
+		require.NoError(t, err)
+
+		var result string
+		err = c.Get(ctx, "user:123", &result)
+		assert.ErrorIs(t, err, cache.ErrCacheMiss)
+
+		err = c.Get(ctx, "user:456", &result)
+		assert.ErrorIs(t, err, cache.ErrCacheMiss)
+
+		err = c.Get(ctx, "token:abc", &result)
+		assert.NoError(t, err)
+	})
+}
+
+func TestRedisCache_SetWithNilProtection(t *testing.T) {
+	mr := miniredis.RunT(t)
+	defer mr.Close()
+
+	c, err := cache.NewRedisCacheWithOptions(&redis.Options{
+		Addr: mr.Addr(),
+	})
+	require.NoError(t, err)
+	defer c.Close()
+
+	ctx := context.Background()
+
+	t.Run("设置nil值使用nilTTL", func(t *testing.T) {
+		key := "redis-nil-key"
+		err := c.SetWithNilProtection(ctx, key, nil, 5*time.Minute, 1*time.Minute)
+		require.NoError(t, err)
+
+		var result string
+		err = c.Get(ctx, key, &result)
+		assert.ErrorIs(t, err, cache.ErrCacheMiss)
+	})
+
+	t.Run("设置非nil值使用ttl", func(t *testing.T) {
+		key := "redis-non-nil-key"
+		value := "test-value"
+		err := c.SetWithNilProtection(ctx, key, value, 5*time.Minute, 1*time.Minute)
+		require.NoError(t, err)
+
+		var result string
+		err = c.Get(ctx, key, &result)
+		require.NoError(t, err)
+		assert.Equal(t, value, result)
+	})
+
+	t.Run("序列化失败返回错误", func(t *testing.T) {
+		ch := make(chan int)
+		err := c.SetWithNilProtection(ctx, "bad-key", ch, 5*time.Minute, 1*time.Minute)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "序列化")
+	})
+}
+
+func TestRedisCache_Ping(t *testing.T) {
+	mr := miniredis.RunT(t)
+	defer mr.Close()
+
+	c, err := cache.NewRedisCacheWithOptions(&redis.Options{
+		Addr: mr.Addr(),
+	})
+	require.NoError(t, err)
+	defer c.Close()
+
+	ctx := context.Background()
+	err = c.Ping(ctx)
+	assert.NoError(t, err)
+}
+
+func TestRedisCache_Close(t *testing.T) {
+	mr := miniredis.RunT(t)
+	defer mr.Close()
+
+	c, err := cache.NewRedisCacheWithOptions(&redis.Options{
+		Addr: mr.Addr(),
+	})
+	require.NoError(t, err)
+
+	err = c.Close()
+	assert.NoError(t, err)
+}
+
+func TestNewRedisCacheWithOptions(t *testing.T) {
+	t.Run("连接成功", func(t *testing.T) {
+		mr := miniredis.RunT(t)
+		defer mr.Close()
+
+		c, err := cache.NewRedisCacheWithOptions(&redis.Options{
+			Addr: mr.Addr(),
+		})
+		require.NoError(t, err)
+		assert.NotNil(t, c)
+		defer c.Close()
+	})
+
+	t.Run("连接失败", func(t *testing.T) {
+		_, err := cache.NewRedisCacheWithOptions(&redis.Options{
+			Addr: "invalid:99999",
+		})
+		assert.Error(t, err)
+	})
+}
+
+func TestRedisCache_SetNonSerializable(t *testing.T) {
+	mr := miniredis.RunT(t)
+	defer mr.Close()
+
+	c, err := cache.NewRedisCacheWithOptions(&redis.Options{
+		Addr: mr.Addr(),
+	})
+	require.NoError(t, err)
+	defer c.Close()
+
+	ctx := context.Background()
+
+	t.Run("Set非序列化值", func(t *testing.T) {
+		ch := make(chan int)
+		err := c.Set(ctx, "bad-key", ch, 5*time.Minute)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "序列化")
 	})
 }

@@ -297,5 +297,5 @@ func (s *SocialLoginService) findOrCreateUser(ctx context.Context, provider stri
 }
 
 func (s *SocialLoginService) generateTokenPair(ctx context.Context, user *model.User) (*model.LoginResponse, error) {
-	return s.tokenSvc.GenerateTokenPair(ctx, user.ID, user.Email, []string{"openid", "profile", "email"}, "")
+	return s.tokenSvc.GenerateTokenPair(ctx, user.ID, user.Email, user.Role, []string{"openid", "profile", "email"}, "")
 }

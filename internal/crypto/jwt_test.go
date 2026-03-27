@@ -63,7 +63,7 @@ func TestJWTService_GenerateAccessToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			token, err := svc.GenerateAccessToken(tt.userID, tt.email, tt.scopes)
+			token, err := svc.GenerateAccessToken(tt.userID, tt.email, "user", tt.scopes)
 
 			require.NoError(t, err)
 			assert.NotEmpty(t, token)
@@ -100,7 +100,7 @@ func TestJWTService_ValidateAccessToken(t *testing.T) {
 	svc := createTestJWTService(t)
 
 	// 生成有效的Token
-	validToken, err := svc.GenerateAccessToken("user-123", "test@example.com", []string{"openid"})
+	validToken, err := svc.GenerateAccessToken("user-123", "test@example.com", "user", []string{"openid"})
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -179,7 +179,7 @@ func TestJWTService_ExpiredToken(t *testing.T) {
 	)
 
 	// 生成Token
-	token, err := svc.GenerateAccessToken("user-123", "test@example.com", []string{"openid"})
+	token, err := svc.GenerateAccessToken("user-123", "test@example.com", "user", []string{"openid"})
 	require.NoError(t, err)
 
 	// 等待Token过期
@@ -263,7 +263,7 @@ func TestJWTService_DifferentKeyValidation(t *testing.T) {
 	)
 
 	// 用 svc1 生成 Token
-	token, err := svc1.GenerateAccessToken("user-123", "test@example.com", []string{"openid"})
+	token, err := svc1.GenerateAccessToken("user-123", "test@example.com", "user", []string{"openid"})
 	require.NoError(t, err)
 
 	// 用 svc2 验证应该失败
@@ -368,7 +368,7 @@ func TestJWTService_GenerateAccessToken_NoActiveKey(t *testing.T) {
 	)
 
 	// 尝试生成Token应该失败
-	_, err := svc.GenerateAccessToken("user-123", "test@example.com", []string{"openid"})
+	_, err := svc.GenerateAccessToken("user-123", "test@example.com", "user", []string{"openid"})
 	assert.ErrorIs(t, err, crypto.ErrNoActiveKey)
 }
 
@@ -388,7 +388,7 @@ func TestJWTService_GenerateAccessTokenWithKeyID(t *testing.T) {
 	svc.SetActiveKey(keyID, privateKey, &privateKey.PublicKey)
 
 	// 使用指定的keyID生成Token
-	token, err := svc.GenerateAccessTokenWithKeyID("user-123", "test@example.com", []string{"openid"}, keyID)
+	token, err := svc.GenerateAccessTokenWithKeyID("user-123", "test@example.com", "user", []string{"openid"}, keyID)
 	require.NoError(t, err)
 	assert.NotEmpty(t, token)
 

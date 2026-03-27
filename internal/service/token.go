@@ -36,12 +36,12 @@ func NewTokenService(jwtSvc *crypto.JWTService, store store.Store) *TokenService
 // 生成access_token和refresh_token，存储到数据库并返回响应
 func (s *TokenService) GenerateTokenPair(
 	ctx context.Context,
-	userID, email string,
+	userID, email, role string,
 	scopes []string,
 	clientID string,
 ) (*model.LoginResponse, error) {
 	// 生成access token
-	accessToken, err := s.jwtSvc.GenerateAccessToken(userID, email, scopes)
+	accessToken, err := s.jwtSvc.GenerateAccessToken(userID, email, role, scopes)
 	if err != nil {
 		return nil, err
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/your-org/sso/internal/cache"
 	"github.com/your-org/sso/internal/crypto"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/service"
@@ -575,4 +576,49 @@ func TestAuthService_LoginWithAudit(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEmpty(t, loginResp.AccessToken)
 	})
+}
+
+// ============================================================================
+// NewAuthServiceWithCache 测试
+// ============================================================================
+
+func TestNewAuthServiceWithCache(t *testing.T) {
+	store := mock.New()
+	passwordSvc := crypto.NewPasswordService(10)
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	jwtSvc := crypto.NewJWTService(
+		privateKey,
+		&privateKey.PublicKey,
+		"test-issuer",
+		15*time.Minute,
+		7*24*time.Hour,
+	)
+
+	// 创建内存缓存
+	memCache := cache.NewMemoryCache()
+	defer memCache.Close()
+
+	// 创建带缓存的AuthService
+	authSvc := service.NewAuthServiceWithCache(
+		store,
+		passwordSvc,
+		jwtSvc,
+		5,
+		30*time.Minute,
+		memCache,
+	)
+
+	assert.NotNil(t, authSvc)
+
+	// 验证可以正常使用
+	ctx := context.Background()
+	user, err := authSvc.Register(ctx, &model.RegisterRequest{
+		Email:    "cache-test@example.com",
+		Password: "Password123!!",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "cache-test@example.com", user.Email)
 }

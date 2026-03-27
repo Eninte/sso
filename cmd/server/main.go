@@ -223,10 +223,10 @@ func main() {
 	protected.HandleFunc("/mfa/disable", mfaHandler.HandleDisableMFA).Methods("POST")
 	protected.HandleFunc("/mfa/status", mfaHandler.HandleMFAStatus).Methods("GET")
 
-	// 管理员端点 (需要认证 + 管理员权限)
+	// 管理员端点 (需要认证 + 管理员角色)
 	admin := router.PathPrefix("/admin").Subrouter()
 	admin.Use(middleware.AuthMiddleware(jwtSvc))
-	admin.Use(middleware.AdminMiddleware(cfg.GetAdminEmails(), cfg.GetAdminDomains()))
+	admin.Use(middleware.RequireAdmin())
 	admin.HandleFunc("/health", adminHandler.HandleSystemHealth).Methods("GET")
 	admin.HandleFunc("/cleanup", adminHandler.HandleCleanup).Methods("POST")
 	admin.HandleFunc("/users", adminHandler.HandleListUsers).Methods("GET")

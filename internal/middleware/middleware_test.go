@@ -153,7 +153,7 @@ func TestAuthMiddleware_ValidToken(t *testing.T) {
 	jwtSvc := createTestJWTService(t)
 
 	// 生成有效的Token
-	token, err := jwtSvc.GenerateAccessToken("user-123", "test@example.com", []string{"openid", "profile"})
+	token, err := jwtSvc.GenerateAccessToken("user-123", "test@example.com", "user", []string{"openid", "profile"})
 	require.NoError(t, err)
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -276,7 +276,7 @@ func TestAuthMiddleware_ExpiredToken(t *testing.T) {
 	)
 
 	// 生成Token
-	token, err := jwtSvc.GenerateAccessToken("user-123", "test@example.com", []string{"openid"})
+	token, err := jwtSvc.GenerateAccessToken("user-123", "test@example.com", "user", []string{"openid"})
 	require.NoError(t, err)
 
 	// 等待Token过期
@@ -300,7 +300,7 @@ func TestAuthMiddleware_ExpiredToken(t *testing.T) {
 func TestAuthMiddleware_DifferentKeyToken(t *testing.T) {
 	// 用一个密钥生成Token
 	jwtSvc1 := createTestJWTService(t)
-	token, err := jwtSvc1.GenerateAccessToken("user-123", "test@example.com", []string{"openid"})
+	token, err := jwtSvc1.GenerateAccessToken("user-123", "test@example.com", "user", []string{"openid"})
 	require.NoError(t, err)
 
 	// 用另一个密钥验证
@@ -553,16 +553,16 @@ func TestRateLimiter_RemoteAddrWithoutPort(t *testing.T) {
 }
 
 // ============================================================================
-// AdminMiddleware 测试
+// RequireAdmin 测试
 // ============================================================================
 
-func TestAdminMiddleware(t *testing.T) {
+func TestRequireAdmin(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	t.Run("无邮箱上下文-返回401", func(t *testing.T) {
-		adminMw := middleware.AdminMiddleware([]string{"admin@example.com"}, []string{"company.com"})
+	t.Run("无角色上下文-返回401", func(t *testing.T) {
+		adminMw := middleware.RequireAdmin()
 		wrapped := adminMw(handler)
 
 		req := httptest.NewRequest("GET", "/admin", nil)
@@ -573,12 +573,12 @@ func TestAdminMiddleware(t *testing.T) {
 		assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	})
 
-	t.Run("非管理员邮箱-返回403", func(t *testing.T) {
-		adminMw := middleware.AdminMiddleware([]string{"admin@example.com"}, []string{})
+	t.Run("普通用户-返回403", func(t *testing.T) {
+		adminMw := middleware.RequireAdmin()
 		wrapped := adminMw(handler)
 
 		req := httptest.NewRequest("GET", "/admin", nil)
-		ctx := context.WithValue(req.Context(), middleware.UserEmailKey, "user@example.com")
+		ctx := context.WithValue(req.Context(), middleware.UserRoleKey, "user")
 		rec := httptest.NewRecorder()
 
 		wrapped.ServeHTTP(rec, req.WithContext(ctx))
@@ -586,12 +586,32 @@ func TestAdminMiddleware(t *testing.T) {
 		assert.Equal(t, http.StatusForbidden, rec.Code)
 	})
 
-	t.Run("管理员邮箱白名单匹配", func(t *testing.T) {
-		adminMw := middleware.AdminMiddleware([]string{"admin@example.com"}, []string{})
+	t.Run("管理员角色-返回200", func(t *testing.T) {
+		adminMw := middleware.RequireAdmin()
 		wrapped := adminMw(handler)
 
 		req := httptest.NewRequest("GET", "/admin", nil)
-		ctx := context.WithValue(req.Context(), middleware.UserEmailKey, "admin@example.com")
+		ctx := context.WithValue(req.Context(), middleware.UserRoleKey, "admin")
+		rec := httptest.NewRecorder()
+
+		wrapped.ServeHTTP(rec, req.WithContext(ctx))
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+}
+
+// RequireRole 测试
+func TestRequireRole(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	t.Run("角色匹配-返回200", func(t *testing.T) {
+		roleMw := middleware.RequireRole("admin", "super_admin")
+		wrapped := roleMw(handler)
+
+		req := httptest.NewRequest("GET", "/admin", nil)
+		ctx := context.WithValue(req.Context(), middleware.UserRoleKey, "admin")
 		rec := httptest.NewRecorder()
 
 		wrapped.ServeHTTP(rec, req.WithContext(ctx))
@@ -599,64 +619,12 @@ func TestAdminMiddleware(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 	})
 
-	t.Run("管理员邮箱大小写不敏感", func(t *testing.T) {
-		adminMw := middleware.AdminMiddleware([]string{"Admin@Example.com"}, []string{})
-		wrapped := adminMw(handler)
+	t.Run("角色不匹配-返回403", func(t *testing.T) {
+		roleMw := middleware.RequireRole("admin")
+		wrapped := roleMw(handler)
 
 		req := httptest.NewRequest("GET", "/admin", nil)
-		ctx := context.WithValue(req.Context(), middleware.UserEmailKey, "admin@example.com")
-		rec := httptest.NewRecorder()
-
-		wrapped.ServeHTTP(rec, req.WithContext(ctx))
-
-		assert.Equal(t, http.StatusOK, rec.Code)
-	})
-
-	t.Run("管理员域名白名单匹配", func(t *testing.T) {
-		adminMw := middleware.AdminMiddleware([]string{}, []string{"company.com"})
-		wrapped := adminMw(handler)
-
-		req := httptest.NewRequest("GET", "/admin", nil)
-		ctx := context.WithValue(req.Context(), middleware.UserEmailKey, "user@company.com")
-		rec := httptest.NewRecorder()
-
-		wrapped.ServeHTTP(rec, req.WithContext(ctx))
-
-		assert.Equal(t, http.StatusOK, rec.Code)
-	})
-
-	t.Run("非管理员域名-返回403", func(t *testing.T) {
-		adminMw := middleware.AdminMiddleware([]string{}, []string{"company.com"})
-		wrapped := adminMw(handler)
-
-		req := httptest.NewRequest("GET", "/admin", nil)
-		ctx := context.WithValue(req.Context(), middleware.UserEmailKey, "user@other.com")
-		rec := httptest.NewRecorder()
-
-		wrapped.ServeHTTP(rec, req.WithContext(ctx))
-
-		assert.Equal(t, http.StatusForbidden, rec.Code)
-	})
-
-	t.Run("空邮箱无@符号-不匹配域名", func(t *testing.T) {
-		adminMw := middleware.AdminMiddleware([]string{}, []string{"company.com"})
-		wrapped := adminMw(handler)
-
-		req := httptest.NewRequest("GET", "/admin", nil)
-		ctx := context.WithValue(req.Context(), middleware.UserEmailKey, "invalid-email")
-		rec := httptest.NewRecorder()
-
-		wrapped.ServeHTTP(rec, req.WithContext(ctx))
-
-		assert.Equal(t, http.StatusForbidden, rec.Code)
-	})
-
-	t.Run("空列表-所有用户拒绝", func(t *testing.T) {
-		adminMw := middleware.AdminMiddleware([]string{}, []string{})
-		wrapped := adminMw(handler)
-
-		req := httptest.NewRequest("GET", "/admin", nil)
-		ctx := context.WithValue(req.Context(), middleware.UserEmailKey, "any@example.com")
+		ctx := context.WithValue(req.Context(), middleware.UserRoleKey, "user")
 		rec := httptest.NewRecorder()
 
 		wrapped.ServeHTTP(rec, req.WithContext(ctx))

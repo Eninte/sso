@@ -257,7 +257,7 @@ func (s *AuthService) LoginWithAudit(ctx context.Context, req *model.LoginReques
 		s.auditSvc.LogUserLogin(ctx, user.ID, user.Email, auditCtx.IPAddress, auditCtx.UserAgent, true)
 	}
 
-	return s.generateTokenPair(ctx, user.ID, user.Email, []string{"openid", "profile", "email"}, "")
+	return s.generateTokenPair(ctx, user.ID, user.Email, user.Role, []string{"openid", "profile", "email"}, "")
 }
 
 func (s *AuthService) Login(ctx context.Context, req *model.LoginRequest) (*model.LoginResponse, error) {
@@ -327,7 +327,7 @@ func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken st
 		s.auditSvc.LogTokenRefresh(ctx, user.ID, tokenRecord.ClientID, auditCtx.IPAddress)
 	}
 
-	return s.generateTokenPair(ctx, user.ID, user.Email, tokenRecord.Scopes, tokenRecord.ClientID)
+	return s.generateTokenPair(ctx, user.ID, user.Email, user.Role, tokenRecord.Scopes, tokenRecord.ClientID)
 }
 
 func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (*model.LoginResponse, error) {
@@ -444,9 +444,9 @@ func (s *AuthService) ValidateToken(ctx context.Context, accessToken string) (*c
 // 使用TokenService统一处理Token生成逻辑
 func (s *AuthService) generateTokenPair(
 	ctx context.Context,
-	userID, email string,
+	userID, email, role string,
 	scopes []string,
 	clientID string,
 ) (*model.LoginResponse, error) {
-	return s.tokenSvc.GenerateTokenPair(ctx, userID, email, scopes, clientID)
+	return s.tokenSvc.GenerateTokenPair(ctx, userID, email, role, scopes, clientID)
 }

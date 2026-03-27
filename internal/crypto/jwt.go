@@ -137,13 +137,14 @@ type AccessTokenClaims struct {
 	KeyID  string   `json:"kid,omitempty"`
 	Email  string   `json:"email"`
 	Scopes []string `json:"scope"`
+	Role   string   `json:"role,omitempty"`
 }
 
-func (s *JWTService) GenerateAccessToken(userID, email string, scopes []string) (string, error) {
-	return s.GenerateAccessTokenWithKeyID(userID, email, scopes, s.activeKeyID)
+func (s *JWTService) GenerateAccessToken(userID, email, role string, scopes []string) (string, error) {
+	return s.GenerateAccessTokenWithKeyID(userID, email, role, scopes, s.activeKeyID)
 }
 
-func (s *JWTService) GenerateAccessTokenWithKeyID(userID, email string, scopes []string, keyID string) (string, error) {
+func (s *JWTService) GenerateAccessTokenWithKeyID(userID, email, role string, scopes []string, keyID string) (string, error) {
 	var privateKey *rsa.PrivateKey
 	if keyID != "" {
 		var ok bool
@@ -173,6 +174,7 @@ func (s *JWTService) GenerateAccessTokenWithKeyID(userID, email string, scopes [
 		KeyID:  keyID,
 		Email:  email,
 		Scopes: scopes,
+		Role:   role,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
