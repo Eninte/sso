@@ -174,76 +174,115 @@ func (s *OAuthService) ExchangeAuthorizationCode(
 	redirectURI string,
 	codeVerifier string,
 ) (*model.LoginResponse, error) {
+	// 验证授权码
+	authCode, err := s.validateAuthorizationCode(ctx, code, clientID, redirectURI)
+	if err != nil {
+		return nil, err
+	}
+
+	// 验证客户端密钥
+	if err := s.validateClientSecret(ctx, authCode, clientID, clientSecret); err != nil {
+		return nil, err
+	}
+
+	// 验证PKCE
+	if err := s.validatePKCE(ctx, authCode, clientID, codeVerifier); err != nil {
+		return nil, err
+	}
+
+	// 标记授权码为已使用
+	if err := s.markAuthorizationCodeUsed(ctx, authCode, clientID); err != nil {
+		return nil, err
+	}
+
+	// 生成令牌响应
+	return s.generateTokenResponse(ctx, authCode)
+}
+
+// validateAuthorizationCode 验证授权码有效性
+func (s *OAuthService) validateAuthorizationCode(
+	ctx context.Context,
+	code string,
+	clientID string,
+	redirectURI string,
+) (*model.AuthorizationCode, error) {
 	authCode, err := s.store.GetAuthorizationCode(ctx, code)
 	if err != nil {
-		// 记录无效授权码审计日志
-		if s.auditSvc != nil {
-			s.auditSvc.LogAuthCodeInvalid(ctx, "", clientID, "", "invalid_code")
-		}
+		s.logAuthCodeInvalid(ctx, "", clientID, "", "invalid_code")
 		return nil, ErrInvalidCode
 	}
 
 	if authCode.ClientID != clientID {
-		// 记录无效客户端审计日志
-		if s.auditSvc != nil {
-			s.auditSvc.LogAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "invalid_client")
-		}
+		s.logAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "invalid_client")
 		return nil, ErrInvalidClient
 	}
 
 	if authCode.RedirectURI != redirectURI {
-		// 记录无效重定向URI审计日志
-		if s.auditSvc != nil {
-			s.auditSvc.LogAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "invalid_redirect_uri")
-		}
+		s.logAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "invalid_redirect_uri")
 		return nil, ErrInvalidRedirectURI
 	}
 
 	if authCode.ExpiresAt.Before(time.Now()) {
-		// 记录授权码过期审计日志
-		if s.auditSvc != nil {
-			s.auditSvc.LogAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "code_expired")
-		}
+		s.logAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "code_expired")
 		return nil, ErrCodeExpired
 	}
 
 	if authCode.UsedAt != nil {
-		// 记录授权码已使用审计日志
-		if s.auditSvc != nil {
-			s.auditSvc.LogAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "code_used")
-		}
+		s.logAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "code_used")
 		return nil, ErrCodeUsed
 	}
 
+	return authCode, nil
+}
+
+// validateClientSecret 验证客户端密钥
+func (s *OAuthService) validateClientSecret(
+	ctx context.Context,
+	authCode *model.AuthorizationCode,
+	clientID string,
+	clientSecret string,
+) error {
 	client, err := s.getClient(ctx, clientID)
 	if err != nil {
-		return nil, ErrInvalidClient
+		return ErrInvalidClient
 	}
 
 	if !client.PublicClient {
 		if !compareClientSecret(client.ClientSecret, clientSecret) {
-			// 记录无效客户端密钥审计日志
-			if s.auditSvc != nil {
-				s.auditSvc.LogAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "invalid_client_secret")
-			}
-			return nil, ErrInvalidClient
+			s.logAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "invalid_client_secret")
+			return ErrInvalidClient
 		}
 	}
 
+	return nil
+}
+
+// validatePKCE 验证PKCE码验证器
+func (s *OAuthService) validatePKCE(
+	ctx context.Context,
+	authCode *model.AuthorizationCode,
+	clientID string,
+	codeVerifier string,
+) error {
 	if authCode.CodeChallenge != "" {
 		if err := verifyPKCE(authCode.CodeChallenge, authCode.CodeChallengeMethod, codeVerifier); err != nil {
-			// 记录PKCE验证失败审计日志
-			if s.auditSvc != nil {
-				s.auditSvc.LogAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "pkce_verification_failed")
-			}
-			return nil, ErrInvalidCodeVerifier
+			s.logAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "pkce_verification_failed")
+			return ErrInvalidCodeVerifier
 		}
 	}
+	return nil
+}
 
+// markAuthorizationCodeUsed 标记授权码为已使用
+func (s *OAuthService) markAuthorizationCodeUsed(
+	ctx context.Context,
+	authCode *model.AuthorizationCode,
+	clientID string,
+) error {
 	now := time.Now()
 	authCode.UsedAt = &now
 	if err := s.store.UpdateAuthorizationCode(ctx, authCode); err != nil {
-		return nil, fmt.Errorf("更新授权码状态失败: %w", err)
+		return fmt.Errorf("更新授权码状态失败: %w", err)
 	}
 
 	// 记录授权码使用审计日志
@@ -251,11 +290,14 @@ func (s *OAuthService) ExchangeAuthorizationCode(
 		s.auditSvc.LogAuthCodeUsed(ctx, authCode.UserID, clientID, "")
 	}
 
-	// TODO: 实现完整的令牌生成逻辑
-	// 当前返回占位符，需要实现:
-	// 1. 生成 access_token 和 refresh_token
-	// 2. 存储 token 记录到数据库
-	// 3. 返回真实的令牌响应
+	return nil
+}
+
+// generateTokenResponse 生成令牌响应
+func (s *OAuthService) generateTokenResponse(
+	ctx context.Context,
+	authCode *model.AuthorizationCode,
+) (*model.LoginResponse, error) {
 	user, err := s.store.GetByID(ctx, authCode.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("获取用户信息失败: %w", err)
@@ -269,6 +311,13 @@ func (s *OAuthService) ExchangeAuthorizationCode(
 		TokenType:    "Bearer",
 		ExpiresIn:    900,
 	}, nil
+}
+
+// logAuthCodeInvalid 记录无效授权码审计日志
+func (s *OAuthService) logAuthCodeInvalid(ctx context.Context, userID, clientID, ipAddress, reason string) {
+	if s.auditSvc != nil {
+		s.auditSvc.LogAuthCodeInvalid(ctx, userID, clientID, ipAddress, reason)
+	}
 }
 
 // RevokeToken 撤销Token

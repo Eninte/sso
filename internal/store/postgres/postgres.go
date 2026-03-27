@@ -22,6 +22,10 @@ import (
 // 默认查询超时时间
 const DefaultQueryTimeout = 10 * time.Second
 
+// CleanupBatchSize 清理过期数据时的批量大小
+// 使用分批删除避免长时间锁表和大量WAL日志
+const CleanupBatchSize = 1000
+
 // Store PostgreSQL存储实现
 type Store struct {
 	db      *sql.DB
@@ -629,28 +633,73 @@ func (s *Store) RevokeAllUserTokens(ctx context.Context, userID string) error {
 }
 
 // CleanupExpired 清理过期的Token和授权码
+// 使用分批删除避免长时间锁表和大量WAL日志
 func (s *Store) CleanupExpired(ctx context.Context) error {
-	// 清理过期的Token
-	_, err := s.db.ExecContext(ctx, `DELETE FROM tokens WHERE expires_at < $1`, time.Now())
-	if err != nil {
-		return err
+	now := time.Now()
+
+	// 分批清理过期的Token
+	if err := s.cleanupExpiredBatch(ctx, "tokens", now); err != nil {
+		return fmt.Errorf("清理过期Token失败: %w", err)
 	}
 
-	// 清理过期的授权码
-	_, err = s.db.ExecContext(ctx, `DELETE FROM authorization_codes WHERE expires_at < $1`, time.Now())
-	if err != nil {
-		return err
+	// 分批清理过期的授权码
+	if err := s.cleanupExpiredBatch(ctx, "authorization_codes", now); err != nil {
+		return fmt.Errorf("清理过期授权码失败: %w", err)
 	}
 
-	// 清理过期的验证令牌
-	_, err = s.db.ExecContext(ctx, `DELETE FROM verification_tokens WHERE expires_at < $1`, time.Now())
-	if err != nil {
-		return err
+	// 分批清理过期的验证令牌
+	if err := s.cleanupExpiredBatch(ctx, "verification_tokens", now); err != nil {
+		return fmt.Errorf("清理过期验证令牌失败: %w", err)
 	}
 
-	// 清理过期的重置令牌
-	_, err = s.db.ExecContext(ctx, `DELETE FROM reset_tokens WHERE expires_at < $1`, time.Now())
-	return err
+	// 分批清理过期的重置令牌
+	if err := s.cleanupExpiredBatch(ctx, "reset_tokens", now); err != nil {
+		return fmt.Errorf("清理过期重置令牌失败: %w", err)
+	}
+
+	return nil
+}
+
+// cleanupExpiredBatch 分批清理指定表中的过期数据
+// 每次删除最多CleanupBatchSize条记录，避免长时间锁表
+func (s *Store) cleanupExpiredBatch(ctx context.Context, tableName string, before time.Time) error {
+	query := fmt.Sprintf(`
+		DELETE FROM %s 
+		WHERE id IN (
+			SELECT id FROM %s 
+			WHERE expires_at < $1 
+			LIMIT $2
+		)
+	`, tableName, tableName)
+
+	totalDeleted := 0
+	for {
+		result, err := s.db.ExecContext(ctx, query, before, CleanupBatchSize)
+		if err != nil {
+			return err
+		}
+
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+
+		totalDeleted += int(affected)
+
+		// 如果删除的记录数小于批量大小，说明已经没有更多过期记录
+		if affected < CleanupBatchSize {
+			break
+		}
+
+		// 避免过度占用数据库资源，短暂休息
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	return nil
 }
 
 // ============================================================================

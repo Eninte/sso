@@ -140,10 +140,18 @@ type AccessTokenClaims struct {
 	Role   string   `json:"role,omitempty"`
 }
 
+// GenerateAccessToken 生成访问令牌
+// 使用当前活跃密钥签名
 func (s *JWTService) GenerateAccessToken(userID, email, role string, scopes []string) (string, error) {
 	return s.GenerateAccessTokenWithKeyID(userID, email, role, scopes, s.activeKeyID)
 }
 
+// GenerateAccessTokenWithKeyID 使用指定密钥生成访问令牌
+// userID: 用户唯一标识
+// email: 用户邮箱
+// role: 用户角色
+// scopes: 授权范围
+// keyID: 指定的密钥ID，为空时使用活跃密钥
 func (s *JWTService) GenerateAccessTokenWithKeyID(userID, email, role string, scopes []string, keyID string) (string, error) {
 	var privateKey *rsa.PrivateKey
 	if keyID != "" {
@@ -184,6 +192,8 @@ func (s *JWTService) GenerateAccessTokenWithKeyID(userID, email, role string, sc
 	return token.SignedString(privateKey)
 }
 
+// GenerateRefreshToken 生成刷新令牌
+// 使用密码学安全的随机数生成器生成32字节的随机令牌
 func (s *JWTService) GenerateRefreshToken() (string, error) {
 	bytes := make([]byte, 32)
 	if _, err := rand.Read(bytes); err != nil {
@@ -192,6 +202,9 @@ func (s *JWTService) GenerateRefreshToken() (string, error) {
 	return base64.URLEncoding.EncodeToString(bytes), nil
 }
 
+// ValidateAccessToken 验证访问令牌并返回Claims
+// 验证签名、过期时间和算法
+// 返回解析后的Claims或错误
 func (s *JWTService) ValidateAccessToken(tokenString string) (*AccessTokenClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &AccessTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
 		if token.Method.Alg() != jwt.SigningMethodRS256.Alg() {
