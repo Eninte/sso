@@ -4,16 +4,28 @@ package cache_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
-	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/your-org/sso/internal/cache"
 )
+
+// ============================================================================
+// 测试辅助函数
+// ============================================================================
+
+// testRedisAddr 返回测试用 Redis 地址，优先使用环境变量
+func testRedisAddr() string {
+	if addr := os.Getenv("REDIS_TEST_ADDR"); addr != "" {
+		return addr
+	}
+	return "192.168.1.3:30059"
+}
 
 // ============================================================================
 // MemoryCache 测试
@@ -456,30 +468,12 @@ func TestNewCacheWithFallback(t *testing.T) {
 }
 
 // ============================================================================
-// RedisCache 测试（使用 miniredis）
+// RedisCache 测试（使用真实 Redis）
 // ============================================================================
 
-// setupRedisCache 创建带有 miniredis 的 RedisCache 用于测试
-func setupRedisCache(t *testing.T) (*cache.RedisCache, *miniredis.Miniredis) {
-	t.Helper()
-	mr := miniredis.RunT(t)
-
-	client := redis.NewClient(&redis.Options{
-		Addr: mr.Addr(),
-	})
-
-	ctx := context.Background()
-	require.NoError(t, client.Ping(ctx).Err())
-
-	return &cache.RedisCache{}, mr
-}
-
 func TestRedisCache_GetSet(t *testing.T) {
-	mr := miniredis.RunT(t)
-	defer mr.Close()
-
 	c, err := cache.NewRedisCacheWithOptions(&redis.Options{
-		Addr: mr.Addr(),
+		Addr: testRedisAddr(),
 	})
 	require.NoError(t, err)
 	defer c.Close()
@@ -513,11 +507,11 @@ func TestRedisCache_GetSet(t *testing.T) {
 }
 
 func TestRedisCache_Delete(t *testing.T) {
-	mr := miniredis.RunT(t)
-	defer mr.Close()
+	//
+	//
 
 	c, err := cache.NewRedisCacheWithOptions(&redis.Options{
-		Addr: mr.Addr(),
+		Addr: testRedisAddr(),
 	})
 	require.NoError(t, err)
 	defer c.Close()
@@ -541,11 +535,11 @@ func TestRedisCache_Delete(t *testing.T) {
 }
 
 func TestRedisCache_DeletePattern(t *testing.T) {
-	mr := miniredis.RunT(t)
-	defer mr.Close()
+	//
+	//
 
 	c, err := cache.NewRedisCacheWithOptions(&redis.Options{
-		Addr: mr.Addr(),
+		Addr: testRedisAddr(),
 	})
 	require.NoError(t, err)
 	defer c.Close()
@@ -573,11 +567,11 @@ func TestRedisCache_DeletePattern(t *testing.T) {
 }
 
 func TestRedisCache_SetWithNilProtection(t *testing.T) {
-	mr := miniredis.RunT(t)
-	defer mr.Close()
+	//
+	//
 
 	c, err := cache.NewRedisCacheWithOptions(&redis.Options{
-		Addr: mr.Addr(),
+		Addr: testRedisAddr(),
 	})
 	require.NoError(t, err)
 	defer c.Close()
@@ -615,11 +609,11 @@ func TestRedisCache_SetWithNilProtection(t *testing.T) {
 }
 
 func TestRedisCache_Ping(t *testing.T) {
-	mr := miniredis.RunT(t)
-	defer mr.Close()
+	//
+	//
 
 	c, err := cache.NewRedisCacheWithOptions(&redis.Options{
-		Addr: mr.Addr(),
+		Addr: testRedisAddr(),
 	})
 	require.NoError(t, err)
 	defer c.Close()
@@ -630,11 +624,11 @@ func TestRedisCache_Ping(t *testing.T) {
 }
 
 func TestRedisCache_Close(t *testing.T) {
-	mr := miniredis.RunT(t)
-	defer mr.Close()
+	//
+	//
 
 	c, err := cache.NewRedisCacheWithOptions(&redis.Options{
-		Addr: mr.Addr(),
+		Addr: testRedisAddr(),
 	})
 	require.NoError(t, err)
 
@@ -644,11 +638,11 @@ func TestRedisCache_Close(t *testing.T) {
 
 func TestNewRedisCacheWithOptions(t *testing.T) {
 	t.Run("连接成功", func(t *testing.T) {
-		mr := miniredis.RunT(t)
-		defer mr.Close()
+		//
+		//
 
 		c, err := cache.NewRedisCacheWithOptions(&redis.Options{
-			Addr: mr.Addr(),
+			Addr: testRedisAddr(),
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, c)
@@ -664,11 +658,11 @@ func TestNewRedisCacheWithOptions(t *testing.T) {
 }
 
 func TestRedisCache_SetNonSerializable(t *testing.T) {
-	mr := miniredis.RunT(t)
-	defer mr.Close()
+	//
+	//
 
 	c, err := cache.NewRedisCacheWithOptions(&redis.Options{
-		Addr: mr.Addr(),
+		Addr: testRedisAddr(),
 	})
 	require.NoError(t, err)
 	defer c.Close()

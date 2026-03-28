@@ -40,21 +40,34 @@ dev: ## 开发模式: 启动依赖服务并运行应用
 # ============================================================================
 .PHONY: test
 test: ## 运行所有测试
-	go test -v -race ./...
+	gotestsum --format pkgname -- -race ./...
+
+.PHONY: test-verbose
+test-verbose: ## 运行测试（详细输出）
+	gotestsum --format standard-verbose -- -race -count=1 ./...
 
 .PHONY: test-unit
 test-unit: ## 运行单元测试 (短测试)
-	go test -v -race -short ./...
+	gotestsum --format pkgname -- -race -short ./...
 
 .PHONY: test-integration
 test-integration: ## 运行集成测试
-	go test -v -tags=integration ./...
+	gotestsum --format pkgname -- -race -tags=integration ./...
 
 .PHONY: test-coverage
-test-coverage: ## 生成测试覆盖率报告
+test-coverage: ## 生成测试覆盖率报告（HTML）
 	go test -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "覆盖率报告: coverage.html"
+
+.PHONY: test-report
+test-report: ## 生成JUnit XML测试报告
+	gotestsum --junitfile test-results.xml --format pkgname -- -race ./...
+	@echo "测试报告: test-results.xml"
+
+.PHONY: test-failed
+test-failed: ## 仅重跑失败的测试
+	gotestsum --rerun-fails --format pkgname -- -race ./...
 
 .PHONY: test-coverage-check
 test-coverage-check: ## 运行测试并检查覆盖率阈值 (>=70%)
@@ -133,7 +146,7 @@ fmt: ## 格式化代码
 .PHONY: clean
 clean: ## 清理构建文件
 	rm -rf $(BUILD_DIR)
-	rm -f coverage.out coverage.html
+	rm -f coverage.out coverage.html test-results.xml
 
 # ============================================================================
 # 帮助

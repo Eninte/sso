@@ -298,7 +298,7 @@ sso/
 | DB_PORT | 数据库端口 | 5432 | - |
 | DB_NAME | 数据库名称 | sso | - |
 | DB_PASSWORD | 数据库密码 | - | **必填** |
-| DB_SSL_MODE | 数据库SSL模式 | disable | **必须为require** |
+| DB_SSL_MODE | 数据库SSL模式 | require | **必须为require** |
 | JWT_PRIVATE_KEY_PATH | JWT私钥路径 | ./keys/private.pem | - |
 | JWT_PUBLIC_KEY_PATH | JWT公钥路径 | ./keys/public.pem | - |
 | BCRYPT_COST | bcrypt成本因子 | 12 | **必须>=12** |

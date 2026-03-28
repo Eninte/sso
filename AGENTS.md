@@ -36,14 +36,35 @@ make test-security      # go vet + govulncheck
 
 Linter配置：`.golangci.yml`（enable-all选择性禁用）。提交前必须运行 `make lint`。
 
-## 数据库与基础设施
+## 环境配置
+
+**⚠️ 禁止安装 PostgreSQL 或 Redis！测试服务已在远程主机运行，直接使用。**
+
+| 变量 | 测试环境 | 生产环境 | 说明 |
+|------|---------|---------|------|
+| `DB_HOST` | `192.168.1.3` | 按需 | |
+| `DB_PORT` | `5432` | `5432` | |
+| `DB_NAME` | `sso_test` | `sso` | |
+| `DB_USER` | `sso` | `sso` | |
+| `DB_PASSWORD` | `sso`（测试） | **必须设置强密码** | 生产禁止使用示例值 |
+| `DB_SSL_MODE` | `disable` | **`require`** | 生产禁止disable |
+| `REDIS_HOST` | `192.168.1.3` | 按需 | |
+| `REDIS_PORT` | `30059` | `6379` | |
+| `REDIS_PASSWORD` | 无 | 按需 | |
+| `BCRYPT_COST` | `10` | **`>=12`** | |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | **`https://your.com`** | |
+| `JWT_PRIVATE_KEY_PATH` | `./keys/private.pem` | `./keys/private.pem` | `make generate-keys` |
+| `JWT_PUBLIC_KEY_PATH` | `./keys/public.pem` | `./keys/public.pem` | |
+
+运行需要数据库的测试：`DATABASE_URL="postgres://sso:sso@192.168.1.3:5432/sso_test?sslmode=disable" make test`
+
+配置文件：`.env.test`（测试）、`.env.example`（模板）。
 
 ```bash
-make migrate-up                                    # 执行迁移
-make migrate-down                                  # 回滚迁移
-make migrate-create NAME=description               # 创建迁移文件
-make generate-keys                                 # 生成RSA密钥到./keys/
-make docker-up / make docker-down                  # 启动/停止Docker服务
+make migrate-up / make migrate-down              # 数据库迁移
+make migrate-create NAME=description             # 创建迁移文件
+make generate-keys                               # 生成RSA密钥
+make docker-up / make docker-down                # 启动/停止Docker服务
 ```
 
 ## 分层架构
@@ -154,17 +175,6 @@ Model结构体必须有JSON标签：`json:"field_name,omitempty"`。
 - 登录锁定：5次失败 → 锁定30分钟
 - 限流：默认100请求/分钟（通过 `middleware.RateLimiter` 实现）
 - CORS：生产环境必须设置 `CORS_ALLOWED_ORIGINS`
-
-## 生产环境必填配置
-
-```bash
-DB_PASSWORD=<strong-password>           # 数据库密码
-DB_SSL_MODE=require                     # 数据库SSL（禁止disable）
-CORS_ALLOWED_ORIGINS=https://your.com   # 允许的跨域源
-BCRYPT_COST=12                          # bcrypt成本（>=12）
-JWT_PRIVATE_KEY_PATH=./keys/private.pem # RSA私钥路径
-JWT_PUBLIC_KEY_PATH=./keys/public.pem   # RSA公钥路径
-```
 
 ## 常见问题
 

@@ -315,3 +315,55 @@ func TestAdminHandler_HandleCleanup(t *testing.T) {
 		assert.Equal(t, "清理完成", resp["message"])
 	})
 }
+
+// ============================================================================
+// HandleListUsers 错误处理测试
+// ============================================================================
+
+func TestAdminHandler_HandleListUsers_InvalidParams(t *testing.T) {
+	adminHandler, _ := createTestAdminHandler()
+
+	t.Run("无效的page参数", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/admin/users?page=abc&pageSize=10", nil)
+		req = addAdminContext(req, "admin@example.com")
+		w := httptest.NewRecorder()
+
+		adminHandler.HandleListUsers(w, req)
+
+		// 应该使用默认值处理
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+// ============================================================================
+// HandleDisableUser / HandleEnableUser 补充测试
+// ============================================================================
+
+func TestAdminHandler_HandleEnableUser_NotFound(t *testing.T) {
+	adminHandler, _ := createTestAdminHandler()
+
+	t.Run("启用不存在的用户", func(t *testing.T) {
+		body := map[string]string{"user_id": "nonexistent"}
+		bodyBytes, _ := json.Marshal(body)
+
+		req := httptest.NewRequest("POST", "/admin/users/enable", bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		req = addAdminContext(req, "admin@example.com")
+		w := httptest.NewRecorder()
+
+		adminHandler.HandleEnableUser(w, req)
+
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("无效的JSON", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/admin/users/enable", bytes.NewReader([]byte("invalid")))
+		req.Header.Set("Content-Type", "application/json")
+		req = addAdminContext(req, "admin@example.com")
+		w := httptest.NewRecorder()
+
+		adminHandler.HandleEnableUser(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}

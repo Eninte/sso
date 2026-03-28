@@ -40,6 +40,21 @@ var AllowedCleanupTables = map[string]bool{
 // 保持向后兼容性
 var allowedCleanupTables = AllowedCleanupTables
 
+// cleanupTableKeys 各清理表的主键列名（只读，通过getPrimaryKeyColumn访问）
+var cleanupTableKeys = map[string]string{
+	"tokens":              "id",
+	"authorization_codes": "code",
+	"verification_tokens": "token",
+	"reset_tokens":        "token",
+}
+
+// getPrimaryKeyColumn 返回指定表的主键列名
+// 如果表不在映射中，返回空字符串和false
+func getPrimaryKeyColumn(table string) (string, bool) {
+	pk, ok := cleanupTableKeys[table]
+	return pk, ok
+}
+
 // Store PostgreSQL存储实现
 type Store struct {
 	db      *sql.DB
@@ -674,14 +689,20 @@ func (s *Store) cleanupExpiredBatch(ctx context.Context, tableName string, befor
 		return fmt.Errorf("不允许清理的表: %s", tableName)
 	}
 
+	// 获取表对应的主键列名
+	pkColumn, ok := getPrimaryKeyColumn(tableName)
+	if !ok {
+		return fmt.Errorf("表 %s 缺少主键列名配置", tableName)
+	}
+
 	query := fmt.Sprintf(`
 		DELETE FROM %s 
-		WHERE id IN (
-			SELECT id FROM %s 
+		WHERE %s IN (
+			SELECT %s FROM %s 
 			WHERE expires_at < $1 
 			LIMIT $2
 		)
-	`, tableName, tableName)
+	`, tableName, pkColumn, pkColumn, tableName)
 
 	totalDeleted := 0
 	for {

@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/your-org/sso/internal/crypto"
 	"github.com/your-org/sso/internal/handler"
 )
 
@@ -97,5 +99,51 @@ func TestWellKnownHandler_HandleJWKS(t *testing.T) {
 		assert.Equal(t, "sso-key-1", jwk["kid"])
 		assert.NotEmpty(t, jwk["n"])
 		assert.NotEmpty(t, jwk["e"])
+	})
+}
+
+// ============================================================================
+// NewWellKnownHandlerWithJWTService 测试
+// ============================================================================
+
+func TestNewWellKnownHandlerWithJWTService(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	jwtSvc := crypto.NewJWTService(
+		privateKey,
+		&privateKey.PublicKey,
+		"test-issuer",
+		15*time.Minute,
+		7*24*time.Hour,
+	)
+
+	h := handler.NewWellKnownHandlerWithJWTService("http://localhost:9090", jwtSvc)
+	require.NotNil(t, h)
+
+	t.Run("HandleDiscovery正常工作", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/.well-known/openid-configuration", nil)
+		w := httptest.NewRecorder()
+
+		h.HandleDiscovery(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("HandleJWKS使用JWTService", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/.well-known/jwks.json", nil)
+		w := httptest.NewRecorder()
+
+		h.HandleJWKS(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &resp)
+		require.NoError(t, err)
+
+		// 验证返回了keys字段
+		_, ok := resp["keys"].([]interface{})
+		require.True(t, ok)
 	})
 }
