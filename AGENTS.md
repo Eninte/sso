@@ -55,14 +55,65 @@ make docker-up / make docker-down                  # 启动/停止Docker服务
 
 依赖注入通过接口实现（`store.Store`、`service.AuthServiceInterface`）。测试使用 `internal/store/mock` 包。
 
-## 错误处理
+## 统一错误处理
 
-- 使用 `internal/errors` 中预定义的错误变量（`apperrors.ErrInvalidCredentials`等）
-- 新错误用 `apperrors.New(code, message, httpStatus)` 或 `apperrors.Wrap(...)` 构造
-- Store层返回 `store.ErrNotFound`、`store.ErrDuplicateEmail`
-- Service层用 `fmt.Errorf("context: %w", err)` 包装错误
-- Handler层映射为HTTP状态码；响应消息使用 `ErrCode*` 常量
-- 使用 `slog` 记录错误，包含上下文（user_id、request_id）
+本项目使用 `internal/errors` 包实现统一错误体系，**所有层级必须遵守以下规范**。
+
+### 错误码与预定义错误
+
+- 使用 `apperrors.Err*` 预定义错误变量，不要自行创建新错误类型
+- 预定义错误列表见 `internal/errors/errors.go:154-232`
+- 示例：`apperrors.ErrInvalidCredentials`、`apperrors.ErrEmailExists`、`apperrors.ErrAccountLocked`
+
+### 错误构造
+
+```go
+// 创建新错误
+apperrors.New(code, message, httpStatus)
+
+// 包装已有错误
+apperrors.Wrap(code, message, httpStatus, err)
+
+// 添加详情
+appErr.WithDetails("extra info")
+```
+
+### 各层错误处理规则
+
+| 层级 | 规则 | 示例 |
+|------|------|------|
+| Store | 返回 `store.ErrNotFound`、`store.ErrDuplicateEmail` 等统一错误 | `return store.ErrNotFound` |
+| Service | 用 `fmt.Errorf("context: %w", err)` 包装，或直接返回预定义错误 | `return fmt.Errorf("创建用户失败: %w", err)` |
+| Handler | 映射为HTTP状态码，响应消息使用 `ErrCode*` 常量 | 见下方Handler错误响应示例 |
+
+### Handler错误响应
+
+Handler层使用 `ErrCode*` 常量（如 `ErrCodeLoginFailed`、`ErrCodeRegisterFailed`）作为响应消息：
+
+```go
+// 使用 apperrors 获取HTTP状态码和错误码
+w.WriteHeader(apperrors.GetHTTPStatus(err))
+json.NewEncoder(w).Encode(map[string]string{
+    "error": string(apperrors.GetErrorCode(err)),
+})
+```
+
+### 错误判断
+
+```go
+// 判断错误类型
+apperrors.Is(err, store.ErrNotFound)
+
+// 类型断言
+var appErr *apperrors.AppError
+apperrors.As(err, &appErr)
+```
+
+### 禁止事项
+
+- ❌ 禁止在Handler/Service层直接 `errors.New("message")` 创建原始错误
+- ❌ 禁止在响应中暴露内部错误详情（如数据库错误、堆栈信息）
+- ❌ 禁止忽略错误（除明确标注 `_ =` 的审计日志调用）
 
 ## 代码风格
 
@@ -90,18 +141,30 @@ Model结构体必须有JSON标签：`json:"field_name,omitempty"`。
 - 框架：`testify/assert` + `testify/require`
 - 优先使用表驱动测试
 - 命名：`TestFunctionName_场景`（如 `TestAuthService_Register_邮箱已存在`）
-- Mock：`mock.New()` 创建实例，`store.Reset()` 清空数据
+- Mock：`mock.New()` 创建实例，`mockStore.Reset()` 清空数据
 - 错误注入：设置 `store.CreateUserErr`、`store.GetUserByIDErr` 等字段
 - 测试中使用 `crypto.NewPasswordService(10)`（降低bcrypt cost）
 
 ## JWT与安全
 
-- Access Token：RS256签名，包含用户声明
+- Access Token：RS256签名，必须验证签名算法（`jwt.SigningMethodRS256`）
 - Refresh Token：32字节随机字符串，不含用户信息
 - 生产环境bcrypt cost必须 >= 12（测试可用10）
+- 生产环境必须设置 `DB_SSL_MODE=require` 或更高
 - 登录锁定：5次失败 → 锁定30分钟
-- 限流：默认100请求/分钟
+- 限流：默认100请求/分钟（通过 `middleware.RateLimiter` 实现）
 - CORS：生产环境必须设置 `CORS_ALLOWED_ORIGINS`
+
+## 生产环境必填配置
+
+```bash
+DB_PASSWORD=<strong-password>           # 数据库密码
+DB_SSL_MODE=require                     # 数据库SSL（禁止disable）
+CORS_ALLOWED_ORIGINS=https://your.com   # 允许的跨域源
+BCRYPT_COST=12                          # bcrypt成本（>=12）
+JWT_PRIVATE_KEY_PATH=./keys/private.pem # RSA私钥路径
+JWT_PUBLIC_KEY_PATH=./keys/public.pem   # RSA公钥路径
+```
 
 ## 常见问题
 
@@ -109,3 +172,4 @@ Model结构体必须有JSON标签：`json:"field_name,omitempty"`。
 - 数据库连接失败 → 检查 `DB_PASSWORD` 环境变量
 - CORS错误 → 检查 `CORS_ALLOWED_ORIGINS` 配置
 - 密钥错误 → 运行 `make generate-keys` 创建 `./keys/private.pem` 和 `./keys/public.pem`
+- 生产环境启动失败 → 检查 `DB_SSL_MODE` 是否为 `require`，`BCRYPT_COST` 是否 >= 12

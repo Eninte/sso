@@ -14,7 +14,7 @@
 
 ## 配置文档
 - `.env.example` 包含所有环境变量配置示例
-- 生产环境必须设置的变量：`DB_PASSWORD`、`CORS_ALLOWED_ORIGINS`、`ADMIN_EMAILS`
+- 生产环境必须设置的变量：`DB_PASSWORD`、`DB_SSL_MODE=require`、`CORS_ALLOWED_ORIGINS`
 - JWT密钥路径默认为 `./keys/private.pem` 和 `./keys/public.pem`
 
 ## API文档

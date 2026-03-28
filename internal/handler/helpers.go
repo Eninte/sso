@@ -11,6 +11,7 @@ import (
 	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/middleware"
 	"github.com/your-org/sso/internal/service"
+	"github.com/your-org/sso/internal/validator"
 )
 
 // 请求体大小限制常量
@@ -115,4 +116,66 @@ func writeOAuthError(w http.ResponseWriter, r *http.Request, err error) {
 	default:
 		writeJSON(w, http.StatusInternalServerError, apperrors.ErrInternal.ToLocalizedResponse(lang))
 	}
+}
+
+// ============================================================================
+// 验证错误处理
+// ============================================================================
+
+// validationError 定义验证错误映射
+type validationError struct {
+	err        error
+	code       apperrors.ErrorCode
+	httpStatus int
+}
+
+// validationErrors 验证错误映射表
+var validationErrors = []validationError{
+	// 邮箱相关错误
+	{validator.ErrEmailRequired, apperrors.ErrCodeEmailRequired, http.StatusBadRequest},
+	{validator.ErrEmailInvalid, apperrors.ErrCodeEmailInvalid, http.StatusBadRequest},
+
+	// 密码相关错误
+	{validator.ErrPasswordRequired, apperrors.ErrCodePasswordRequired, http.StatusBadRequest},
+	{validator.ErrPasswordTooShort, apperrors.ErrCodePasswordTooShort, http.StatusBadRequest},
+	{validator.ErrPasswordTooLong, apperrors.ErrCodePasswordTooLong, http.StatusBadRequest},
+	{validator.ErrPasswordNoUppercase, apperrors.ErrCodePasswordNoUppercase, http.StatusBadRequest},
+	{validator.ErrPasswordNoLowercase, apperrors.ErrCodePasswordNoLowercase, http.StatusBadRequest},
+	{validator.ErrPasswordNoDigit, apperrors.ErrCodePasswordNoDigit, http.StatusBadRequest},
+	{validator.ErrPasswordNoSpecial, apperrors.ErrCodePasswordNoSpecial, http.StatusBadRequest},
+
+	// 认证相关错误
+	{service.ErrInvalidCredentials, apperrors.ErrCodeInvalidCredentials, http.StatusUnauthorized},
+	{apperrors.ErrEmailExists, apperrors.ErrCodeEmailExists, http.StatusConflict},
+}
+
+// writeValidationError 统一处理验证错误
+// 返回true表示错误已处理，false表示未知错误
+func writeValidationError(w http.ResponseWriter, r *http.Request, err error) bool {
+	lang := middleware.GetLanguageFromContext(r.Context())
+
+	for _, ve := range validationErrors {
+		if errors.Is(err, ve.err) {
+			writeJSON(w, ve.httpStatus, map[string]string{
+				"error": apperrors.GetMessage(ve.code, lang),
+			})
+			return true
+		}
+	}
+
+	return false
+}
+
+// handleServiceError 统一处理服务层错误
+// 首先尝试使用writeValidationError，失败则使用默认错误码
+func handleServiceError(w http.ResponseWriter, r *http.Request, err error, defaultCode apperrors.ErrorCode) {
+	if writeValidationError(w, r, err) {
+		return
+	}
+
+	// 未知错误，使用默认错误码
+	lang := middleware.GetLanguageFromContext(r.Context())
+	writeJSON(w, http.StatusInternalServerError, map[string]string{
+		"error": apperrors.GetMessage(defaultCode, lang),
+	})
 }

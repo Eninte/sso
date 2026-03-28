@@ -40,7 +40,6 @@ func TestSecurityHeaders(t *testing.T) {
 	// 验证安全头
 	assert.Equal(t, "DENY", rec.Header().Get("X-Frame-Options"))
 	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
-	assert.Equal(t, "1; mode=block", rec.Header().Get("X-XSS-Protection"))
 	assert.Contains(t, rec.Header().Get("Strict-Transport-Security"), "max-age=31536000")
 	assert.Equal(t, "default-src 'self'", rec.Header().Get("Content-Security-Policy"))
 	assert.Equal(t, "strict-origin-when-cross-origin", rec.Header().Get("Referrer-Policy"))

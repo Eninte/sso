@@ -106,7 +106,15 @@ func TestNewOAuthServiceWithCache(t *testing.T) {
 	memCache := cache.NewMemoryCache()
 	defer memCache.Close()
 
-	oauthSvc := service.NewOAuthServiceWithCache(store, memCache)
+	tokenSvc := service.NewTokenService(
+		crypto.NewJWTService(func() *rsa.PrivateKey {
+			key, _ := rsa.GenerateKey(rand.Reader, 2048)
+			return key
+		}(), nil, "test", 15*time.Minute, 7*24*time.Hour),
+		store,
+	)
+
+	oauthSvc := service.NewOAuthServiceWithCache(store, memCache, tokenSvc)
 
 	assert.NotNil(t, oauthSvc)
 }
@@ -115,7 +123,15 @@ func TestNewOAuthServiceWithAudit(t *testing.T) {
 	store := mock.New()
 	auditSvc := service.NewAuditService(store)
 
-	oauthSvc := service.NewOAuthServiceWithAudit(store, auditSvc)
+	tokenSvc := service.NewTokenService(
+		crypto.NewJWTService(func() *rsa.PrivateKey {
+			key, _ := rsa.GenerateKey(rand.Reader, 2048)
+			return key
+		}(), nil, "test", 15*time.Minute, 7*24*time.Hour),
+		store,
+	)
+
+	oauthSvc := service.NewOAuthServiceWithAudit(store, auditSvc, tokenSvc)
 
 	assert.NotNil(t, oauthSvc)
 }

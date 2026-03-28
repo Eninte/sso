@@ -31,10 +31,11 @@ type PasswordService struct {
 // NewPasswordService 创建密码服务
 // cost: bcrypt成本因子，推荐值12-14
 // 较高的cost值更安全但验证更慢
+// 生产环境必须 >= 12
 func NewPasswordService(cost int) *PasswordService {
-	// 确保cost在合理范围内
-	if cost < 10 {
-		cost = 10
+	// 确保cost在合理范围内（生产环境推荐12-14）
+	if cost < 12 {
+		cost = 12
 	}
 	if cost > 14 {
 		cost = 14

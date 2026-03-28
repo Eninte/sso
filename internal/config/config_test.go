@@ -122,6 +122,18 @@ func TestValidate_BcryptCostRange(t *testing.T) {
 			env:     "production",
 		},
 		{
+			name:    "cost=11不满足生产要求",
+			cost:    "11",
+			wantErr: true,
+			env:     "production",
+		},
+		{
+			name:    "cost=10不满足生产要求",
+			cost:    "10",
+			wantErr: true,
+			env:     "production",
+		},
+		{
 			name:    "cost超出范围",
 			cost:    "50",
 			wantErr: false, // 只有警告，不报错
@@ -135,6 +147,10 @@ func TestValidate_BcryptCostRange(t *testing.T) {
 			os.Setenv("SERVER_ENV", tt.env)
 			os.Setenv("CORS_ALLOWED_ORIGINS", "https://example.com")
 			os.Setenv("ADMIN_EMAILS", "admin@company.com")
+			// 生产环境需要设置DB_SSL_MODE
+			if tt.env == "production" {
+				os.Setenv("DB_SSL_MODE", "require")
+			}
 
 			cfg, err := config.Load()
 			if tt.wantErr {
@@ -153,6 +169,7 @@ func TestValidate_ProductionDefaults(t *testing.T) {
 
 	os.Setenv("SERVER_ENV", "production")
 	os.Setenv("BCRYPT_COST", "12")
+	os.Setenv("DB_SSL_MODE", "require")
 
 	tests := []struct {
 		name        string
@@ -174,6 +191,51 @@ func TestValidate_ProductionDefaults(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			os.Setenv("CORS_ALLOWED_ORIGINS", tt.corsOrigins)
+
+			cfg, err := config.Load()
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, cfg)
+			}
+		})
+	}
+}
+
+func TestValidate_ProductionDBSSL(t *testing.T) {
+	cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	os.Setenv("SERVER_ENV", "production")
+	os.Setenv("BCRYPT_COST", "12")
+	os.Setenv("CORS_ALLOWED_ORIGINS", "https://example.com")
+
+	tests := []struct {
+		name    string
+		sslMode string
+		wantErr bool
+	}{
+		{
+			name:    "生产环境禁用SSL",
+			sslMode: "disable",
+			wantErr: true,
+		},
+		{
+			name:    "生产环境SSL require",
+			sslMode: "require",
+			wantErr: false,
+		},
+		{
+			name:    "生产环境SSL verify-full",
+			sslMode: "verify-full",
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			os.Setenv("DB_SSL_MODE", tt.sslMode)
 
 			cfg, err := config.Load()
 			if tt.wantErr {
@@ -319,6 +381,10 @@ func TestIsDevelopment(t *testing.T) {
 			// 为生产环境设置非默认值
 			os.Setenv("CORS_ALLOWED_ORIGINS", "https://example.com")
 			os.Setenv("ADMIN_EMAILS", "admin@company.com")
+			if tt.env == "production" {
+				os.Setenv("DB_SSL_MODE", "require")
+				os.Setenv("BCRYPT_COST", "12")
+			}
 
 			cfg, err := config.Load()
 			require.NoError(t, err)

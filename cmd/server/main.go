@@ -123,6 +123,9 @@ func main() {
 	// 7. 初始化指标服务
 	metricsSvc := metrics.NewService()
 
+	// 7.1 初始化Token生成服务
+	tokenSvc := service.NewTokenService(jwtSvc, store)
+
 	// 8. 初始化业务服务（带缓存）
 	authSvc := service.NewAuthServiceWithCache(
 		store,
@@ -133,7 +136,7 @@ func main() {
 		cacheSvc,
 		metricsSvc,
 	)
-	oauthSvc := service.NewOAuthServiceWithCache(store, cacheSvc)
+	oauthSvc := service.NewOAuthServiceWithCache(store, cacheSvc, tokenSvc)
 	userSvc := service.NewUserService(store, passwordSvc, emailSvc, cfg.BaseURL())
 	auditSvc := service.NewAuditService(store)
 	mfaSvc := service.NewMFAService(store)
@@ -166,10 +169,15 @@ func main() {
 	router := mux.NewRouter()
 
 	// 12. 应用中间件
+	// 创建限流器
+	rateLimiter := middleware.NewRateLimiter(cfg.RateLimitRequests, cfg.RateLimitWindow)
+
 	router.Use(middleware.SecurityHeaders)
 	router.Use(middleware.Logger)
 	// 添加metrics中间件，收集HTTP请求指标
 	router.Use(metricsSvc.HTTPMiddleware)
+	// 限流中间件
+	router.Use(rateLimiter.Middleware)
 	// 使用配置中的CORS设置
 	corsConfig := &middleware.CORSConfig{
 		AllowedOrigins: cfg.GetCORSAllowedOrigins(),
@@ -186,8 +194,8 @@ func main() {
 	// 健康检查端点 (不需要认证)
 	router.HandleFunc("/health", healthHandler).Methods("GET")
 
-	// Prometheus指标端点
-	router.HandleFunc("/metrics", metricsHandler.HandleMetrics).Methods("GET")
+	// Prometheus指标端点 (使用Basic Auth保护)
+	router.Handle("/metrics", middleware.BasicAuth(cfg.MetricsUsername, cfg.MetricsPassword)(http.HandlerFunc(metricsHandler.HandleMetrics))).Methods("GET")
 
 	// OIDC Discovery端点 (公开)
 	router.HandleFunc("/.well-known/openid-configuration", wellKnownHandler.HandleDiscovery).Methods("GET")
@@ -244,7 +252,7 @@ func main() {
 	}
 
 	// 使用auditSvc记录服务启动
-	_ = auditSvc
+	auditSvc.LogSystemStart(context.Background(), "1.0.0")
 
 	slog.Info("SSO服务初始化完成",
 		"endpoints", []string{
@@ -267,7 +275,7 @@ func main() {
 	}()
 
 	// 16. 等待中断信号
-	gracefulShutdown(server)
+	gracefulShutdown(rateLimiter, server)
 }
 
 // initLogger 初始化日志配置
@@ -318,12 +326,15 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // gracefulShutdown 优雅关闭服务器
-func gracefulShutdown(server *http.Server) {
+func gracefulShutdown(rateLimiter *middleware.RateLimiter, server *http.Server) {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	sig := <-quit
 	slog.Info("收到关闭信号，正在优雅关闭服务器...", "signal", sig)
+
+	// 停止限流器
+	rateLimiter.Stop()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

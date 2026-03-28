@@ -19,10 +19,6 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		// 浏览器将严格遵循Content-Type头
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 
-		// XSS保护 (旧版浏览器)
-		// 现代浏览器使用CSP替代
-		w.Header().Set("X-XSS-Protection", "1; mode=block")
-
 		// 严格传输安全 (HSTS)
 		// 强制浏览器使用HTTPS
 		// max-age: 1年

@@ -13,17 +13,21 @@ import (
 // ============================================================================
 
 // MetricsHandler 指标处理器
+// 认证由外部BasicAuth中间件处理
 type MetricsHandler struct {
 	metrics *metrics.Service
 }
 
 // NewMetricsHandler 创建指标处理器
 func NewMetricsHandler(metrics *metrics.Service) *MetricsHandler {
-	return &MetricsHandler{metrics: metrics}
+	return &MetricsHandler{
+		metrics: metrics,
+	}
 }
 
 // HandleMetrics 处理指标请求
 // GET /metrics
+// 认证由BasicAuth中间件处理
 func (h *MetricsHandler) HandleMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	w.WriteHeader(http.StatusOK)

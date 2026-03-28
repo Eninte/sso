@@ -21,7 +21,8 @@ import (
 
 func createTestAuthorizeHandler(t *testing.T) *handler.AuthorizeHandler {
 	storeInst := mock.New()
-	oauthSvc := service.NewOAuthService(storeInst)
+	tokenSvc := createTestTokenServiceForHandler()
+	oauthSvc := service.NewOAuthService(storeInst, tokenSvc)
 	return handler.NewAuthorizeHandler(oauthSvc)
 }
 

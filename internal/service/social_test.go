@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -211,7 +212,7 @@ func TestSocialLoginService_HandleCallback(t *testing.T) {
 	t.Run("不支持的提供商", func(t *testing.T) {
 		svc := service.NewSocialLoginService(storeInst, jwtSvc, "", "", "", "")
 
-		_, err := svc.HandleCallback(context.Background(), "unsupported", "code", "http://localhost/callback")
+		_, err := svc.HandleCallback(context.Background(), "unsupported", "code", "test-state", "http://localhost/callback")
 
 		assert.ErrorIs(t, err, service.ErrProviderNotSupported)
 	})
@@ -219,7 +220,7 @@ func TestSocialLoginService_HandleCallback(t *testing.T) {
 	t.Run("空redirectURI使用默认值-不支持的提供商", func(t *testing.T) {
 		svc := service.NewSocialLoginService(storeInst, jwtSvc, "", "", "", "")
 
-		_, err := svc.HandleCallback(context.Background(), "github", "code", "")
+		_, err := svc.HandleCallback(context.Background(), "github", "code", "test-state", "")
 
 		assert.ErrorIs(t, err, service.ErrProviderNotSupported)
 	})
@@ -344,7 +345,16 @@ func TestSocialLoginService_HandleCallback_FullFlow(t *testing.T) {
 
 		svc := service.NewSocialLoginServiceWithProviders(storeInst, jwtSvc, providers, http.DefaultClient)
 
-		resp, err := svc.HandleCallback(context.Background(), "google", "mock-code", "http://localhost/callback")
+		// 先获取授权URL以生成state
+		authURL, err := svc.GetAuthorizationURL("google", "http://localhost/callback", "")
+		require.NoError(t, err)
+
+		// 从URL中提取state
+		parsedURL, _ := url.Parse(authURL)
+		state := parsedURL.Query().Get("state")
+		require.NotEmpty(t, state)
+
+		resp, err := svc.HandleCallback(context.Background(), "google", "mock-code", state, "http://localhost/callback")
 
 		require.NoError(t, err)
 		assert.NotEmpty(t, resp.AccessToken)
@@ -396,7 +406,14 @@ func TestSocialLoginService_HandleCallback_FullFlow(t *testing.T) {
 
 		svc := service.NewSocialLoginServiceWithProviders(storeInst, jwtSvc, providers, http.DefaultClient)
 
-		resp, err := svc.HandleCallback(context.Background(), "google", "code", "http://localhost")
+		// 先获取授权URL以生成state
+		authURL, err := svc.GetAuthorizationURL("google", "http://localhost", "")
+		require.NoError(t, err)
+		parsedURL, _ := url.Parse(authURL)
+		state := parsedURL.Query().Get("state")
+		require.NotEmpty(t, state)
+
+		resp, err := svc.HandleCallback(context.Background(), "google", "code", state, "http://localhost")
 
 		require.NoError(t, err)
 		assert.NotEmpty(t, resp.AccessToken)
@@ -431,7 +448,14 @@ func TestSocialLoginService_HandleCallback_FullFlow(t *testing.T) {
 
 		svc := service.NewSocialLoginServiceWithProviders(storeInst, jwtSvc, providers, http.DefaultClient)
 
-		resp, err := svc.HandleCallback(context.Background(), "github", "code", "http://localhost")
+		// 先获取授权URL以生成state
+		authURL, err := svc.GetAuthorizationURL("github", "http://localhost", "")
+		require.NoError(t, err)
+		parsedURL, _ := url.Parse(authURL)
+		state := parsedURL.Query().Get("state")
+		require.NotEmpty(t, state)
+
+		resp, err := svc.HandleCallback(context.Background(), "github", "code", state, "http://localhost")
 
 		require.NoError(t, err)
 		assert.NotEmpty(t, resp.AccessToken)
@@ -465,7 +489,14 @@ func TestSocialLoginService_HandleCallback_FullFlow(t *testing.T) {
 
 		svc := service.NewSocialLoginServiceWithProviders(storeInst, jwtSvc, providers, http.DefaultClient)
 
-		_, err := svc.HandleCallback(context.Background(), "google", "bad-code", "http://localhost")
+		// 先获取授权URL以生成state
+		authURL, err := svc.GetAuthorizationURL("google", "http://localhost", "")
+		require.NoError(t, err)
+		parsedURL, _ := url.Parse(authURL)
+		state := parsedURL.Query().Get("state")
+		require.NotEmpty(t, state)
+
+		_, err = svc.HandleCallback(context.Background(), "google", "bad-code", state, "http://localhost")
 
 		assert.ErrorIs(t, err, service.ErrOAuthCodeInvalid)
 	})
@@ -497,7 +528,14 @@ func TestSocialLoginService_HandleCallback_FullFlow(t *testing.T) {
 
 		svc := service.NewSocialLoginServiceWithProviders(storeInst, jwtSvc, providers, http.DefaultClient)
 
-		_, err := svc.HandleCallback(context.Background(), "github", "code", "http://localhost")
+		// 先获取授权URL以生成state
+		authURL, err := svc.GetAuthorizationURL("github", "http://localhost", "")
+		require.NoError(t, err)
+		parsedURL, _ := url.Parse(authURL)
+		state := parsedURL.Query().Get("state")
+		require.NotEmpty(t, state)
+
+		_, err = svc.HandleCallback(context.Background(), "github", "code", state, "http://localhost")
 
 		assert.ErrorIs(t, err, service.ErrSocialLoginFailed)
 	})

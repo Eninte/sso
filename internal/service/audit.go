@@ -110,9 +110,32 @@ func (s *AuditService) Log(ctx context.Context, log *model.AuditLog) {
 	case s.logChan <- log:
 		// 成功发送到channel
 	default:
-		// channel已满，记录警告但不阻塞
-		s.logger.Warn("审计日志channel已满，丢弃日志", "log_id", log.ID)
+		// channel已满，降级处理：尝试同步存储或记录到slog
+		s.fallbackLog(ctx, log)
 	}
+}
+
+// fallbackLog 降级日志处理
+// 当异步channel满时，尝试同步存储或记录详细日志
+func (s *AuditService) fallbackLog(ctx context.Context, log *model.AuditLog) {
+	s.logger.WarnContext(ctx, "审计日志channel已满，降级处理",
+		"log_id", log.ID,
+		"event_type", log.EventType,
+		"user_id", log.UserID,
+	)
+
+	// 尝试同步存储（带超时）
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.store.StoreAuditLog(ctx, log); err != nil {
+			s.logger.ErrorContext(ctx, "降级存储审计日志失败",
+				"error", err,
+				"log_id", log.ID,
+				"event_type", log.EventType,
+			)
+		}
+	}()
 }
 
 // LogUserRegister 记录用户注册事件
@@ -326,6 +349,15 @@ func (s *AuditService) LogKeyRevoked(ctx context.Context, keyID string) {
 	details, _ := json.Marshal(map[string]interface{}{"key_id": keyID})
 	s.Log(ctx, &model.AuditLog{
 		EventType: string(model.EventKeyRevoked),
+		Details:   string(details),
+		Success:   true,
+	})
+}
+
+func (s *AuditService) LogSystemStart(ctx context.Context, version string) {
+	details, _ := json.Marshal(map[string]interface{}{"version": version})
+	s.Log(ctx, &model.AuditLog{
+		EventType: string(model.EventSystemStart),
 		Details:   string(details),
 		Success:   true,
 	})

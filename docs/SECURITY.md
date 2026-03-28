@@ -45,6 +45,7 @@
 - **密码策略**：最小8位，包含大小写字母和数字
 - **登录锁定**：5次失败后锁定30分钟
 - **MFA支持**：TOTP双因素认证
+- **Metrics端点**：支持Basic Auth认证保护
 
 ### Token安全
 
@@ -80,6 +81,8 @@ RATE_LIMIT_REQUESTS=50
 RATE_LIMIT_WINDOW=1m
 MAX_LOGIN_ATTEMPTS=3
 LOCKOUT_DURATION=1h
+METRICS_USERNAME=<your-username>   # Metrics Basic Auth
+METRICS_PASSWORD=<strong-password>
 ```
 
 ### 密钥管理

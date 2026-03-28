@@ -88,6 +88,10 @@ type Config struct {
 
 	// CORS配置
 	CORSAllowedOrigins string // 允许的跨域源 (逗号分隔)
+
+	// Metrics配置
+	MetricsUsername string // Metrics Basic Auth用户名
+	MetricsPassword string // Metrics Basic Auth密码
 }
 
 // Load 从环境变量加载配置
@@ -139,9 +143,10 @@ func Load() (*Config, error) {
 
 		// 安全配置
 		// BcryptCost: bcrypt成本因子，影响密码哈希性能
-		// 推荐值: 10-12，值越高越安全但性能越低
-		// cost=10: ~50ms, cost=11: ~100ms, cost=12: ~200ms
-		BcryptCost:        getEnvInt("BCRYPT_COST", 10),
+		// 推荐值: 12-14，值越高越安全但性能越低
+		// cost=12: ~200ms, cost=13: ~400ms, cost=14: ~800ms
+		// 生产环境必须 >= 12
+		BcryptCost:        getEnvInt("BCRYPT_COST", 12),
 		RateLimitRequests: getEnvInt("RATE_LIMIT_REQUESTS", 100),
 		RateLimitWindow:   getEnvDuration("RATE_LIMIT_WINDOW", 1*time.Minute),
 		MaxLoginAttempts:  getEnvInt("MAX_LOGIN_ATTEMPTS", 5),
@@ -162,6 +167,10 @@ func Load() (*Config, error) {
 
 		// CORS配置
 		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000"),
+
+		// Metrics配置
+		MetricsUsername: os.Getenv("METRICS_USERNAME"),
+		MetricsPassword: os.Getenv("METRICS_PASSWORD"),
 	}
 
 	// 验证必需的配置
@@ -222,9 +231,13 @@ func (c *Config) validate() error {
 			slog.Error("生产环境不能使用默认CORS配置")
 			return fmt.Errorf("生产环境必须设置 CORS_ALLOWED_ORIGINS")
 		}
-		if c.BcryptCost < 10 {
-			slog.Error("生产环境bcrypt cost应至少为10", "current", c.BcryptCost)
+		if c.BcryptCost < 12 {
+			slog.Error("生产环境bcrypt cost应至少为12", "current", c.BcryptCost)
 			return ErrBcryptCostTooLow
+		}
+		if c.DBSSLMode == "disable" {
+			slog.Error("生产环境数据库必须启用SSL")
+			return fmt.Errorf("生产环境必须设置 DB_SSL_MODE=require 或更高")
 		}
 		if c.JWTIssuer == "sso" {
 			slog.Warn("生产环境使用默认JWT Issuer，建议自定义")
@@ -232,6 +245,11 @@ func (c *Config) validate() error {
 		// 检查SMTP配置
 		if c.SMTPHost == "localhost" {
 			slog.Warn("生产环境使用localhost作为SMTP服务器")
+		}
+		// 检查Metrics认证配置
+		if c.MetricsUsername != "" && c.MetricsPassword == "" {
+			slog.Error("生产环境配置了METRICS_USERNAME但未设置METRICS_PASSWORD")
+			return fmt.Errorf("生产环境配置了METRICS_USERNAME时必须设置METRICS_PASSWORD")
 		}
 	}
 

@@ -21,6 +21,8 @@
 - 授权码使用后设置 `UsedAt` 字段，不要删除
 
 ## 配置验证
-- 生产环境必须设置 `CORS_ALLOWED_ORIGINS`、`ADMIN_EMAILS`、`DB_PASSWORD`
+- 生产环境必须设置 `CORS_ALLOWED_ORIGINS`、`DB_PASSWORD`
+- 生产环境必须设置 `DB_SSL_MODE=require`（禁止disable）
+- 生产环境 `BCRYPT_COST` 必须 >= 12
 - JWT密钥路径默认为 `./keys/private.pem` 和 `./keys/public.pem`
 - 使用 `make generate-keys` 生成RSA密钥对

@@ -44,30 +44,34 @@ type OAuthService struct {
 	store    store.Store   // 数据存储
 	auditSvc *AuditService // 审计服务
 	cache    cache.Cache   // 缓存服务
+	tokenSvc *TokenService // Token生成服务
 }
 
 // NewOAuthService 创建OAuth服务
-func NewOAuthService(store store.Store) *OAuthService {
+func NewOAuthService(store store.Store, tokenSvc *TokenService) *OAuthService {
 	return &OAuthService{
 		store:    store,
 		auditSvc: NewAuditService(store),
+		tokenSvc: tokenSvc,
 	}
 }
 
 // NewOAuthServiceWithAudit 创建OAuth服务（带审计服务注入）
-func NewOAuthServiceWithAudit(store store.Store, auditSvc *AuditService) *OAuthService {
+func NewOAuthServiceWithAudit(store store.Store, auditSvc *AuditService, tokenSvc *TokenService) *OAuthService {
 	return &OAuthService{
 		store:    store,
 		auditSvc: auditSvc,
+		tokenSvc: tokenSvc,
 	}
 }
 
 // NewOAuthServiceWithCache 创建带缓存的OAuth服务
-func NewOAuthServiceWithCache(store store.Store, cacheSvc cache.Cache) *OAuthService {
+func NewOAuthServiceWithCache(store store.Store, cacheSvc cache.Cache, tokenSvc *TokenService) *OAuthService {
 	return &OAuthService{
 		store:    store,
 		auditSvc: NewAuditService(store),
 		cache:    cacheSvc,
+		tokenSvc: tokenSvc,
 	}
 }
 
@@ -306,14 +310,19 @@ func (s *OAuthService) generateTokenResponse(
 		return nil, fmt.Errorf("获取用户信息失败: %w", err)
 	}
 
-	_ = user // TODO: 使用用户信息生成令牌
+	// 使用TokenService生成令牌对
+	if s.tokenSvc == nil {
+		return nil, fmt.Errorf("token服务未初始化")
+	}
 
-	return &model.LoginResponse{
-		AccessToken:  "access_token_placeholder",
-		RefreshToken: "refresh_token_placeholder",
-		TokenType:    "Bearer",
-		ExpiresIn:    900,
-	}, nil
+	return s.tokenSvc.GenerateTokenPair(
+		ctx,
+		user.ID,
+		user.Email,
+		user.Role,
+		authCode.Scopes,
+		authCode.ClientID,
+	)
 }
 
 // logAuthCodeInvalid 记录无效授权码审计日志

@@ -970,23 +970,9 @@ func (s *Store) GetKeyByID(ctx context.Context, keyID string) (*model.KeyVersion
 	return key, nil
 }
 
-func (s *Store) ListActiveKeys(ctx context.Context) ([]*model.KeyVersion, error) {
-	ctx, cancel := s.withTimeout(ctx)
-	defer cancel()
-
-	query := `
-		SELECT id, public_key, private_key, status, created_at, expires_at
-		FROM key_versions
-		WHERE status IN ('active', 'deprecated')
-		ORDER BY created_at DESC
-	`
-
-	rows, err := s.db.QueryContext(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
+// scanKeyVersions 扫描密钥版本结果集
+// 提取公共逻辑，避免代码重复
+func (s *Store) scanKeyVersions(rows *sql.Rows) ([]*model.KeyVersion, error) {
 	keys := make([]*model.KeyVersion, 0)
 	for rows.Next() {
 		key := &model.KeyVersion{}
@@ -1011,6 +997,26 @@ func (s *Store) ListActiveKeys(ctx context.Context) ([]*model.KeyVersion, error)
 	return keys, nil
 }
 
+func (s *Store) ListActiveKeys(ctx context.Context) ([]*model.KeyVersion, error) {
+	ctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+
+	query := `
+		SELECT id, public_key, private_key, status, created_at, expires_at
+		FROM key_versions
+		WHERE status IN ('active', 'deprecated')
+		ORDER BY created_at DESC
+	`
+
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return s.scanKeyVersions(rows)
+}
+
 func (s *Store) ListAllKeys(ctx context.Context) ([]*model.KeyVersion, error) {
 	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
@@ -1027,28 +1033,7 @@ func (s *Store) ListAllKeys(ctx context.Context) ([]*model.KeyVersion, error) {
 	}
 	defer rows.Close()
 
-	keys := make([]*model.KeyVersion, 0)
-	for rows.Next() {
-		key := &model.KeyVersion{}
-		err := rows.Scan(
-			&key.ID,
-			&key.PublicKey,
-			&key.PrivateKey,
-			&key.Status,
-			&key.CreatedAt,
-			&key.ExpiresAt,
-		)
-		if err != nil {
-			return nil, err
-		}
-		keys = append(keys, key)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return keys, nil
+	return s.scanKeyVersions(rows)
 }
 
 func (s *Store) DeprecateKey(ctx context.Context, keyID string, expiresAt time.Time) error {

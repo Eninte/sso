@@ -137,6 +137,6 @@ type SocialLoginServiceInterface interface {
 	// GetAuthorizationURL 获取授权URL
 	GetAuthorizationURL(provider, redirectURI, state string) (string, error)
 
-	// HandleCallback 处理回调
-	HandleCallback(ctx context.Context, provider, code, redirectURI string) (*model.LoginResponse, error)
+	// HandleCallback 处理回调（需验证state防止CSRF攻击）
+	HandleCallback(ctx context.Context, provider, code, state, redirectURI string) (*model.LoginResponse, error)
 }

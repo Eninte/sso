@@ -26,6 +26,23 @@ import (
 // 测试辅助函数
 // ============================================================================
 
+// createTestJWTService 创建测试用的JWT服务
+func createTestJWTServiceForHandlerTest() *crypto.JWTService {
+	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	return crypto.NewJWTService(
+		privateKey,
+		&privateKey.PublicKey,
+		"test-issuer",
+		15*time.Minute,
+		7*24*time.Hour,
+	)
+}
+
+// createTestTokenServiceForHandler 创建测试用的Token服务
+func createTestTokenServiceForHandler() *service.TokenService {
+	return service.NewTokenService(createTestJWTServiceForHandlerTest(), mock.New())
+}
+
 // createTestLoginHandler 创建测试用的登录处理器
 func createTestLoginHandler(t *testing.T) (*handler.LoginHandler, *mock.Store) {
 	// 创建Mock存储
@@ -342,8 +359,9 @@ func createTestTokenHandler(t *testing.T) (*handler.TokenHandler, *mock.Store) {
 		7*24*time.Hour,
 	)
 
+	tokenSvc := service.NewTokenService(jwtSvc, store)
 	authSvc := service.NewAuthService(store, passwordSvc, jwtSvc, 5, 30*time.Minute)
-	oauthSvc := service.NewOAuthService(store)
+	oauthSvc := service.NewOAuthService(store, tokenSvc)
 
 	tokenHandler := handler.NewTokenHandler(authSvc, oauthSvc)
 
@@ -666,7 +684,8 @@ func TestLoginHandler_InvalidJSON(t *testing.T) {
 
 func TestAuthorizeHandler_InvalidRequest(t *testing.T) {
 	store := mock.New()
-	oauthSvc := service.NewOAuthService(store)
+	tokenSvc := createTestTokenServiceForHandler()
+	oauthSvc := service.NewOAuthService(store, tokenSvc)
 	authorizeHandler := handler.NewAuthorizeHandler(oauthSvc)
 
 	t.Run("缺少client_id参数", func(t *testing.T) {

@@ -290,7 +290,7 @@ func (s *AuthService) revokeTokenWithRetry(ctx context.Context, accessToken stri
 		if s.cache != nil {
 			cacheKey := cache.TokenKey(accessToken)
 			if err := s.cache.Delete(ctx, cacheKey); err != nil {
-				slog.Warn("清除Token缓存失败", "error", err)
+				slog.Warn("清除Token缓存失败", "error", err, "token", accessToken)
 			}
 		}
 

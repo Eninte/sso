@@ -1,9 +1,11 @@
 // Package middleware 认证中间件
-// 提供JWT Token验证和权限检查功能
+// 提供JWT Token验证、Basic Auth和权限检查功能
 package middleware
 
 import (
 	"context"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -165,4 +167,67 @@ func GetIsAdminFromContext(ctx context.Context) bool {
 		return isAdmin
 	}
 	return false
+}
+
+// ============================================================================
+// Basic Auth中间件
+// ============================================================================
+
+// BasicAuth Basic Auth认证中间件
+// 使用恒定时间比较防止时序攻击
+func BasicAuth(username, password string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if username == "" || password == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			authHeader := r.Header.Get("Authorization")
+			if authHeader == "" {
+				w.Header().Set("WWW-Authenticate", `Basic realm="Metrics"`)
+				http.Error(w, "未授权", http.StatusUnauthorized)
+				return
+			}
+
+			const prefix = "Basic "
+			if !strings.HasPrefix(authHeader, prefix) {
+				http.Error(w, "无效的认证头格式", http.StatusUnauthorized)
+				return
+			}
+
+			encoded := authHeader[len(prefix):]
+			decoded, err := base64Decode(encoded)
+			if err != nil {
+				http.Error(w, "无效的编码格式", http.StatusUnauthorized)
+				return
+			}
+
+			parts := strings.SplitN(decoded, ":", 2)
+			if len(parts) != 2 {
+				http.Error(w, "无效的凭据格式", http.StatusUnauthorized)
+				return
+			}
+
+			usernameMatch := subtle.ConstantTimeCompare([]byte(parts[0]), []byte(username)) == 1
+			passwordMatch := subtle.ConstantTimeCompare([]byte(parts[1]), []byte(password)) == 1
+
+			if !usernameMatch || !passwordMatch {
+				w.Header().Set("WWW-Authenticate", `Basic realm="Metrics"`)
+				http.Error(w, "未授权", http.StatusUnauthorized)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// base64Decode 解码base64字符串
+func base64Decode(s string) (string, error) {
+	decoded, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return "", err
+	}
+	return string(decoded), nil
 }

@@ -99,19 +99,9 @@ func TestUserInfoHandler_HandleFull(t *testing.T) {
 
 func TestMetricsHandler_HandleMetrics(t *testing.T) {
 	metricsSvc := metrics.NewService()
-	h := handler.NewMetricsHandler(metricsSvc)
 
-	t.Run("返回Prometheus格式", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/metrics", nil)
-		w := httptest.NewRecorder()
-
-		h.HandleMetrics(w, req)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Equal(t, "text/plain; version=0.0.4", w.Header().Get("Content-Type"))
-	})
-
-	t.Run("有指标时返回数据", func(t *testing.T) {
+	t.Run("返回指标数据", func(t *testing.T) {
+		h := handler.NewMetricsHandler(metricsSvc)
 		metricsSvc.Increment("http_requests_total")
 
 		req := httptest.NewRequest("GET", "/metrics", nil)
@@ -120,7 +110,80 @@ func TestMetricsHandler_HandleMetrics(t *testing.T) {
 		h.HandleMetrics(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "text/plain; version=0.0.4", w.Header().Get("Content-Type"))
 		assert.Contains(t, w.Body.String(), "http_requests_total")
+	})
+
+	t.Run("无指标时返回空数据", func(t *testing.T) {
+		h := handler.NewMetricsHandler(metrics.NewService())
+
+		req := httptest.NewRequest("GET", "/metrics", nil)
+		w := httptest.NewRecorder()
+
+		h.HandleMetrics(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "text/plain; version=0.0.4", w.Header().Get("Content-Type"))
+	})
+}
+
+// ============================================================================
+// BasicAuth中间件测试
+// ============================================================================
+
+func TestBasicAuth_Middleware(t *testing.T) {
+	metricsSvc := metrics.NewService()
+	metricsHandler := handler.NewMetricsHandler(metricsSvc)
+
+	t.Run("无认证配置时直接通过", func(t *testing.T) {
+		middleware := middleware.BasicAuth("", "")
+		handler := middleware(http.HandlerFunc(metricsHandler.HandleMetrics))
+
+		req := httptest.NewRequest("GET", "/metrics", nil)
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("配置认证后无凭据返回401", func(t *testing.T) {
+		middleware := middleware.BasicAuth("admin", "secret")
+		handler := middleware(http.HandlerFunc(metricsHandler.HandleMetrics))
+
+		req := httptest.NewRequest("GET", "/metrics", nil)
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Contains(t, w.Header().Get("WWW-Authenticate"), "Basic")
+	})
+
+	t.Run("配置认证后错误凭据返回401", func(t *testing.T) {
+		middleware := middleware.BasicAuth("admin", "secret")
+		handler := middleware(http.HandlerFunc(metricsHandler.HandleMetrics))
+
+		req := httptest.NewRequest("GET", "/metrics", nil)
+		req.SetBasicAuth("admin", "wrong")
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+
+	t.Run("配置认证后正确凭据返回200", func(t *testing.T) {
+		middleware := middleware.BasicAuth("admin", "secret")
+		handler := middleware(http.HandlerFunc(metricsHandler.HandleMetrics))
+
+		req := httptest.NewRequest("GET", "/metrics", nil)
+		req.SetBasicAuth("admin", "secret")
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
 	})
 }
 
@@ -190,7 +253,7 @@ func TestSocialLoginHandler_HandleCallback(t *testing.T) {
 	})
 
 	t.Run("有授权码但不支持的提供商", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/auth/unsupported/callback?code=abc123", nil)
+		req := httptest.NewRequest("GET", "/auth/unsupported/callback?code=abc123&state=test-state", nil)
 		w := httptest.NewRecorder()
 
 		h.HandleCallback(w, req)

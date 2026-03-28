@@ -69,6 +69,10 @@ RATE_LIMIT_WINDOW=1m
 MAX_LOGIN_ATTEMPTS=5
 LOCKOUT_DURATION=30m
 
+# Metrics配置 (Prometheus指标端点认证)
+METRICS_USERNAME=your_metrics_username
+METRICS_PASSWORD=your_strong_metrics_password
+
 # CORS配置
 CORS_ALLOWED_ORIGINS=https://yourdomain.com
 ```
@@ -599,6 +603,10 @@ scrape_configs:
       - targets: ['sso:9090']
     metrics_path: '/metrics'
     scrape_interval: 15s
+    # 如果配置了Metrics Basic Auth，需要添加以下配置
+    basic_auth:
+      username: '${METRICS_USERNAME}'
+      password: '${METRICS_PASSWORD}'
 ```
 
 ### Grafana Dashboard

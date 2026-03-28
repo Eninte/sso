@@ -39,11 +39,14 @@ GET /health
 
 ### Prometheus指标
 
-获取服务监控指标。
+获取服务监控指标（如果配置了`METRICS_USERNAME`和`METRICS_PASSWORD`，需要Basic Auth认证）。
 
 ```
 GET /metrics
+Authorization: Basic base64(username:password)
 ```
+
+**认证**: 可选（配置`METRICS_USERNAME`和`METRICS_PASSWORD`后启用）
 
 **响应**: Prometheus文本格式
 

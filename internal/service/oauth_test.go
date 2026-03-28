@@ -3,6 +3,8 @@ package service_test
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
 	"testing"
@@ -11,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/your-org/sso/internal/crypto"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/service"
 	"github.com/your-org/sso/internal/store/mock"
@@ -20,10 +23,29 @@ import (
 // 测试辅助函数
 // ============================================================================
 
+// createTestJWTService 创建测试用的JWT服务
+func createTestJWTServiceForOAuth() *crypto.JWTService {
+	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	return crypto.NewJWTService(
+		privateKey,
+		&privateKey.PublicKey,
+		"test-issuer",
+		15*time.Minute,
+		7*24*time.Hour,
+	)
+}
+
+// createTestTokenService 创建测试用的Token服务
+func createTestTokenService(store *mock.Store) *service.TokenService {
+	jwtSvc := createTestJWTServiceForOAuth()
+	return service.NewTokenService(jwtSvc, store)
+}
+
 // createTestOAuthService 创建测试用的OAuth服务
 func createTestOAuthService(t *testing.T) (*service.OAuthService, *mock.Store) {
 	store := mock.New()
-	oauthSvc := service.NewOAuthService(store)
+	tokenSvc := createTestTokenService(store)
+	oauthSvc := service.NewOAuthService(store, tokenSvc)
 	return oauthSvc, store
 }
 
@@ -364,12 +386,13 @@ func TestOAuthService_RevokeToken(t *testing.T) {
 
 func TestOAuthService_NewOAuthServiceWithAudit(t *testing.T) {
 	store := mock.New()
+	tokenSvc := createTestTokenService(store)
 
 	t.Run("创建带审计的OAuth服务", func(t *testing.T) {
 		auditSvc := service.NewAuditService(store)
 		defer auditSvc.Close()
 
-		oauthSvc := service.NewOAuthServiceWithAudit(store, auditSvc)
+		oauthSvc := service.NewOAuthServiceWithAudit(store, auditSvc, tokenSvc)
 		assert.NotNil(t, oauthSvc)
 	})
 }
@@ -380,10 +403,11 @@ func TestOAuthService_NewOAuthServiceWithAudit(t *testing.T) {
 
 func TestOAuthService_NewOAuthServiceWithCache(t *testing.T) {
 	store := mock.New()
+	tokenSvc := createTestTokenService(store)
 
 	t.Run("创建带缓存的OAuth服务", func(t *testing.T) {
 		// 使用mock cache
-		oauthSvc := service.NewOAuthServiceWithCache(store, nil)
+		oauthSvc := service.NewOAuthServiceWithCache(store, nil, tokenSvc)
 		assert.NotNil(t, oauthSvc)
 	})
 }

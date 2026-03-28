@@ -56,4 +56,7 @@ const (
 
 	EventKeyRotated AuditEventType = "key.rotated" // 密钥轮换
 	EventKeyRevoked AuditEventType = "key.revoked" // 密钥撤销
+
+	EventSystemStart AuditEventType = "system.start" // 系统启动
+	EventSystemStop  AuditEventType = "system.stop"  // 系统停止
 )

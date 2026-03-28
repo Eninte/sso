@@ -169,7 +169,7 @@ make docker-logs
 | 方法 | 路径 | 描述 | 认证 |
 |------|------|------|------|
 | GET | /health | 健康检查 | 否 |
-| GET | /metrics | Prometheus指标 | 否 |
+| GET | /metrics | Prometheus指标 | Basic Auth（可选） |
 
 ### OIDC Discovery端点
 
@@ -265,9 +265,9 @@ sso/
 ## 安全特性
 
 ### 密码安全
-- bcrypt哈希（cost=12-14）
+- bcrypt哈希（cost>=12，测试环境可用10）
 - 最小密码长度要求
-- 密码强度验证
+- 密码强度验证（大小写字母、数字、特殊字符）
 
 ### Token安全
 - JWT使用RS256签名
@@ -281,26 +281,31 @@ sso/
 - 账户状态管理（活跃/锁定/禁用）
 
 ### 网络安全
-- Rate Limiting防护
-- 安全HTTP头（CSP、HSTS等）
+- Rate Limiting防护（默认100请求/分钟）
+- 安全HTTP头（CSP、HSTS、X-Frame-Options等）
 - CORS白名单配置
-- HTTPS支持（生产环境）
+- 生产环境数据库必须启用SSL（`DB_SSL_MODE=require`）
 
 ## 环境变量配置
 
 参考 `.env.example` 文件，主要配置项：
 
-| 变量 | 描述 | 默认值 |
-|------|------|--------|
-| SERVER_HOST | 服务器监听地址 | 0.0.0.0 |
-| SERVER_PORT | 服务器端口 | 9090 |
-| DB_HOST | 数据库主机 | localhost |
-| DB_PORT | 数据库端口 | 5432 |
-| DB_NAME | 数据库名称 | sso |
-| JWT_PRIVATE_KEY_PATH | JWT私钥路径 | ./keys/private.pem |
-| JWT_PUBLIC_KEY_PATH | JWT公钥路径 | ./keys/public.pem |
-| BCRYPT_COST | bcrypt成本因子 | 12 |
-| MAX_LOGIN_ATTEMPTS | 最大登录尝试次数 | 5 |
+| 变量 | 描述 | 默认值 | 生产要求 |
+|------|------|--------|----------|
+| SERVER_HOST | 服务器监听地址 | 0.0.0.0 | - |
+| SERVER_PORT | 服务器端口 | 9090 | - |
+| DB_HOST | 数据库主机 | localhost | - |
+| DB_PORT | 数据库端口 | 5432 | - |
+| DB_NAME | 数据库名称 | sso | - |
+| DB_PASSWORD | 数据库密码 | - | **必填** |
+| DB_SSL_MODE | 数据库SSL模式 | disable | **必须为require** |
+| JWT_PRIVATE_KEY_PATH | JWT私钥路径 | ./keys/private.pem | - |
+| JWT_PUBLIC_KEY_PATH | JWT公钥路径 | ./keys/public.pem | - |
+| BCRYPT_COST | bcrypt成本因子 | 12 | **必须>=12** |
+| CORS_ALLOWED_ORIGINS | 允许的跨域源 | http://localhost:3000 | **必填** |
+| MAX_LOGIN_ATTEMPTS | 最大登录尝试次数 | 5 | - |
+| METRICS_USERNAME | Metrics Basic Auth用户名 | - | 生产环境建议设置 |
+| METRICS_PASSWORD | Metrics Basic Auth密码 | - | 生产环境建议设置 |
 
 ## 常见问题
 

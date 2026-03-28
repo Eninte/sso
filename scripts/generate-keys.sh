@@ -31,7 +31,7 @@ openssl genrsa -out $KEYS_DIR/private.pem 2048
 echo "正在从私钥提取公钥..."
 openssl rsa -in $KEYS_DIR/private.pem -pubout -out $KEYS_DIR/public.pem
 
-# 设置适当的文件权限
+# 设置适当的文件权限（仅所有者可读写）
 chmod 600 $KEYS_DIR/private.pem
 chmod 644 $KEYS_DIR/public.pem
 

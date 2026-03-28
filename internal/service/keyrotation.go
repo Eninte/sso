@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/your-org/sso/internal/crypto"
+	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/store"
 )
@@ -34,7 +35,7 @@ func NewKeyRotationService(
 
 func (s *KeyRotationService) RotateKey(ctx context.Context) (*model.KeyVersion, error) {
 	activeKey, err := s.keyStore.GetActiveKey(ctx)
-	if err != nil && err != store.ErrNotFound {
+	if err != nil && !apperrors.Is(err, store.ErrNotFound) {
 		return nil, fmt.Errorf("failed to get active key: %w", err)
 	}
 
@@ -147,7 +148,7 @@ func (s *KeyRotationService) GetKeyStatus(ctx context.Context) ([]*model.KeyVers
 
 func (s *KeyRotationService) InitializeFirstKey(ctx context.Context) (*model.KeyVersion, error) {
 	activeKey, err := s.keyStore.GetActiveKey(ctx)
-	if err != nil && err != store.ErrNotFound {
+	if err != nil && !apperrors.Is(err, store.ErrNotFound) {
 		return nil, fmt.Errorf("failed to check for active key: %w", err)
 	}
 

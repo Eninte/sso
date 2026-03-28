@@ -78,17 +78,29 @@ func (h *SocialLoginHandler) HandleCallback(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// 3. 获取回调URL
+	// 3. 获取state参数（用于CSRF防护）
+	state := r.URL.Query().Get("state")
+	if state == "" {
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeOAuthStateInvalid))
+		return
+	}
+
+	// 4. 获取回调URL
 	redirectURI := r.URL.Query().Get("redirect_uri")
 
-	// 4. 处理回调
-	token, err := h.socialSvc.HandleCallback(r.Context(), provider, code, redirectURI)
+	// 5. 处理回调（验证state）
+	token, err := h.socialSvc.HandleCallback(r.Context(), provider, code, state, redirectURI)
 	if err != nil {
+		// 根据错误类型返回相应的错误码
+		if apperrors.Is(err, apperrors.ErrOAuthStateInvalid) {
+			writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeOAuthStateInvalid))
+			return
+		}
 		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeSocialLoginFailed))
 		return
 	}
 
-	// 5. 返回Token
+	// 6. 返回Token
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"access_token":  token.AccessToken,
 		"refresh_token": token.RefreshToken,

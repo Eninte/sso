@@ -25,3 +25,4 @@
 - 密码哈希失败：检查bcrypt cost设置（生产环境必须 >= 12）
 - 数据库连接失败：检查 `DB_PASSWORD` 环境变量是否设置
 - CORS错误：检查 `CORS_ALLOWED_ORIGINS` 环境变量配置
+- 生产环境启动失败：检查 `DB_SSL_MODE` 是否为 `require`

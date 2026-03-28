@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -44,6 +45,14 @@ type OAuthProvider struct {
 	Scopes       []string
 }
 
+// stateInfo OAuth state信息
+// 用于验证回调请求，防止CSRF攻击
+type stateInfo struct {
+	provider    string    // 提供商名称
+	redirectURI string    // 回调URL
+	createdAt   time.Time // 创建时间
+}
+
 // HTTPClient HTTP客户端接口
 // 支持注入mock用于测试
 type HTTPClient interface {
@@ -60,6 +69,7 @@ type SocialLoginService struct {
 	tokenSvc   *TokenService
 	providers  map[string]*OAuthProvider
 	httpClient HTTPClient
+	stateCache sync.Map // 用于存储OAuth state，防止CSRF攻击
 }
 
 func NewSocialLoginService(
@@ -145,6 +155,18 @@ func (s *SocialLoginService) GetAuthorizationURL(provider, redirectURI, state st
 		redirectURI = "http://localhost:9090/auth/" + provider + "/callback"
 	}
 
+	// 如果未提供state，生成随机state
+	if state == "" {
+		state = uuid.New().String()
+	}
+
+	// 存储state到缓存（5分钟过期），用于后续验证
+	s.stateCache.Store(state, stateInfo{
+		provider:    provider,
+		redirectURI: redirectURI,
+		createdAt:   time.Now(),
+	})
+
 	params := url.Values{
 		"client_id":     {p.ClientID},
 		"redirect_uri":  {redirectURI},
@@ -156,14 +178,40 @@ func (s *SocialLoginService) GetAuthorizationURL(provider, redirectURI, state st
 	return p.AuthURL + "?" + params.Encode(), nil
 }
 
-func (s *SocialLoginService) HandleCallback(ctx context.Context, provider, code, redirectURI string) (*model.LoginResponse, error) {
+func (s *SocialLoginService) HandleCallback(ctx context.Context, provider, code, state, redirectURI string) (*model.LoginResponse, error) {
 	p, ok := s.providers[provider]
 	if !ok {
 		return nil, ErrProviderNotSupported
 	}
 
+	// 验证state参数（防止CSRF攻击）
+	if state == "" {
+		return nil, ErrOAuthStateInvalid
+	}
+
+	// 从缓存中获取state信息
+	stateVal, exists := s.stateCache.Load(state)
+	if !exists {
+		return nil, ErrOAuthStateInvalid
+	}
+
+	// 删除已使用的state（防止重放攻击）
+	s.stateCache.Delete(state)
+
+	// 安全类型断言
+	info, ok := stateVal.(stateInfo)
+	if !ok {
+		return nil, ErrOAuthStateInvalid
+	}
+
+	// 验证state是否过期（5分钟）
+	if time.Since(info.createdAt) > 5*time.Minute {
+		return nil, ErrOAuthStateInvalid
+	}
+
+	// 如果未提供redirectURI，使用存储的值
 	if redirectURI == "" {
-		redirectURI = "http://localhost:9090/auth/" + provider + "/callback"
+		redirectURI = info.redirectURI
 	}
 
 	accessToken, err := s.exchangeCode(p, code, redirectURI)
