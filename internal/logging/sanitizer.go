@@ -3,17 +3,7 @@
 package logging
 
 import (
-	"regexp"
-)
-
-var (
-	// emailRegex 邮箱脱敏正则
-	// 保留前1-3个字符和域名部分
-	emailRegex = regexp.MustCompile(`^(.{1,3})?[^@]*@(.+)$`)
-
-	// phoneRegex 手机号脱敏正则
-	// 只匹配以1开头的11位手机号
-	phoneRegex = regexp.MustCompile(`^(1\d{2})\d{4}(\d{4})$`)
+	"strings"
 )
 
 // SanitizeEmail 脱敏邮箱地址
@@ -22,15 +12,25 @@ func SanitizeEmail(email string) string {
 	if email == "" {
 		return ""
 	}
-	matches := emailRegex.FindStringSubmatch(email)
-	if len(matches) != 3 {
+
+	// 查找@符号位置
+	atIndex := strings.Index(email, "@")
+	if atIndex <= 0 {
 		return email
 	}
-	prefix := matches[1]
-	if prefix == "" {
-		prefix = "u"
+
+	// 获取用户名部分
+	username := email[:atIndex]
+
+	// 保留前1-3个字符
+	var prefix string
+	if len(username) <= 3 {
+		prefix = username
+	} else {
+		prefix = username[:1]
 	}
-	return prefix + "***@" + matches[2]
+
+	return prefix + "***@" + email[atIndex+1:]
 }
 
 // SanitizeToken 脱敏Token
@@ -44,6 +44,21 @@ func SanitizeToken(token string) string {
 
 // SanitizePhone 脱敏手机号
 // "13812345678" -> "138****5678"
+// 只对以1开头的11位手机号进行脱敏
 func SanitizePhone(phone string) string {
-	return phoneRegex.ReplaceAllString(phone, "$1****$2")
+	if len(phone) != 11 {
+		return phone
+	}
+
+	if phone[0] != '1' || phone[1] < '3' || phone[1] > '9' {
+		return phone
+	}
+
+	for _, c := range phone {
+		if c < '0' || c > '9' {
+			return phone
+		}
+	}
+
+	return phone[:3] + "****" + phone[7:]
 }
