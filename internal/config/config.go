@@ -92,6 +92,9 @@ type Config struct {
 	// Metrics配置
 	MetricsUsername string // Metrics Basic Auth用户名
 	MetricsPassword string // Metrics Basic Auth密码
+
+	// 优雅关闭配置
+	ShutdownTimeout time.Duration // 优雅关闭超时时间
 }
 
 // Load 从环境变量加载配置
@@ -171,6 +174,9 @@ func Load() (*Config, error) {
 		// Metrics配置
 		MetricsUsername: os.Getenv("METRICS_USERNAME"),
 		MetricsPassword: os.Getenv("METRICS_PASSWORD"),
+
+		// 优雅关闭配置
+		ShutdownTimeout: getEnvDuration("SHUTDOWN_TIMEOUT", 30*time.Second),
 	}
 
 	// 验证必需的配置

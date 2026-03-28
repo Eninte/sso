@@ -51,6 +51,15 @@ jobs:
           DATABASE_URL: postgres://sso:testpassword@localhost:5432/sso_test?sslmode=disable
         run: go test -v -race -coverprofile=coverage.out ./...
 
+      - name: Check coverage threshold
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          if [ $(echo "$COVERAGE < 70" | bc) -eq 1 ]; then
+            echo "Coverage $COVERAGE% is below threshold 70%"
+            exit 1
+          fi
+          echo "Coverage: $COVERAGE%"
+
       - name: Upload coverage report
         uses: codecov/codecov-action@v4
         with:

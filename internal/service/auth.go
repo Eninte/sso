@@ -269,7 +269,10 @@ func (s *AuthService) Login(ctx context.Context, req *model.LoginRequest) (*mode
 // ============================================================================
 
 // maxRevokeRetries Token撤销最大重试次数
-const maxRevokeRetries = 3
+const (
+	maxRevokeRetries     = 3
+	revokeRetryBaseDelay = 100 * time.Millisecond
+)
 
 // revokeTokenWithRetry 带重试的Token撤销
 func (s *AuthService) revokeTokenWithRetry(ctx context.Context, accessToken string) error {
@@ -282,7 +285,7 @@ func (s *AuthService) revokeTokenWithRetry(ctx context.Context, accessToken stri
 				"attempt", i+1,
 				"max_retries", maxRevokeRetries,
 			)
-			time.Sleep(time.Duration(i+1) * 100 * time.Millisecond)
+			time.Sleep(time.Duration(i+1) * revokeRetryBaseDelay)
 			continue
 		}
 

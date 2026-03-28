@@ -47,18 +47,24 @@ type SystemHealthInfo struct {
 
 // AdminService 管理员服务实现
 type AdminService struct {
-	store store.Store
-	cache cache.Cache
+	store   store.Store
+	cache   cache.Cache
+	version string
 }
 
 // NewAdminService 创建管理员服务
 func NewAdminService(store store.Store) *AdminService {
-	return &AdminService{store: store}
+	return &AdminService{store: store, version: "dev"}
 }
 
 // NewAdminServiceWithCache 创建带缓存的管理员服务
 func NewAdminServiceWithCache(store store.Store, cacheSvc cache.Cache) *AdminService {
-	return &AdminService{store: store, cache: cacheSvc}
+	return &AdminService{store: store, cache: cacheSvc, version: "dev"}
+}
+
+// NewAdminServiceWithVersion 创建带版本号的管理员服务
+func NewAdminServiceWithVersion(store store.Store, cacheSvc cache.Cache, version string) *AdminService {
+	return &AdminService{store: store, cache: cacheSvc, version: version}
 }
 
 // ============================================================================
@@ -105,7 +111,7 @@ func (s *AdminService) DisableUser(ctx context.Context, userID string) error {
 		return err
 	}
 
-	user.Status = "disabled"
+	user.Status = model.UserStatusDisabled
 	user.UpdatedAt = time.Now()
 
 	if err := s.store.Update(ctx, user); err != nil {
@@ -127,7 +133,7 @@ func (s *AdminService) EnableUser(ctx context.Context, userID string) error {
 		return err
 	}
 
-	user.Status = "active"
+	user.Status = model.UserStatusActive
 	user.LoginAttempts = 0
 	user.LockedUntil = nil
 	user.UpdatedAt = time.Now()
@@ -150,7 +156,7 @@ func (s *AdminService) SystemHealth(ctx context.Context) (*SystemHealthInfo, err
 		Status:    "ok",
 		Timestamp: time.Now(),
 		Database:  dbStatus,
-		Version:   "1.0.0",
+		Version:   s.version,
 	}, nil
 }
 

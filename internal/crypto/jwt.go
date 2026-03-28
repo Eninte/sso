@@ -24,7 +24,7 @@ import (
 var (
 	ErrInvalidToken = apperrors.ErrInvalidToken
 	ErrTokenExpired = apperrors.ErrTokenExpired
-	ErrNoActiveKey  = errors.New("no active key available")
+	ErrNoActiveKey  = apperrors.ErrNoActiveKey
 )
 
 type JWTService struct {
@@ -74,7 +74,16 @@ func NewJWTServiceWithKeyStore(
 	}
 }
 
-func (s *JWTService) SetActiveKey(keyID string, privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey) {
+func (s *JWTService) SetActiveKey(keyID string, privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey) error {
+	if keyID == "" {
+		return apperrors.ErrKeyIDEmpty
+	}
+	if privateKey == nil {
+		return apperrors.ErrPrivateKeyNil
+	}
+	if publicKey == nil {
+		return apperrors.ErrPublicKeyNil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.keys[keyID] = privateKey
@@ -82,6 +91,7 @@ func (s *JWTService) SetActiveKey(keyID string, privateKey *rsa.PrivateKey, publ
 	s.activeKeyID = keyID
 	s.privateKey = privateKey
 	s.publicKey = publicKey
+	return nil
 }
 
 func (s *JWTService) AddVerificationKey(keyID string, publicKey *rsa.PublicKey) {

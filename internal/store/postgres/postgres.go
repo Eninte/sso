@@ -26,14 +26,19 @@ const DefaultQueryTimeout = 10 * time.Second
 // 使用分批删除避免长时间锁表和大量WAL日志
 const CleanupBatchSize = 1000
 
-// allowedCleanupTables 允许清理的表名白名单
-// 防止SQL注入：仅允许预定义的表名
-var allowedCleanupTables = map[string]bool{
-	"tokens":              true,
-	"authorization_codes": true,
-	"verification_tokens": true,
-	"reset_tokens":        true,
+// AllowedCleanupTables 允许清理操作的表名白名单
+// 用于防止SQL注入攻击，仅允许预定义的安全表名
+// 这些表包含有过期时间字段(expires_at)，支持安全清理
+var AllowedCleanupTables = map[string]bool{
+	"tokens":              true, // OAuth令牌表
+	"authorization_codes": true, // OAuth授权码表
+	"verification_tokens": true, // 邮箱验证令牌表
+	"reset_tokens":        true, // 密码重置令牌表
 }
+
+// allowedCleanupTables 是AllowedCleanupTables的内部别名
+// 保持向后兼容性
+var allowedCleanupTables = AllowedCleanupTables
 
 // Store PostgreSQL存储实现
 type Store struct {

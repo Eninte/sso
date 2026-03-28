@@ -27,6 +27,7 @@ import (
 var (
 	ErrProviderNotSupported = apperrors.ErrProviderNotSupported
 	ErrOAuthStateInvalid    = apperrors.ErrOAuthStateInvalid
+	ErrOAuthStateExpired    = apperrors.ErrOAuthStateExpired
 	ErrOAuthCodeInvalid     = apperrors.ErrInvalidCode
 	ErrSocialLoginFailed    = apperrors.ErrSocialLoginFailed
 )
@@ -249,7 +250,7 @@ func (s *SocialLoginService) HandleCallback(ctx context.Context, provider, code,
 
 	// 验证state是否过期（5分钟）
 	if time.Since(info.createdAt) > 5*time.Minute {
-		return nil, ErrOAuthStateInvalid
+		return nil, ErrOAuthStateExpired
 	}
 
 	// 如果未提供redirectURI，使用存储的值

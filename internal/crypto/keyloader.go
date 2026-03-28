@@ -225,7 +225,9 @@ func LoadKeysForRotation(
 	svc := NewJWTService(privateKey, publicKey, issuer, accessTokenTTL, refreshTokenTTL)
 
 	// 设置活跃密钥
-	svc.SetActiveKey(keyID, privateKey, publicKey)
+	if err := svc.SetActiveKey(keyID, privateKey, publicKey); err != nil {
+		return nil, fmt.Errorf("设置活跃密钥失败: %w", err)
+	}
 
 	// 加载轮换公钥（用于验证旧Token）
 	for _, path := range rotationPublicKeyPaths {

@@ -103,18 +103,19 @@ sso/
 │   │   └── *_test.go
 │   │
 │   ├── logging/                # 日志工具
-│   │   └── logging.go          # 日志初始化
+│   │   ├── logger.go           # 日志初始化和辅助函数
+│   │   └── sanitizer.go        # 日志脱敏（邮箱、Token、手机号）
 │   │
 │   ├── metrics/                # Prometheus指标
 │   │   └── metrics.go          # 指标定义和收集
 │   │
 │   ├── middleware/             # HTTP中间件
-│   │   ├── auth.go             # 认证中间件
+│   │   ├── auth.go             # 认证中间件 + 上下文键定义
 │   │   ├── cors.go             # CORS中间件
-│   │   ├── logger.go           # 日志中间件
-│   │   ├── security.go         # 安全头中间件
-│   │   ├── rate_limit.go       # 限流中间件
-│   │   ├── admin.go            # 管理员权限中间件
+│   │   ├── logging.go          # 日志中间件
+│   │   ├── security.go         # 安全头中间件（含CSP nonce）
+│   │   ├── requestid.go        # 请求ID中间件
+│   │   ├── ratelimit.go        # 限流中间件
 │   │   ├── language.go         # 语言中间件
 │   │   └── middleware_test.go
 │   │
@@ -281,9 +282,10 @@ type Store interface {
 - 链式处理
 
 **中间件类型**：
-- `SecurityHeaders` - 安全HTTP头
+- `SecurityHeaders` - 安全HTTP头（含 CSP nonce）
+- `RequestID` - 请求追踪 ID（X-Request-ID）
 - `CORS` - 跨域资源共享
-- `Logger` - 请求日志
+- `Logger` - 请求日志（自动关联 request_id）
 - `AuthMiddleware` - JWT认证
 - `AdminMiddleware` - 管理员权限检查
 - `Language` - 多语言支持
@@ -520,11 +522,17 @@ auth_token_refresh_total     // Token刷新次数
 
 ```go
 // 结构化日志 (slog)
-slog.Info("用户登录成功",
+// 自动关联 request_id
+logger := logging.WithContext(ctx)
+logger.Info("用户登录成功",
     "user_id", userID,
     "ip", clientIP,
     "duration", duration,
 )
+
+// 敏感信息自动脱敏
+logging.LogAuth("login", userID, email, true, nil)
+// email 自动脱敏为 "u***@example.com"
 
 // 日志级别
 - ERROR: 系统错误、安全事件

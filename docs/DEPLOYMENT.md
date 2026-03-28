@@ -69,6 +69,9 @@ RATE_LIMIT_WINDOW=1m
 MAX_LOGIN_ATTEMPTS=5
 LOCKOUT_DURATION=30m
 
+# 优雅关闭配置
+SHUTDOWN_TIMEOUT=30s
+
 # Metrics配置 (Prometheus指标端点认证)
 METRICS_USERNAME=your_metrics_username
 METRICS_PASSWORD=your_strong_metrics_password

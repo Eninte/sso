@@ -73,11 +73,16 @@ const (
 	ErrCodeOAuthCodeExchangeFailed ErrorCode = "OAUTH_CODE_EXCHANGE_FAILED" // OAuth授权码交换失败
 	ErrCodeSocialLoginFailed       ErrorCode = "SOCIAL_LOGIN_FAILED"        // 社交登录失败
 	ErrCodeOAuthStateInvalid       ErrorCode = "OAUTH_STATE_INVALID"        // OAuth状态无效
+	ErrCodeOAuthStateExpired       ErrorCode = "OAUTH_STATE_EXPIRED"        // OAuth状态已过期
 
 	// 密钥相关错误
 	ErrCodeKeyNotFound    ErrorCode = "KEY_NOT_FOUND"    // 密钥未找到
 	ErrCodeKeyPathInvalid ErrorCode = "KEY_PATH_INVALID" // 密钥路径无效
 	ErrCodeKeyParseFailed ErrorCode = "KEY_PARSE_FAILED" // 密钥解析失败
+	ErrCodeKeyIDEmpty     ErrorCode = "KEY_ID_EMPTY"     // 密钥ID为空
+	ErrCodePrivateKeyNil  ErrorCode = "PRIVATE_KEY_NIL"  // 私钥为空
+	ErrCodePublicKeyNil   ErrorCode = "PUBLIC_KEY_NIL"   // 公钥为空
+	ErrCodeNoActiveKey    ErrorCode = "NO_ACTIVE_KEY"    // 无活跃密钥
 
 	// 缓存相关错误
 	ErrCodeCacheMiss ErrorCode = "CACHE_MISS" // 缓存未命中
@@ -212,11 +217,16 @@ var (
 	ErrOAuthCodeExchangeFailed = New(ErrCodeOAuthCodeExchangeFailed, "OAuth授权码交换失败", 400)
 	ErrSocialLoginFailed       = New(ErrCodeSocialLoginFailed, "社交登录失败", 400)
 	ErrOAuthStateInvalid       = New(ErrCodeOAuthStateInvalid, "OAuth状态无效", 400)
+	ErrOAuthStateExpired       = New(ErrCodeOAuthStateExpired, "OAuth状态已过期，请重新发起登录", 400)
 
 	// 密钥错误
 	ErrKeyNotFound    = New(ErrCodeKeyNotFound, "密钥未找到", 500)
 	ErrKeyPathInvalid = New(ErrCodeKeyPathInvalid, "密钥路径无效", 500)
 	ErrKeyParseFailed = New(ErrCodeKeyParseFailed, "密钥解析失败", 500)
+	ErrKeyIDEmpty     = New(ErrCodeKeyIDEmpty, "密钥ID不能为空", 400)
+	ErrPrivateKeyNil  = New(ErrCodePrivateKeyNil, "私钥不能为空", 400)
+	ErrPublicKeyNil   = New(ErrCodePublicKeyNil, "公钥不能为空", 400)
+	ErrNoActiveKey    = New(ErrCodeNoActiveKey, "无活跃密钥可用", 500)
 
 	// 缓存错误
 	ErrCacheMiss = New(ErrCodeCacheMiss, "缓存未命中", 404)

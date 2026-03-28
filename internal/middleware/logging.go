@@ -53,6 +53,7 @@ func Logger(next http.Handler) http.Handler {
 			"duration", duration.String(),
 			"remote_addr", r.RemoteAddr,
 			"user_agent", r.UserAgent(),
+			"request_id", GetRequestIDFromContext(r.Context()),
 		)
 	})
 }

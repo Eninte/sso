@@ -27,6 +27,9 @@ import (
 	"github.com/your-org/sso/internal/store/postgres"
 )
 
+// Version 服务版本号，通过 -ldflags 注入
+var Version = "dev"
+
 func main() {
 	// 1. 加载配置
 	cfg, err := config.Load()
@@ -140,7 +143,7 @@ func main() {
 	userSvc := service.NewUserService(store, passwordSvc, emailSvc, cfg.BaseURL())
 	auditSvc := service.NewAuditService(store)
 	mfaSvc := service.NewMFAService(store)
-	adminSvc := service.NewAdminServiceWithCache(store, cacheSvc)
+	adminSvc := service.NewAdminServiceWithVersion(store, cacheSvc, Version)
 
 	// 8. 初始化第三方登录服务
 	socialSvc := service.NewSocialLoginService(store, jwtSvc, cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GitHubClientID, cfg.GitHubClientSecret)
@@ -173,6 +176,7 @@ func main() {
 	rateLimiter := middleware.NewRateLimiter(cfg.RateLimitRequests, cfg.RateLimitWindow)
 
 	router.Use(middleware.SecurityHeaders)
+	router.Use(middleware.RequestID)
 	router.Use(middleware.Logger)
 	// 添加metrics中间件，收集HTTP请求指标
 	router.Use(metricsSvc.HTTPMiddleware)
@@ -252,7 +256,7 @@ func main() {
 	}
 
 	// 使用auditSvc记录服务启动
-	auditSvc.LogSystemStart(context.Background(), "1.0.0")
+	auditSvc.LogSystemStart(context.Background(), Version)
 
 	slog.Info("SSO服务初始化完成",
 		"endpoints", []string{
@@ -287,7 +291,7 @@ func main() {
 		return quit
 	}():
 		slog.Info("收到关闭信号，正在优雅关闭服务器...", "signal", sig)
-		gracefulShutdown(rateLimiter, server, auditSvc, socialSvc)
+		gracefulShutdown(rateLimiter, server, auditSvc, socialSvc, cfg.ShutdownTimeout)
 	}
 }
 
@@ -339,7 +343,7 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // gracefulShutdown 优雅关闭服务器
-func gracefulShutdown(rateLimiter *middleware.RateLimiter, server *http.Server, auditSvc *service.AuditService, socialSvc *service.SocialLoginService) {
+func gracefulShutdown(rateLimiter *middleware.RateLimiter, server *http.Server, auditSvc *service.AuditService, socialSvc *service.SocialLoginService, timeout time.Duration) {
 	// 停止限流器
 	rateLimiter.Stop()
 
@@ -355,7 +359,7 @@ func gracefulShutdown(rateLimiter *middleware.RateLimiter, server *http.Server, 
 		slog.Info("社交登录服务已关闭")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {

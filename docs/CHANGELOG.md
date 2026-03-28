@@ -8,15 +8,61 @@
 - 多语言支持（i18n）
 - 更多第三方登录提供商支持
 
-### Changed
-- 无
+### Security
+
+- **JWT密钥轮换并发安全**：`JWTService` 的 map 操作添加 `sync.RWMutex`，修复密钥轮换时与 token 验证的 data race
+- **SMTP TLS 不再静默降级**：移除 `sendEmailSTARTTLS` 中 TLS 错误时自动回退到 `InsecureSkipVerify` 的逻辑，证书验证失败直接报错
+- **OAuth State 原子验证**：`HandleCallback` 改用 `LoadAndDelete` 替代 `Load` + `Delete`，防止并发回调绕过 state 验证
+- **OAuth State 内存泄漏防护**：`SocialLoginService` 添加后台 goroutine 每分钟清理过期 state 条目
+- **密码重置强制密码强度校验**：`ResetPasswordWithAudit` 添加 `validator.ValidatePassword` 调用，与 `ChangePasswordWithAudit` 行为一致
+- **SQL 注入防护**：`cleanupExpiredBatch` 添加表名白名单，防止未来误传用户输入导致注入
+- **数据库连接默认启用 SSL**：`DB_SSL_MODE` 默认值从 `disable` 改为 `prefer`
+- **CSP nonce 支持**：`SecurityHeaders` 中间件为每个请求生成随机 CSP nonce，防止 XSS 攻击
+- **日志敏感信息脱敏**：新增 `logging.SanitizeEmail()` / `SanitizeToken()` / `SanitizePhone()`，`LogAuth` 自动脱敏邮箱
+- **请求追踪 ID**：新增 `middleware.RequestID` 中间件，自动生成 `X-Request-ID`，日志自动关联
 
 ### Fixed
-- 无
 
-## [1.0.0] - 2024-01-15
+- 修复服务器启动失败时 goroutine 中调用 `os.Exit(1)` 导致 `db.Close()` / `cacheSvc.Close()` 不执行的问题，改用 error channel 通知主 goroutine
+- 修复 `ForgotPassword` 所有错误分支返回 `nil` 导致生产环境无法排查数据库故障、token 生成失败等问题，添加 `slog` 日志
+- 修复 `gracefulShutdown` 未调用 `auditSvc.Close()` 导致 worker goroutine 丢失未写入审计日志的问题
+- 修复 token 响应中 `expires_in` 硬编码为 `900` 未从 JWT 配置读取的问题
+- 修复 `AdminService` 结构体中未使用的 `client` 字段
+- 修复 `admin.go` 状态字符串硬编码问题，改用 `model.UserStatusDisabled` / `model.UserStatusActive` 常量
+- 修复 `admin.go` 版本号硬编码 `1.0.0`，改用 `Version` 变量（支持 `-ldflags` 注入）
+
+### Changed
+
+- `AuditServiceInterface.Log()` 移除 `error` 返回值，与 `AuditService.Log()` 实现保持一致（审计日志异步写入，失败不阻塞主流程）
+- `gracefulShutdown` 函数签名变更，新增 `auditSvc`、`socialSvc` 和 `timeout` 参数用于优雅关闭
+- 清理 `.golangci.yml` 中 10 个已废弃 linter 配置（deadcode, exhaustivestruct, golint 等）
+- `auth.go` 提取 `revokeRetryBaseDelay` 常量替代内联魔法数字 `100 * time.Millisecond`
+- `config.go` 新增 `ShutdownTimeout` 配置项（环境变量 `SHUTDOWN_TIMEOUT`，默认 30s）
+- CI 测试步骤添加覆盖率阈值检查（≥70%）
+- Makefile 新增 `test-coverage-check` 目标
+
+---
+
+## [1.0.0] - 2026-03-27
 
 ### Added
+- 实现RBAC系统并提升测试覆盖率
+- 实现基于角色的访问控制(RBAC)
+- 实现Redis缓存集成与密钥轮换机制
+- JWT密钥轮换机制并完善审计日志
+- 添加基准测试工具和性能报告生成功能
+- 增加OAuth服务审计和缓存测试用例
+- 添加原子登录尝试操作接口和方法
+
+### Fixed
+- 修复缓存操作错误被忽略的问题
+
+---
+
+## [0.1.0] - 2026-03-23
+
+### Added
+- 项目初始化
 - 用户注册/登录功能
 - JWT Token签发与验证（RS256）
 - Access Token和Refresh Token支持
@@ -32,126 +78,24 @@
 - 数据库迁移脚本
 - Docker部署支持
 - 完整的单元测试覆盖
-
-### Security
-- bcrypt密码哈希（cost=12）
-- JWT RS256签名
-- Access Token有效期15分钟
-- Refresh Token有效期7天
-- 登录失败5次锁定30分钟
-
-## [0.9.0] - 2024-01-01
-
-### Added
 - 多因素认证（MFA）TOTP支持
-- MFA备用恢复码
 - 用户邮箱验证
 - 忘记密码/重置密码功能
 - 管理员用户管理功能
-- 系统健康检查端点
 - 审计日志功能
-
-### Changed
-- 优化Token刷新机制（Token轮换）
-- 改进错误消息国际化
-
-### Fixed
-- 修复并发Token刷新问题
-- 修复CORS预检请求处理
-
-## [0.8.0] - 2023-12-15
-
-### Added
-- Google第三方登录
-- GitHub第三方登录
-- 社交登录回调处理
-- 登录提供商发现端点
+- Google/GitHub第三方登录
+- Redis缓存层
+- Rate Limiting
+- 错误消息国际化支持
 
 ### Changed
 - 重构认证服务架构
 - 优化数据库查询性能
-
-## [0.7.0] - 2023-12-01
-
-### Added
-- Redis缓存层
-- 会话管理
-- Rate Limiting
-- 请求限流中间件
+- 完成架构重构和Handler依赖更新
 
 ### Fixed
-- 修复数据库连接池泄漏
-- 修复Token过期时间计算错误
-
-## [0.6.0] - 2023-11-15
-
-### Added
-- 管理员API端点
-- 用户禁用/启用功能
-- 批量用户查询
-- 过期数据清理
-
-### Changed
-- 优化数据库索引
-- 改进日志格式
-
-## [0.5.0] - 2023-11-01
-
-### Added
-- 邮件服务集成
-- 邮箱验证功能
-- 忘记密码流程
-- 密码重置功能
-
-### Security
-- 添加密码强度验证
-- 添加邮箱格式验证
-
-## [0.4.0] - 2023-10-15
-
-### Added
-- OAuth 2.0授权端点
-- 授权码生成和验证
-- 客户端管理
-- Scope验证
-
-### Changed
-- 重构Token生成逻辑
-- 优化JWT Claims结构
-
-## [0.3.0] - 2023-10-01
-
-### Added
-- 用户注册功能
-- 用户登录功能
-- Token签发
-- Token刷新
-- Token撤销
-
-### Security
-- bcrypt密码哈希
-- JWT签名验证
-
-## [0.2.0] - 2023-09-15
-
-### Added
-- PostgreSQL存储层
-- 数据库迁移框架
-- 用户模型
-- Token模型
-
-### Changed
-- 从内存存储迁移到PostgreSQL
-
-## [0.1.0] - 2023-09-01
-
-### Added
-- 项目初始化
-- 基础HTTP服务器
-- 路由框架
-- 配置管理
-- 日志系统
-- 健康检查端点
+- 统一错误处理机制
+- 完善错误统一处理
 
 ---
 

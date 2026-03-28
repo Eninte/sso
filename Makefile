@@ -56,6 +56,16 @@ test-coverage: ## 生成测试覆盖率报告
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "覆盖率报告: coverage.html"
 
+.PHONY: test-coverage-check
+test-coverage-check: ## 运行测试并检查覆盖率阈值 (>=70%)
+	@go test -coverprofile=coverage.out ./... > /dev/null 2>&1
+	@COVERAGE=$$(go tool cover -func=coverage.out | grep total | awk '{print $$3}' | sed 's/%//'); \
+	if [ $$(echo "$$COVERAGE < 70" | bc) -eq 1 ]; then \
+		echo "❌ Coverage $$COVERAGE% is below threshold 70%"; \
+		exit 1; \
+	fi; \
+	echo "✅ Coverage: $$COVERAGE%"
+
 .PHONY: test-security
 test-security: ## 运行安全检查
 	go vet ./...

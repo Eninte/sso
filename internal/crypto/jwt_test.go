@@ -317,10 +317,32 @@ func TestJWTService_SetActiveKey(t *testing.T) {
 
 	// 设置新的活跃密钥
 	newKeyID := "new-key-123"
-	svc.SetActiveKey(newKeyID, newPrivateKey, &newPrivateKey.PublicKey)
+	err = svc.SetActiveKey(newKeyID, newPrivateKey, &newPrivateKey.PublicKey)
+	require.NoError(t, err)
 
 	// 验证活跃密钥ID已更新
 	assert.Equal(t, newKeyID, svc.GetActiveKeyID())
+}
+
+func TestJWTService_SetActiveKey_InvalidParams(t *testing.T) {
+	svc := createTestJWTService(t)
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	// 空keyID
+	err = svc.SetActiveKey("", privateKey, &privateKey.PublicKey)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "密钥ID")
+
+	// nil privateKey
+	err = svc.SetActiveKey("key-123", nil, &privateKey.PublicKey)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "私钥")
+
+	// nil publicKey
+	err = svc.SetActiveKey("key-123", privateKey, nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "公钥")
 }
 
 func TestJWTService_AddVerificationKey(t *testing.T) {
@@ -346,7 +368,8 @@ func TestJWTService_RemoveKey(t *testing.T) {
 	keyID := "test-key-123"
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
-	svc.SetActiveKey(keyID, privateKey, &privateKey.PublicKey)
+	err = svc.SetActiveKey(keyID, privateKey, &privateKey.PublicKey)
+	require.NoError(t, err)
 
 	// 删除密钥
 	svc.RemoveKey(keyID)
@@ -385,7 +408,8 @@ func TestJWTService_GenerateAccessTokenWithKeyID(t *testing.T) {
 	)
 
 	keyID := "custom-key-123"
-	svc.SetActiveKey(keyID, privateKey, &privateKey.PublicKey)
+	err = svc.SetActiveKey(keyID, privateKey, &privateKey.PublicKey)
+	require.NoError(t, err)
 
 	// 使用指定的keyID生成Token
 	token, err := svc.GenerateAccessTokenWithKeyID("user-123", "test@example.com", "user", []string{"openid"}, keyID)

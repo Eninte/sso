@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"os"
 	"time"
+
+	"github.com/your-org/sso/internal/middleware"
 )
 
 // ============================================================================
@@ -116,8 +118,13 @@ func parseLevel(level string) (slog.Level, error) {
 
 // WithContext 创建带上下文的日志记录器
 func WithContext(ctx context.Context) *slog.Logger {
-	// 可以从context中提取trace_id等信息
-	return slog.Default()
+	logger := slog.Default()
+
+	if requestID := middleware.GetRequestIDFromContext(ctx); requestID != "" {
+		logger = logger.With("request_id", requestID)
+	}
+
+	return logger
 }
 
 // WithComponent 创建带组件名称的日志记录器
@@ -164,7 +171,7 @@ func LogAuth(event string, userID string, email string, success bool, err error)
 	attrs := []any{
 		"event", event,
 		"user_id", userID,
-		"email", email,
+		"email", SanitizeEmail(email),
 		"success", success,
 	}
 	if err != nil {

@@ -173,7 +173,7 @@ func TestAdminService_SystemHealth(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "ok", health.Status)
 		assert.Equal(t, "ok", health.Database)
-		assert.Equal(t, "1.0.0", health.Version)
+		assert.Equal(t, "dev", health.Version)
 		assert.NotZero(t, health.Timestamp)
 	})
 }

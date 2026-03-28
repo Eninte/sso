@@ -36,6 +36,9 @@ const (
 
 	// IsAdminKey 管理员标识上下文键
 	IsAdminKey contextKey = "isAdmin"
+
+	// RequestIDKey 请求ID上下文键
+	RequestIDKey contextKey = "requestID"
 )
 
 // ============================================================================

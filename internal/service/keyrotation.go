@@ -63,7 +63,9 @@ func (s *KeyRotationService) RotateKey(ctx context.Context) (*model.KeyVersion, 
 		return nil, fmt.Errorf("failed to parse private key: %w", err)
 	}
 
-	s.jwtSvc.SetActiveKey(newKeyVersion.ID, privKey, pubKey)
+	if err := s.jwtSvc.SetActiveKey(newKeyVersion.ID, privKey, pubKey); err != nil {
+		return nil, fmt.Errorf("failed to set active key: %w", err)
+	}
 
 	if activeKey != nil {
 		expiresAt := time.Now().Add(s.transitionPeriod)

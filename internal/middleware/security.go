@@ -3,7 +3,16 @@
 package middleware
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"fmt"
 	"net/http"
+)
+
+const (
+	// cspNonceKey CSP nonce上下文键
+	cspNonceKey contextKey = "cspNonce"
 )
 
 // SecurityHeaders 安全头中间件
@@ -26,8 +35,13 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 
 		// 内容安全策略 (CSP)
-		// 限制资源加载来源
-		w.Header().Set("Content-Security-Policy", "default-src 'self'")
+		// 使用nonce支持安全的内联脚本
+		nonce := generateCSPNonce()
+		csp := fmt.Sprintf(
+			"default-src 'self'; script-src 'self' 'nonce-%s'; style-src 'self' 'nonce-%s'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+			nonce, nonce,
+		)
+		w.Header().Set("Content-Security-Policy", csp)
 
 		// 引用策略
 		// 控制Referer头的发送
@@ -37,7 +51,25 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		// 禁用不必要的浏览器功能
 		w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
 
+		// 将nonce添加到上下文，供模板使用
+		ctx := context.WithValue(r.Context(), cspNonceKey, nonce)
+
 		// 继续处理请求
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// generateCSPNonce 生成CSP nonce
+func generateCSPNonce() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return base64.StdEncoding.EncodeToString(b)
+}
+
+// GetCSPNonce 从上下文获取CSP nonce
+func GetCSPNonce(ctx context.Context) string {
+	if nonce, ok := ctx.Value(cspNonceKey).(string); ok {
+		return nonce
+	}
+	return ""
 }
