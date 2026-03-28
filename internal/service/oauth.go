@@ -8,6 +8,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/your-org/sso/internal/cache"
@@ -87,10 +88,12 @@ func (s *OAuthService) getClient(ctx context.Context, clientID string) (*model.C
 		return nil, err
 	}
 
-	// 缓存结果
+	// 缓存结果（失败不影响主流程）
 	if s.cache != nil {
 		cacheKey := cache.ClientKey(clientID)
-		_ = s.cache.Set(ctx, cacheKey, client, cache.ClientTTL)
+		if err := s.cache.Set(ctx, cacheKey, client, cache.ClientTTL); err != nil {
+			slog.Warn("缓存客户端信息失败", "error", err, "client_id", clientID)
+		}
 	}
 
 	return client, nil

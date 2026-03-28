@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/your-org/sso/internal/common"
@@ -142,7 +143,10 @@ func (s *UserService) VerifyEmail(ctx context.Context, userID, token string) err
 		return err
 	}
 
-	_ = s.store.DeleteVerificationToken(ctx, userID)
+	// 清理验证令牌（失败不影响主流程）
+	if err := s.store.DeleteVerificationToken(ctx, userID); err != nil {
+		slog.Warn("清理验证令牌失败", "error", err, "user_id", userID)
+	}
 
 	return nil
 }
@@ -212,8 +216,14 @@ func (s *UserService) ResetPasswordWithAudit(ctx context.Context, userID, token,
 		return err
 	}
 
-	_ = s.store.DeleteResetToken(ctx, userID)
-	_ = s.store.RevokeAllUserTokens(ctx, userID)
+	// 清理重置令牌（失败不影响主流程）
+	if err := s.store.DeleteResetToken(ctx, userID); err != nil {
+		slog.Warn("清理重置令牌失败", "error", err, "user_id", userID)
+	}
+	// 撤销用户所有Token（失败不影响主流程）
+	if err := s.store.RevokeAllUserTokens(ctx, userID); err != nil {
+		slog.Warn("撤销用户Token失败", "error", err, "user_id", userID)
+	}
 
 	if s.auditSvc != nil {
 		s.auditSvc.LogPasswordReset(ctx, userID, ipAddress)

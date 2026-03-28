@@ -286,10 +286,12 @@ func (s *AuthService) revokeTokenWithRetry(ctx context.Context, accessToken stri
 			continue
 		}
 
-		// 清除缓存
+		// 清除缓存（失败不影响主流程）
 		if s.cache != nil {
 			cacheKey := cache.TokenKey(accessToken)
-			_ = s.cache.Delete(ctx, cacheKey)
+			if err := s.cache.Delete(ctx, cacheKey); err != nil {
+				slog.Warn("清除Token缓存失败", "error", err)
+			}
 		}
 
 		return nil
@@ -370,9 +372,11 @@ func (s *AuthService) LogoutAllWithAudit(ctx context.Context, userID string, aud
 		return fmt.Errorf("登出所有设备失败: %w", err)
 	}
 
-	// 清除该用户相关的缓存
+	// 清除该用户相关的缓存（失败不影响主流程）
 	if s.cache != nil {
-		_ = s.cache.DeletePattern(ctx, cache.TokenCachePrefix+"*")
+		if err := s.cache.DeletePattern(ctx, cache.TokenCachePrefix+"*"); err != nil {
+			slog.Warn("清除用户Token缓存失败", "error", err, "user_id", userID)
+		}
 	}
 
 	s.incrementMetric("auth_logout_all_total")
@@ -427,10 +431,12 @@ func (s *AuthService) ValidateToken(ctx context.Context, accessToken string) (*c
 		return nil, ErrInvalidToken
 	}
 
-	// 缓存结果
+	// 缓存结果（失败不影响主流程）
 	if s.cache != nil {
 		cacheKey := cache.TokenKey(accessToken)
-		_ = s.cache.Set(ctx, cacheKey, tokenRecord, cache.TokenTTL)
+		if err := s.cache.Set(ctx, cacheKey, tokenRecord, cache.TokenTTL); err != nil {
+			slog.Warn("缓存Token记录失败", "error", err)
+		}
 	}
 
 	return claims, nil

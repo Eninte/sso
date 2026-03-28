@@ -1,123 +1,111 @@
 # SSO服务 - AI代理协作指南
 
-本指南为AI代理提供在本Go项目中工作的标准规范。
+Go 1.26+ 单点登录服务，提供OAuth 2.0/OpenID Connect认证功能。
 
-## 项目概述
-
-这是一个基于Go 1.26+的单点登录(SSO)服务，提供OAuth 2.0/OpenID Connect认证功能。
-
-## 构建与测试命令
+## 构建与运行
 
 ```bash
-# 构建
-make build
-
-# 运行
-make run
-
-# 开发模式（启动依赖服务并运行）
-make dev
-
-# 测试
-make test                    # 运行所有测试
-make test-unit               # 运行单元测试（短测试）
-make test-integration        # 运行集成测试
-go test -v -run TestAuthService_Login ./internal/service/  # 运行单个测试
-make test-coverage           # 生成测试覆盖率报告
-
-# 代码质量
-make lint                    # 运行代码检查
-make fmt                     # 格式化代码
-make test-security           # 运行安全检查
-
-# Docker
-make docker-build            # 构建Docker镜像
-make docker-up               # 启动所有服务
-make docker-down             # 停止服务
-
-# 数据库迁移
-make migrate-up              # 执行数据库迁移
-make migrate-down            # 回滚数据库迁移
-make migrate-create NAME=description  # 创建新的迁移文件
-
-# 密钥管理
-make generate-keys           # 生成RSA密钥对
+make build              # 构建到 ./bin/sso
+make run                # 运行服务
+make dev                # 启动依赖(Docker)并运行
+make clean              # 清理构建产物
 ```
 
-## 代码风格指南
+## 测试
 
-### 导入规范
-1. **分组顺序**：标准库 → 第三方库 → 项目内部包
-2. **使用别名**：仅在必要时使用（如 `apperrors "github.com/your-org/sso/internal/errors"`）
-3. **禁止点导入**：不允许 `import . "package"` 语法
+```bash
+make test                         # 全部测试（含-race）
+make test-unit                    # 仅短测试
+make test-integration             # 集成测试(-tags=integration)
+make test-coverage                # 生成覆盖率报告
+make bench                        # 全部基准测试
 
-### 命名约定
-1. **包名**：小写单词，不使用下划线或混合大小写
-2. **接口**：单方法接口以 `er` 结尾（如 `Reader`, `Writer`）
-3. **变量**：驼峰式命名，导出变量以大写字母开头
-4. **常量**：使用驼峰式或全大写+下划线（根据上下文）
-5. **错误变量**：以 `Err` 开头（如 `ErrInvalidCredentials`）
-
-### 类型定义
-1. **结构体**：使用描述性名称，字段使用JSON标签
-2. **接口**：保持小而专注，避免过大的接口
-3. **错误类型**：定义在专门的 `errors` 包中
-
-### 错误处理
-1. **立即检查**：错误返回后立即检查，不要延迟
-2. **错误包装**：使用 `fmt.Errorf("context: %w", err)` 包装错误
-3. **统一错误**：使用预定义的错误变量（如 `apperrors.ErrInvalidCredentials`）
-4. **日志记录**：使用 `slog` 记录错误上下文
-
-### 注释规范
-1. **包注释**：每个包必须有包注释
-2. **函数注释**：导出函数必须有注释，描述功能和参数
-3. **代码分隔**：使用注释分隔符组织代码块（如 `// ====`）
-4. **中文注释**：允许使用中文注释，但错误消息使用英文
-
-### 测试规范
-1. **测试包**：使用 `package_test` 包进行黑盒测试
-2. **测试框架**：使用 `testify/assert` 和 `testify/require`
-3. **表驱动测试**：优先使用表驱动测试模式
-4. **测试命名**：`TestFunctionName_Scenario` 格式
-5. **Mock对象**：使用专门的mock包（如 `internal/store/mock`）
-
-### 项目结构
-```
-SSO/
-├── cmd/           # 主要应用程序入口
-├── internal/      # 私有应用程序代码
-│   ├── cache/     # 缓存相关
-│   ├── config/    # 配置管理
-│   ├── crypto/    # 加密工具
-│   ├── errors/    # 统一错误定义
-│   ├── handler/   # HTTP处理器
-│   ├── logging/   # 日志工具
-│   ├── metrics/   # 指标收集
-│   ├── middleware/ # HTTP中间件
-│   ├── model/     # 数据模型
-│   ├── service/   # 业务逻辑
-│   ├── store/     # 数据存储层
-│   └── validator/ # 输入验证
-├── migrations/    # 数据库迁移
-├── scripts/       # 工具脚本
-├── static/        # 静态资源
-├── templates/     # 模板文件
-└── testdata/      # 测试数据
+# 单个测试模式：
+go test -v -run TestAuthService_Login ./internal/service/
+go test -v -run TestAuthService_Register/邮箱已存在 ./internal/service/
+go test -v -race -count=1 ./internal/handler/...
 ```
 
-## 开发工作流
+## 代码检查
 
-1. **创建分支**：从 `develop` 分支创建功能分支
-2. **编写代码**：遵循上述代码风格
-3. **运行测试**：确保所有测试通过
-4. **代码检查**：运行 `make lint` 和 `make test-security`
-5. **提交代码**：使用清晰的提交消息
+```bash
+make lint               # go vet + golangci-lint
+make fmt                # go fmt ./...
+make test-security      # go vet + govulncheck
+```
 
-## 注意事项
+Linter配置：`.golangci.yml`（enable-all选择性禁用）。提交前必须运行 `make lint`。
 
-1. **数据库迁移**：使用 `make migrate-create NAME=description` 创建迁移
-2. **密钥管理**：使用 `make generate-keys` 生成RSA密钥
-3. **环境变量**：参考 `.env.example` 配置环境变量
-4. **依赖管理**：使用 `go mod tidy` 管理依赖
-5. **并发安全**：注意并发访问共享数据时的线程安全
+## 数据库与基础设施
+
+```bash
+make migrate-up                                    # 执行迁移
+make migrate-down                                  # 回滚迁移
+make migrate-create NAME=description               # 创建迁移文件
+make generate-keys                                 # 生成RSA密钥到./keys/
+make docker-up / make docker-down                  # 启动/停止Docker服务
+```
+
+## 分层架构
+
+- **Handler**（`internal/handler/`）— HTTP路由、输入验证、错误响应
+- **Service**（`internal/service/`）— 业务逻辑、事务管理
+- **Store**（`internal/store/`）— 数据访问接口；Postgres实现在`store/postgres/`
+- **Model**（`internal/model/`）— 数据结构定义（含JSON标签）
+
+依赖注入通过接口实现（`store.Store`、`service.AuthServiceInterface`）。测试使用 `internal/store/mock` 包。
+
+## 错误处理
+
+- 使用 `internal/errors` 中预定义的错误变量（`apperrors.ErrInvalidCredentials`等）
+- 新错误用 `apperrors.New(code, message, httpStatus)` 或 `apperrors.Wrap(...)` 构造
+- Store层返回 `store.ErrNotFound`、`store.ErrDuplicateEmail`
+- Service层用 `fmt.Errorf("context: %w", err)` 包装错误
+- Handler层映射为HTTP状态码；响应消息使用 `ErrCode*` 常量
+- 使用 `slog` 记录错误，包含上下文（user_id、request_id）
+
+## 代码风格
+
+### 导入
+分组顺序：标准库 → 第三方 → 项目包。仅必要时使用别名（`apperrors "github.com/your-org/sso/internal/errors"`）。禁止点导入。
+
+### 命名
+- 包名：小写无下划线（`store` 非 `data_store`）
+- 接口：单方法以 `-er` 结尾（`Reader`、`Store`）
+- 错误变量：`Err` 前缀（`ErrInvalidCredentials`）
+- 导出：大写开头；未导出：camelCase
+
+### 注释
+- 包注释必须在 `package` 声明上方
+- 导出函数必须有文档注释
+- 使用 `// ====` 分隔符组织代码块
+- 允许中文注释，但错误消息使用英文
+
+### 结构体标签
+Model结构体必须有JSON标签：`json:"field_name,omitempty"`。
+
+## 测试规范
+
+- 黑盒测试：`package service_test`（非 `package service`）
+- 框架：`testify/assert` + `testify/require`
+- 优先使用表驱动测试
+- 命名：`TestFunctionName_场景`（如 `TestAuthService_Register_邮箱已存在`）
+- Mock：`mock.New()` 创建实例，`store.Reset()` 清空数据
+- 错误注入：设置 `store.CreateUserErr`、`store.GetUserByIDErr` 等字段
+- 测试中使用 `crypto.NewPasswordService(10)`（降低bcrypt cost）
+
+## JWT与安全
+
+- Access Token：RS256签名，包含用户声明
+- Refresh Token：32字节随机字符串，不含用户信息
+- 生产环境bcrypt cost必须 >= 12（测试可用10）
+- 登录锁定：5次失败 → 锁定30分钟
+- 限流：默认100请求/分钟
+- CORS：生产环境必须设置 `CORS_ALLOWED_ORIGINS`
+
+## 常见问题
+
+- JWT验证失败 → 检查签名算法是否为RS256
+- 数据库连接失败 → 检查 `DB_PASSWORD` 环境变量
+- CORS错误 → 检查 `CORS_ALLOWED_ORIGINS` 配置
+- 密钥错误 → 运行 `make generate-keys` 创建 `./keys/private.pem` 和 `./keys/public.pem`

@@ -88,10 +88,12 @@ func (s *AdminService) GetUser(ctx context.Context, userID string) (*model.User,
 		return nil, err
 	}
 
-	// 缓存结果
+	// 缓存结果（失败不影响主流程）
 	if s.cache != nil {
 		cacheKey := cache.UserIDKey(userID)
-		_ = s.cache.Set(ctx, cacheKey, user, cache.DefaultTTL)
+		if err := s.cache.Set(ctx, cacheKey, user, cache.DefaultTTL); err != nil {
+			slog.Warn("缓存用户信息失败", "error", err, "user_id", userID)
+		}
 	}
 
 	return user, nil
