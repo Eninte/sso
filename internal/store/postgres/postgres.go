@@ -26,6 +26,15 @@ const DefaultQueryTimeout = 10 * time.Second
 // 使用分批删除避免长时间锁表和大量WAL日志
 const CleanupBatchSize = 1000
 
+// allowedCleanupTables 允许清理的表名白名单
+// 防止SQL注入：仅允许预定义的表名
+var allowedCleanupTables = map[string]bool{
+	"tokens":              true,
+	"authorization_codes": true,
+	"verification_tokens": true,
+	"reset_tokens":        true,
+}
+
 // Store PostgreSQL存储实现
 type Store struct {
 	db      *sql.DB
@@ -655,6 +664,11 @@ func (s *Store) CleanupExpired(ctx context.Context) error {
 // cleanupExpiredBatch 分批清理指定表中的过期数据
 // 每次删除最多CleanupBatchSize条记录，避免长时间锁表
 func (s *Store) cleanupExpiredBatch(ctx context.Context, tableName string, before time.Time) error {
+	// 安全校验：仅允许白名单中的表名，防止SQL注入
+	if !allowedCleanupTables[tableName] {
+		return fmt.Errorf("不允许清理的表: %s", tableName)
+	}
+
 	query := fmt.Sprintf(`
 		DELETE FROM %s 
 		WHERE id IN (

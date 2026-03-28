@@ -47,9 +47,8 @@ type SystemHealthInfo struct {
 
 // AdminService 管理员服务实现
 type AdminService struct {
-	store  store.Store
-	cache  cache.Cache
-	client cache.Cache
+	store store.Store
+	cache cache.Cache
 }
 
 // NewAdminService 创建管理员服务

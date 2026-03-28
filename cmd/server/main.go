@@ -266,16 +266,29 @@ func main() {
 	)
 
 	// 15. 启动服务器
+	errChan := make(chan error, 1)
 	go func() {
 		slog.Info("SSO服务启动成功", "address", server.Addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("服务器启动失败", "error", err)
-			os.Exit(1)
+			errChan <- err
 		}
 	}()
 
-	// 16. 等待中断信号
-	gracefulShutdown(rateLimiter, server)
+	// 16. 等待中断信号或启动错误
+	select {
+	case err := <-errChan:
+		slog.Error("服务器启动错误，正在关闭", "error", err)
+		rateLimiter.Stop()
+		return
+	case sig := <-func() chan os.Signal {
+		quit := make(chan os.Signal, 1)
+		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+		return quit
+	}():
+		slog.Info("收到关闭信号，正在优雅关闭服务器...", "signal", sig)
+		gracefulShutdown(rateLimiter, server, auditSvc, socialSvc)
+	}
 }
 
 // initLogger 初始化日志配置
@@ -326,22 +339,28 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // gracefulShutdown 优雅关闭服务器
-func gracefulShutdown(rateLimiter *middleware.RateLimiter, server *http.Server) {
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-
-	sig := <-quit
-	slog.Info("收到关闭信号，正在优雅关闭服务器...", "signal", sig)
-
+func gracefulShutdown(rateLimiter *middleware.RateLimiter, server *http.Server, auditSvc *service.AuditService, socialSvc *service.SocialLoginService) {
 	// 停止限流器
 	rateLimiter.Stop()
+
+	// 关闭审计服务（确保所有日志写入完成）
+	if auditSvc != nil {
+		auditSvc.Close()
+		slog.Info("审计服务已关闭")
+	}
+
+	// 关闭社交登录服务（停止清理goroutine）
+	if socialSvc != nil {
+		socialSvc.Close()
+		slog.Info("社交登录服务已关闭")
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
 		slog.Error("服务器关闭失败", "error", err)
-		os.Exit(1)
+		return
 	}
 
 	slog.Info("服务器已成功关闭")

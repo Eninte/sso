@@ -459,9 +459,11 @@ func TestUserService_ForgotPassword_WithEmail(t *testing.T) {
 		}
 		mockStore.AddUser(user)
 
+		// 安全设计：邮件发送失败也返回nil，不泄露内部错误
+		// 但会记录错误日志以便排查
 		err := userSvc.ForgotPassword(ctx, "fail@example.com")
 
-		assert.Error(t, err)
+		assert.NoError(t, err)
 		mockSender.shouldError = false
 	})
 }

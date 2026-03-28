@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"net"
 	"net/smtp"
-	"strings"
 	"time"
 )
 
@@ -183,12 +182,6 @@ func sendEmailSTARTTLS(addr, from string, to []string, msg []byte, config *Email
 		return err
 	}
 
-	// 配置 TLS
-	tlsConfig := &tls.Config{
-		ServerName: host,
-		MinVersion: tls.VersionTLS12,
-	}
-
 	// 认证
 	var auth smtp.Auth
 	if config.Username != "" {
@@ -196,24 +189,8 @@ func sendEmailSTARTTLS(addr, from string, to []string, msg []byte, config *Email
 	}
 
 	// 发送邮件 (smtp.SendMail 会自动处理 STARTTLS)
-	err = smtp.SendMail(addr, auth, from, to, msg)
-	if err != nil {
-		// 如果是 TLS 错误，尝试不验证证书 (仅开发环境)
-		if isTLSError(err) {
-			tlsConfig.InsecureSkipVerify = true //nolint:gosec // 仅用于开发环境
-			return smtp.SendMail(addr, auth, from, to, msg)
-		}
-		return err
-	}
-	return nil
-}
-
-// isTLSError 检查是否为 TLS 相关错误
-func isTLSError(err error) bool {
-	errStr := err.Error()
-	return strings.Contains(errStr, "TLS") ||
-		strings.Contains(errStr, "certificate") ||
-		strings.Contains(errStr, "x509")
+	// 安全设计：不允许 TLS 降级，证书验证失败直接返回错误
+	return smtp.SendMail(addr, auth, from, to, msg)
 }
 
 // ============================================================================

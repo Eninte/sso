@@ -126,7 +126,7 @@ func (h *TokenHandler) handleAuthorizationCode(w http.ResponseWriter, r *http.Re
 		"access_token":  token.AccessToken,
 		"refresh_token": token.RefreshToken,
 		"token_type":    "Bearer",
-		"expires_in":    900,
+		"expires_in":    int(h.oauthSvc.GetAccessTokenTTL().Seconds()),
 		"scope":         strings.Join(token.Scopes, " "),
 	})
 }

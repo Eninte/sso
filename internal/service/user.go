@@ -158,29 +158,41 @@ func (s *UserService) VerifyEmail(ctx context.Context, userID, token string) err
 func (s *UserService) ForgotPassword(ctx context.Context, email string) error {
 	user, err := s.store.GetByEmail(ctx, email)
 	if err != nil {
+		// 安全设计：不泄露用户是否存在，但记录错误日志以便排查
+		slog.Debug("ForgotPassword: 获取用户失败", "error", err, "email", email)
 		return nil
 	}
 
 	token, err := common.GenerateToken()
 	if err != nil {
+		slog.Error("ForgotPassword: 生成令牌失败", "error", err, "user_id", user.ID)
 		return nil
 	}
 
 	expiresAt := time.Now().Add(ResetTokenTTL)
 	if err := s.store.StoreResetToken(ctx, user.ID, token, expiresAt); err != nil {
+		slog.Error("ForgotPassword: 存储重置令牌失败", "error", err, "user_id", user.ID)
 		return nil
 	}
 
 	resetLink := fmt.Sprintf("%s/reset-password?token=%s&user_id=%s", s.baseURL, token, user.ID)
 
 	if s.emailSvc != nil {
-		return s.emailSvc.SendPasswordResetEmail(ctx, user.Email, user.Email, resetLink)
+		if err := s.emailSvc.SendPasswordResetEmail(ctx, user.Email, user.Email, resetLink); err != nil {
+			slog.Error("ForgotPassword: 发送重置邮件失败", "error", err, "user_id", user.ID)
+			// 仍然返回 nil，不泄露内部错误
+		}
 	}
 
 	return nil
 }
 
 func (s *UserService) ResetPasswordWithAudit(ctx context.Context, userID, token, newPassword string, ipAddress string) error {
+	// 验证密码强度
+	if err := validator.ValidatePassword(newPassword); err != nil {
+		return err
+	}
+
 	storedToken, err := s.store.GetResetToken(ctx, userID)
 	if err != nil {
 		if apperrors.Is(err, store.ErrNotFound) {

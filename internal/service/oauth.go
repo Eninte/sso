@@ -372,3 +372,12 @@ func verifyPKCE(challenge, method, verifier string) error {
 func compareClientSecret(stored, provided string) bool {
 	return subtle.ConstantTimeCompare([]byte(stored), []byte(provided)) == 1
 }
+
+// GetAccessTokenTTL 获取访问令牌的有效期
+func (s *OAuthService) GetAccessTokenTTL() time.Duration {
+	if s.tokenSvc != nil && s.tokenSvc.jwtSvc != nil {
+		return s.tokenSvc.jwtSvc.GetAccessTokenTTL()
+	}
+	// 默认值：15分钟
+	return 15 * time.Minute
+}

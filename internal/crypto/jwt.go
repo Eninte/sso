@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -27,6 +28,7 @@ var (
 )
 
 type JWTService struct {
+	mu              sync.RWMutex
 	privateKey      *rsa.PrivateKey
 	publicKey       *rsa.PublicKey
 	keys            map[string]*rsa.PrivateKey
@@ -73,6 +75,8 @@ func NewJWTServiceWithKeyStore(
 }
 
 func (s *JWTService) SetActiveKey(keyID string, privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.keys[keyID] = privateKey
 	s.publicKeys[keyID] = publicKey
 	s.activeKeyID = keyID
@@ -81,10 +85,14 @@ func (s *JWTService) SetActiveKey(keyID string, privateKey *rsa.PrivateKey, publ
 }
 
 func (s *JWTService) AddVerificationKey(keyID string, publicKey *rsa.PublicKey) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.publicKeys[keyID] = publicKey
 }
 
 func (s *JWTService) RemoveKey(keyID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	delete(s.keys, keyID)
 	delete(s.publicKeys, keyID)
 	if s.activeKeyID == keyID {
@@ -93,6 +101,8 @@ func (s *JWTService) RemoveKey(keyID string) {
 }
 
 func (s *JWTService) GetActiveKeyID() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.activeKeyID
 }
 
@@ -105,6 +115,9 @@ func (s *JWTService) LoadKeysFromStore(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to load keys from store: %w", err)
 	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	for _, keyVersion := range keys {
 		if !keyVersion.CanVerify() {
@@ -143,7 +156,10 @@ type AccessTokenClaims struct {
 // GenerateAccessToken 生成访问令牌
 // 使用当前活跃密钥签名
 func (s *JWTService) GenerateAccessToken(userID, email, role string, scopes []string) (string, error) {
-	return s.GenerateAccessTokenWithKeyID(userID, email, role, scopes, s.activeKeyID)
+	s.mu.RLock()
+	activeKeyID := s.activeKeyID
+	s.mu.RUnlock()
+	return s.GenerateAccessTokenWithKeyID(userID, email, role, scopes, activeKeyID)
 }
 
 // GenerateAccessTokenWithKeyID 使用指定密钥生成访问令牌
@@ -153,6 +169,7 @@ func (s *JWTService) GenerateAccessToken(userID, email, role string, scopes []st
 // scopes: 授权范围
 // keyID: 指定的密钥ID，为空时使用活跃密钥
 func (s *JWTService) GenerateAccessTokenWithKeyID(userID, email, role string, scopes []string, keyID string) (string, error) {
+	s.mu.RLock()
 	var privateKey *rsa.PrivateKey
 	if keyID != "" {
 		var ok bool
@@ -165,6 +182,9 @@ func (s *JWTService) GenerateAccessTokenWithKeyID(userID, email, role string, sc
 		privateKey = s.privateKey
 		keyID = s.activeKeyID
 	}
+	issuer := s.issuer
+	accessTokenTTL := s.accessTokenTTL
+	s.mu.RUnlock()
 
 	if privateKey == nil {
 		return "", ErrNoActiveKey
@@ -173,9 +193,9 @@ func (s *JWTService) GenerateAccessTokenWithKeyID(userID, email, role string, sc
 	now := time.Now()
 	claims := AccessTokenClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    s.issuer,
+			Issuer:    issuer,
 			Subject:   userID,
-			ExpiresAt: jwt.NewNumericDate(now.Add(s.accessTokenTTL)),
+			ExpiresAt: jwt.NewNumericDate(now.Add(accessTokenTTL)),
 			IssuedAt:  jwt.NewNumericDate(now),
 			NotBefore: jwt.NewNumericDate(now),
 		},
@@ -211,6 +231,9 @@ func (s *JWTService) ValidateAccessToken(tokenString string) (*AccessTokenClaims
 			return nil, ErrInvalidToken
 		}
 
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+
 		kid, _ := token.Header["kid"].(string)
 		if kid != "" {
 			if pubKey, ok := s.publicKeys[kid]; ok {
@@ -241,18 +264,31 @@ func (s *JWTService) ValidateAccessToken(tokenString string) (*AccessTokenClaims
 }
 
 func (s *JWTService) GetPublicKey() *rsa.PublicKey {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.publicKey
 }
 
 func (s *JWTService) GetPublicKeys() map[string]*rsa.PublicKey {
-	return s.publicKeys
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	// 返回副本以防止外部修改
+	result := make(map[string]*rsa.PublicKey, len(s.publicKeys))
+	for k, v := range s.publicKeys {
+		result[k] = v
+	}
+	return result
 }
 
 func (s *JWTService) GetAccessTokenTTL() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.accessTokenTTL
 }
 
 func (s *JWTService) GetJWKS() map[string]interface{} {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	keys := make([]map[string]interface{}, 0, len(s.publicKeys))
 	for kid, pubKey := range s.publicKeys {
 		keys = append(keys, map[string]interface{}{

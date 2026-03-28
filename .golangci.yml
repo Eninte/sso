@@ -5,17 +5,6 @@ run:
 linters:
   enable-all: true
   disable:
-    # Deprecated linters
-    - deadcode
-    - exhaustivestruct
-    - golint
-    - ifshort
-    - interfacer
-    - maligned
-    - nosnakecase
-    - scopelint
-    - structcheck
-    - varcheck
     # Too strict for this project
     - exhaustruct
     - gochecknoglobals

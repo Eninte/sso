@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/your-org/sso/internal/crypto"
 	"github.com/your-org/sso/internal/model"
@@ -56,6 +57,9 @@ type OAuthServiceInterface interface {
 
 	// RevokeToken 撤销Token
 	RevokeToken(ctx context.Context, token string) error
+
+	// GetAccessTokenTTL 获取访问令牌的有效期（秒）
+	GetAccessTokenTTL() time.Duration
 }
 
 // ============================================================================
@@ -77,8 +81,8 @@ type EmailServiceInterface interface {
 
 // AuditServiceInterface 审计服务接口
 type AuditServiceInterface interface {
-	// Log 记录审计日志
-	Log(ctx context.Context, entry *model.AuditLog) error
+	// Log 记录审计日志（异步操作，失败不阻塞主流程）
+	Log(ctx context.Context, entry *model.AuditLog)
 
 	// ListLogs 列出审计日志
 	ListLogs(ctx context.Context, userID string, eventType string, offset, limit int) ([]*model.AuditLog, int, error)

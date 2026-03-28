@@ -110,7 +110,7 @@ func Load() (*Config, error) {
 		DBName:     getEnv("DB_NAME", "sso"),
 		DBUser:     getEnv("DB_USER", "sso"),
 		DBPassword: os.Getenv("DB_PASSWORD"), // 必须通过环境变量设置
-		DBSSLMode:  getEnv("DB_SSL_MODE", "disable"),
+		DBSSLMode:  getEnv("DB_SSL_MODE", "prefer"),
 
 		// 数据库连接池配置
 		DBMaxOpenConns:    getEnvInt("DB_MAX_OPEN_CONNS", 50),

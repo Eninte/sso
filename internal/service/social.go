@@ -69,7 +69,8 @@ type SocialLoginService struct {
 	tokenSvc   *TokenService
 	providers  map[string]*OAuthProvider
 	httpClient HTTPClient
-	stateCache sync.Map // 用于存储OAuth state，防止CSRF攻击
+	stateCache sync.Map      // 用于存储OAuth state，防止CSRF攻击
+	stopChan   chan struct{} // 用于停止清理goroutine
 }
 
 func NewSocialLoginService(
@@ -104,13 +105,19 @@ func NewSocialLoginService(
 		}
 	}
 
-	return &SocialLoginService{
+	svc := &SocialLoginService{
 		store:      store,
 		jwtSvc:     jwtSvc,
 		tokenSvc:   NewTokenService(jwtSvc, store),
 		providers:  providers,
 		httpClient: http.DefaultClient,
+		stopChan:   make(chan struct{}),
 	}
+
+	// 启动后台清理goroutine
+	go svc.cleanupExpiredStates()
+
+	return svc
 }
 
 // NewSocialLoginServiceWithProviders 使用自定义providers创建社交登录服务
@@ -124,13 +131,52 @@ func NewSocialLoginServiceWithProviders(
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	return &SocialLoginService{
+	svc := &SocialLoginService{
 		store:      store,
 		jwtSvc:     jwtSvc,
 		tokenSvc:   NewTokenService(jwtSvc, store),
 		providers:  providers,
 		httpClient: httpClient,
+		stopChan:   make(chan struct{}),
 	}
+
+	// 启动后台清理goroutine
+	go svc.cleanupExpiredStates()
+
+	return svc
+}
+
+// cleanupExpiredStates 定期清理过期的OAuth state缓存
+// 防止内存泄漏和拒绝服务攻击
+func (s *SocialLoginService) cleanupExpiredStates() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			s.stateCache.Range(func(key, value interface{}) bool {
+				info, ok := value.(stateInfo)
+				if !ok {
+					// 无效数据，删除
+					s.stateCache.Delete(key)
+					return true
+				}
+				// 删除超过5分钟的state
+				if time.Since(info.createdAt) > 5*time.Minute {
+					s.stateCache.Delete(key)
+				}
+				return true
+			})
+		case <-s.stopChan:
+			return
+		}
+	}
+}
+
+// Close 关闭服务，停止后台清理goroutine
+func (s *SocialLoginService) Close() {
+	close(s.stopChan)
 }
 
 // ============================================================================
@@ -189,14 +235,11 @@ func (s *SocialLoginService) HandleCallback(ctx context.Context, provider, code,
 		return nil, ErrOAuthStateInvalid
 	}
 
-	// 从缓存中获取state信息
-	stateVal, exists := s.stateCache.Load(state)
-	if !exists {
+	// 原子操作：从缓存中获取并删除state（防止TOCTOU竞争和重放攻击）
+	stateVal, loaded := s.stateCache.LoadAndDelete(state)
+	if !loaded {
 		return nil, ErrOAuthStateInvalid
 	}
-
-	// 删除已使用的state（防止重放攻击）
-	s.stateCache.Delete(state)
 
 	// 安全类型断言
 	info, ok := stateVal.(stateInfo)
