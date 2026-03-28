@@ -181,6 +181,36 @@ var allowedTokenFields = map[string]bool{
 // ErrInvalidFieldName 无效的字段名错误
 var ErrInvalidFieldName = errors.New("invalid field name")
 
+// scanUser 从数据库行扫描用户数据
+// 消除重复的用户扫描代码
+func scanUser(scanner interface {
+	Scan(dest ...interface{}) error
+}) (*model.User, error) {
+	user := &model.User{}
+	var mfaSecret sql.NullString
+	err := scanner.Scan(
+		&user.ID,
+		&user.Email,
+		&user.PasswordHash,
+		&user.EmailVerified,
+		&user.MFAEnabled,
+		&mfaSecret,
+		&user.Role,
+		&user.Status,
+		&user.LoginAttempts,
+		&user.LockedUntil,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if mfaSecret.Valid {
+		user.MFASecret = mfaSecret.String
+	}
+	return user, nil
+}
+
 // getUserByField 通用用户查询函数
 func (s *Store) getUserByField(ctx context.Context, field, value string) (*model.User, error) {
 	// 验证字段名是否在白名单中
@@ -197,32 +227,12 @@ func (s *Store) getUserByField(ctx context.Context, field, value string) (*model
 		FROM users
 		WHERE ` + field + ` = $1`
 
-	user := &model.User{}
-	var mfaSecret sql.NullString
-	err := s.db.QueryRowContext(ctx, query, value).Scan(
-		&user.ID,
-		&user.Email,
-		&user.PasswordHash,
-		&user.EmailVerified,
-		&user.MFAEnabled,
-		&mfaSecret,
-		&user.Role,
-		&user.Status,
-		&user.LoginAttempts,
-		&user.LockedUntil,
-		&user.CreatedAt,
-		&user.UpdatedAt,
-	)
-
+	user, err := scanUser(s.db.QueryRowContext(ctx, query, value))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, store.ErrNotFound
 		}
 		return nil, err
-	}
-
-	if mfaSecret.Valid {
-		user.MFASecret = mfaSecret.String
 	}
 
 	return user, nil
@@ -389,27 +399,9 @@ func (s *Store) ListUsers(ctx context.Context, offset, limit int) ([]*model.User
 	// 预分配slice容量以减少内存重新分配
 	users := make([]*model.User, 0, limit)
 	for rows.Next() {
-		user := &model.User{}
-		var mfaSecret sql.NullString
-		err := rows.Scan(
-			&user.ID,
-			&user.Email,
-			&user.PasswordHash,
-			&user.EmailVerified,
-			&user.MFAEnabled,
-			&mfaSecret,
-			&user.Role,
-			&user.Status,
-			&user.LoginAttempts,
-			&user.LockedUntil,
-			&user.CreatedAt,
-			&user.UpdatedAt,
-		)
+		user, err := scanUser(rows)
 		if err != nil {
 			return nil, 0, err
-		}
-		if mfaSecret.Valid {
-			user.MFASecret = mfaSecret.String
 		}
 		users = append(users, user)
 	}

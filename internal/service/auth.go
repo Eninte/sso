@@ -35,6 +35,30 @@ var (
 // AuthService 认证服务
 // ============================================================================
 
+// AuthServiceOption AuthService配置选项
+type AuthServiceOption func(*AuthService)
+
+// WithCache 设置缓存服务
+func WithCache(cacheSvc cache.Cache) AuthServiceOption {
+	return func(s *AuthService) {
+		s.cache = cacheSvc
+	}
+}
+
+// WithAudit 设置审计服务
+func WithAudit(auditSvc *AuditService) AuthServiceOption {
+	return func(s *AuthService) {
+		s.auditSvc = auditSvc
+	}
+}
+
+// WithMetrics 设置指标服务
+func WithMetrics(metricsSvc *metrics.Service) AuthServiceOption {
+	return func(s *AuthService) {
+		s.metricsSvc = metricsSvc
+	}
+}
+
 // AuthService 认证服务
 // 处理用户认证相关的业务逻辑
 type AuthService struct {
@@ -49,6 +73,8 @@ type AuthService struct {
 	cache           cache.Cache             // 缓存服务（可选）
 }
 
+// NewAuthService 创建AuthService实例
+// 支持通过选项函数配置可选依赖（缓存、审计服务等）
 func NewAuthService(
 	store store.Store,
 	passwordSvc *crypto.PasswordService,
@@ -73,56 +99,30 @@ func NewAuthService(
 	}
 }
 
-// NewAuthServiceWithCache 创建带缓存的AuthService实例
-func NewAuthServiceWithCache(
+// NewAuthServiceWithOptions 创建带选项的AuthService实例
+func NewAuthServiceWithOptions(
 	store store.Store,
 	passwordSvc *crypto.PasswordService,
 	jwtSvc *crypto.JWTService,
 	maxAttempts int,
 	lockoutDuration time.Duration,
-	cacheSvc cache.Cache,
-	metricsSvc ...*metrics.Service,
+	options ...AuthServiceOption,
 ) *AuthService {
-	var m *metrics.Service
-	if len(metricsSvc) > 0 {
-		m = metricsSvc[0]
-	}
-	return &AuthService{
+	svc := &AuthService{
 		store:           store,
 		passwordSvc:     passwordSvc,
 		jwtSvc:          jwtSvc,
 		tokenSvc:        NewTokenService(jwtSvc, store),
 		maxAttempts:     maxAttempts,
 		lockoutDuration: lockoutDuration,
-		metricsSvc:      m,
 		auditSvc:        NewAuditService(store),
-		cache:           cacheSvc,
 	}
-}
 
-func NewAuthServiceWithAudit(
-	store store.Store,
-	passwordSvc *crypto.PasswordService,
-	jwtSvc *crypto.JWTService,
-	maxAttempts int,
-	lockoutDuration time.Duration,
-	auditSvc *AuditService,
-	metricsSvc ...*metrics.Service,
-) *AuthService {
-	var m *metrics.Service
-	if len(metricsSvc) > 0 {
-		m = metricsSvc[0]
+	for _, opt := range options {
+		opt(svc)
 	}
-	return &AuthService{
-		store:           store,
-		passwordSvc:     passwordSvc,
-		jwtSvc:          jwtSvc,
-		tokenSvc:        NewTokenService(jwtSvc, store),
-		maxAttempts:     maxAttempts,
-		lockoutDuration: lockoutDuration,
-		metricsSvc:      m,
-		auditSvc:        auditSvc,
-	}
+
+	return svc
 }
 
 // incrementMetric 增加指标计数（安全调用）

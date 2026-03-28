@@ -73,7 +73,7 @@ func (h *UserHandler) HandleForgotPassword(w http.ResponseWriter, r *http.Reques
 		Email string `json:"email"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
+		handleDecodeJSONError(w, r, err)
 		return
 	}
 
@@ -102,7 +102,7 @@ func (h *UserHandler) HandleResetPassword(w http.ResponseWriter, r *http.Request
 		NewPassword string `json:"new_password"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
+		handleDecodeJSONError(w, r, err)
 		return
 	}
 
@@ -136,7 +136,7 @@ func (h *UserHandler) HandleChangePassword(w http.ResponseWriter, r *http.Reques
 		NewPassword string `json:"new_password"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
+		handleDecodeJSONError(w, r, err)
 		return
 	}
 

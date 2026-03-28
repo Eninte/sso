@@ -5,7 +5,6 @@ package handler
 import (
 	"net/http"
 
-	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/service"
 )
@@ -30,7 +29,7 @@ func (h *LoginHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// 1. 解析请求体 (带大小限制)
 	var req model.LoginRequest
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
+		handleDecodeJSONError(w, r, err)
 		return
 	}
 

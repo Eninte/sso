@@ -35,7 +35,7 @@ func NewTokenHandler(authSvc service.AuthServiceInterface, oauthSvc service.OAut
 func (h *TokenHandler) HandleToken(w http.ResponseWriter, r *http.Request) {
 	var req model.TokenRequest
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
+		handleDecodeJSONError(w, r, err)
 		return
 	}
 
@@ -138,7 +138,7 @@ func (h *TokenHandler) HandleRevoke(w http.ResponseWriter, r *http.Request) {
 		Token string `json:"token"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
+		handleDecodeJSONError(w, r, err)
 		return
 	}
 

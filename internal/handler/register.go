@@ -30,7 +30,7 @@ func (h *RegisterHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// 1. 解析请求体 (带大小限制)
 	var req model.RegisterRequest
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
+		handleDecodeJSONError(w, r, err)
 		return
 	}
 

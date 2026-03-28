@@ -4,7 +4,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -149,8 +148,8 @@ func (h *AdminHandler) handleUserStatusChange(
 	var req struct {
 		UserID string `json:"user_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
+	if err := decodeJSON(r, &req); err != nil {
+		handleDecodeJSONError(w, r, err)
 		return
 	}
 

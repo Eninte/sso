@@ -51,7 +51,7 @@ func AuthMiddleware(jwtSvc *crypto.JWTService) func(http.Handler) http.Handler {
 			// 1. 从Authorization头获取Token
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
-				http.Error(w, `{"error":"缺少Authorization头"}`, http.StatusUnauthorized)
+				writeAdminError(w, http.StatusUnauthorized, "缺少Authorization头")
 				return
 			}
 
@@ -59,14 +59,14 @@ func AuthMiddleware(jwtSvc *crypto.JWTService) func(http.Handler) http.Handler {
 			// 格式: "Bearer <token>"
 			parts := strings.SplitN(authHeader, " ", 2)
 			if len(parts) != 2 || parts[0] != "Bearer" {
-				http.Error(w, `{"error":"无效的Authorization格式"}`, http.StatusUnauthorized)
+				writeAdminError(w, http.StatusUnauthorized, "无效的Authorization格式")
 				return
 			}
 
 			// 3. 验证Token
 			claims, err := jwtSvc.ValidateAccessToken(parts[1])
 			if err != nil {
-				http.Error(w, `{"error":"无效或过期的Token"}`, http.StatusUnauthorized)
+				writeAdminError(w, http.StatusUnauthorized, "无效或过期的Token")
 				return
 			}
 

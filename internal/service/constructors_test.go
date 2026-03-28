@@ -37,13 +37,13 @@ func TestNewAuthServiceWithAudit(t *testing.T) {
 
 	auditSvc := service.NewAuditService(store)
 
-	authSvc := service.NewAuthServiceWithAudit(
+	authSvc := service.NewAuthServiceWithOptions(
 		store,
 		passwordSvc,
 		jwtSvc,
 		5,
 		30*time.Minute,
-		auditSvc,
+		service.WithAudit(auditSvc),
 	)
 
 	assert.NotNil(t, authSvc)

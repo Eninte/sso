@@ -3,6 +3,7 @@
 package middleware
 
 import (
+	"encoding/json"
 	"net"
 	"net/http"
 	"sync"
@@ -56,6 +57,15 @@ func (rl *RateLimiter) Stop() {
 // 限流中间件
 // ============================================================================
 
+// writeError 写入JSON错误响应
+func writeError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"error": message,
+	})
+}
+
 // Middleware 限流中间件
 // 检查客户端请求频率，超过限制返回429
 func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
@@ -66,7 +76,7 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 		// 检查是否超过限制
 		if !rl.Allow(clientIP) {
 			w.Header().Set("Retry-After", rl.window.String())
-			http.Error(w, `{"error":"请求过于频繁，请稍后再试"}`, http.StatusTooManyRequests)
+			writeError(w, http.StatusTooManyRequests, "请求过于频繁，请稍后再试")
 			return
 		}
 

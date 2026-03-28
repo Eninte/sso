@@ -536,7 +536,7 @@ func TestAuthService_NewAuthServiceWithAudit(t *testing.T) {
 		auditSvc := service.NewAuditService(store)
 		defer auditSvc.Close()
 
-		authSvc := service.NewAuthServiceWithAudit(store, passwordSvc, jwtSvc, 5, 30*time.Minute, auditSvc)
+		authSvc := service.NewAuthServiceWithOptions(store, passwordSvc, jwtSvc, 5, 30*time.Minute, service.WithAudit(auditSvc))
 		assert.NotNil(t, authSvc)
 	})
 }
@@ -603,13 +603,13 @@ func TestNewAuthServiceWithCache(t *testing.T) {
 	defer memCache.Close()
 
 	// 创建带缓存的AuthService
-	authSvc := service.NewAuthServiceWithCache(
+	authSvc := service.NewAuthServiceWithOptions(
 		store,
 		passwordSvc,
 		jwtSvc,
 		5,
 		30*time.Minute,
-		memCache,
+		service.WithCache(memCache),
 	)
 
 	assert.NotNil(t, authSvc)

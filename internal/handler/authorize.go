@@ -3,7 +3,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -108,8 +107,8 @@ func (h *AuthorizeHandler) HandleApprove(w http.ResponseWriter, r *http.Request)
 		CodeChallenge       string `json:"code_challenge"`
 		CodeChallengeMethod string `json:"code_challenge_method"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
+	if err := decodeJSON(r, &req); err != nil {
+		handleDecodeJSONError(w, r, err)
 		return
 	}
 

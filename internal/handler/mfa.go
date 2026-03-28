@@ -3,7 +3,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -69,8 +68,8 @@ func (h *MFAHandler) HandleVerifyMFA(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Code string `json:"code"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
+	if err := decodeJSON(r, &req); err != nil {
+		handleDecodeJSONError(w, r, err)
 		return
 	}
 
@@ -107,8 +106,8 @@ func (h *MFAHandler) HandleDisableMFA(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Code string `json:"code"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
+	if err := decodeJSON(r, &req); err != nil {
+		handleDecodeJSONError(w, r, err)
 		return
 	}
 

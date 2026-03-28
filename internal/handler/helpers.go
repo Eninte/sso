@@ -88,6 +88,19 @@ func decodeJSON(r *http.Request, v interface{}) error {
 	return nil
 }
 
+// handleDecodeJSONError 统一处理decodeJSON错误
+// 根据错误类型返回精确的HTTP状态码和错误消息
+func handleDecodeJSONError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, ErrRequestBodyTooLarge):
+		writeError(w, http.StatusRequestEntityTooLarge, getMessage(r, apperrors.ErrCodeRequestBodyTooLarge))
+	case errors.Is(err, ErrRequestBodyExtraData):
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeRequestBodyExtraData))
+	default:
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidRequestFormat))
+	}
+}
+
 // writeOAuthError 统一处理OAuth相关错误，支持本地化
 // 这是一个通用的错误处理函数，可以处理所有类型的服务错误
 func writeOAuthError(w http.ResponseWriter, r *http.Request, err error) {
