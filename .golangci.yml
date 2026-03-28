@@ -23,6 +23,7 @@ linters:
     - gci
     - goimports
     # Not suitable for this project
+    - ireturn
     - depguard
     - gosmopolitan
     - mnd

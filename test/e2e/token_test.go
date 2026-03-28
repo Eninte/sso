@@ -4,6 +4,7 @@
 package e2e
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
