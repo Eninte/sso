@@ -758,3 +758,71 @@ func TestGetLanguageFromContext(t *testing.T) {
 		assert.Equal(t, "zh-CN", middleware.GetLanguageFromContext(context.Background()))
 	})
 }
+
+// ============================================================================
+// RequestID 中间件测试
+// ============================================================================
+
+func TestRequestID(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 从上下文获取请求ID
+		requestID := middleware.GetRequestIDFromContext(r.Context())
+		assert.NotEmpty(t, requestID, "上下文应该包含请求ID")
+		w.WriteHeader(http.StatusOK)
+	})
+
+	wrapped := middleware.RequestID(handler)
+
+	t.Run("自动生成请求ID", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/test", nil)
+		rec := httptest.NewRecorder()
+
+		wrapped.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		// 响应头应该包含请求ID
+		requestID := rec.Header().Get("X-Request-ID")
+		assert.NotEmpty(t, requestID, "响应头应该包含X-Request-ID")
+		assert.Len(t, requestID, 16, "自动生成的请求ID应该是16个字符")
+	})
+
+	t.Run("复用上游X-Request-ID", func(t *testing.T) {
+		upstreamID := "upstream-request-id-123"
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.Header.Set("X-Request-ID", upstreamID)
+		rec := httptest.NewRecorder()
+
+		wrapped.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		// 响应头应该复用上游的请求ID
+		assert.Equal(t, upstreamID, rec.Header().Get("X-Request-ID"))
+	})
+
+	t.Run("生成的ID是hex编码", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/test", nil)
+		rec := httptest.NewRecorder()
+
+		wrapped.ServeHTTP(rec, req)
+
+		requestID := rec.Header().Get("X-Request-ID")
+		// 验证是hex编码（只包含0-9和a-f）
+		assert.Regexp(t, `^[0-9a-f]{16}$`, requestID)
+	})
+}
+
+func TestGetRequestIDFromContext(t *testing.T) {
+	t.Run("上下文有请求ID", func(t *testing.T) {
+		ctx := context.WithValue(context.Background(), middleware.RequestIDKey, "test-request-id")
+		assert.Equal(t, "test-request-id", middleware.GetRequestIDFromContext(ctx))
+	})
+
+	t.Run("上下文无请求ID", func(t *testing.T) {
+		assert.Equal(t, "", middleware.GetRequestIDFromContext(context.Background()))
+	})
+
+	t.Run("上下文键类型错误", func(t *testing.T) {
+		ctx := context.WithValue(context.Background(), middleware.RequestIDKey, 12345)
+		assert.Equal(t, "", middleware.GetRequestIDFromContext(ctx))
+	})
+}

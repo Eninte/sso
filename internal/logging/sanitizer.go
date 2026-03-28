@@ -8,11 +8,12 @@ import (
 
 var (
 	// emailRegex 邮箱脱敏正则
-	// 保留首字符和域名部分
-	emailRegex = regexp.MustCompile(`^(.{1,3})@(.+)$`)
+	// 保留前1-3个字符和域名部分
+	emailRegex = regexp.MustCompile(`^(.{1,3})?[^@]*@(.+)$`)
 
 	// phoneRegex 手机号脱敏正则
-	phoneRegex = regexp.MustCompile(`^(\d{3})\d{4}(\d{4})$`)
+	// 只匹配以1开头的11位手机号
+	phoneRegex = regexp.MustCompile(`^(1\d{2})\d{4}(\d{4})$`)
 )
 
 // SanitizeEmail 脱敏邮箱地址
@@ -25,7 +26,11 @@ func SanitizeEmail(email string) string {
 	if len(matches) != 3 {
 		return email
 	}
-	return matches[1] + "***@" + matches[2]
+	prefix := matches[1]
+	if prefix == "" {
+		prefix = "u"
+	}
+	return prefix + "***@" + matches[2]
 }
 
 // SanitizeToken 脱敏Token

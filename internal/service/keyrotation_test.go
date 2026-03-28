@@ -80,7 +80,7 @@ func TestKeyRotationService_RotateKey(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("首次轮换（无活跃密钥）", func(t *testing.T) {
-		svc, _ := createTestKeyRotationService(t)
+		svc, _ := createTestKeyRotationService(t) //nolint:contextcheck
 
 		key, err := svc.RotateKey(ctx)
 
@@ -91,7 +91,7 @@ func TestKeyRotationService_RotateKey(t *testing.T) {
 	})
 
 	t.Run("轮换已有密钥", func(t *testing.T) {
-		svc, store := createTestKeyRotationService(t)
+		svc, store := createTestKeyRotationService(t) //nolint:contextcheck
 
 		// 先创建一个活跃密钥
 		firstKey, err := svc.RotateKey(ctx)
@@ -118,7 +118,7 @@ func TestKeyRotationService_CleanupExpiredKeys(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("清理过期密钥", func(t *testing.T) {
-		svc, store := createTestKeyRotationService(t)
+		svc, store := createTestKeyRotationService(t) //nolint:contextcheck
 
 		// 创建一个已过期的弃用密钥
 		pastTime := time.Now().Add(-1 * time.Hour)
@@ -138,7 +138,7 @@ func TestKeyRotationService_CleanupExpiredKeys(t *testing.T) {
 	})
 
 	t.Run("无过期密钥", func(t *testing.T) {
-		svc, _ := createTestKeyRotationService(t)
+		svc, _ := createTestKeyRotationService(t) //nolint:contextcheck
 
 		count, err := svc.CleanupExpiredKeys(ctx)
 
@@ -155,7 +155,7 @@ func TestKeyRotationService_RevokeKey(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("撤销弃用密钥", func(t *testing.T) {
-		svc, store := createTestKeyRotationService(t)
+		svc, store := createTestKeyRotationService(t) //nolint:contextcheck
 
 		// 先创建一个活跃密钥
 		activeKey, err := svc.RotateKey(ctx)
@@ -176,7 +176,7 @@ func TestKeyRotationService_RevokeKey(t *testing.T) {
 	})
 
 	t.Run("不能撤销活跃密钥", func(t *testing.T) {
-		svc, _ := createTestKeyRotationService(t)
+		svc, _ := createTestKeyRotationService(t) //nolint:contextcheck
 
 		// 创建活跃密钥
 		activeKey, err := svc.RotateKey(ctx)
@@ -189,7 +189,7 @@ func TestKeyRotationService_RevokeKey(t *testing.T) {
 	})
 
 	t.Run("密钥不存在", func(t *testing.T) {
-		svc, _ := createTestKeyRotationService(t)
+		svc, _ := createTestKeyRotationService(t) //nolint:contextcheck
 
 		err := svc.RevokeKey(ctx, "nonexistent-key")
 		assert.Error(t, err)
@@ -204,7 +204,7 @@ func TestKeyRotationService_GetKeyStatus(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("获取密钥状态", func(t *testing.T) {
-		svc, _ := createTestKeyRotationService(t)
+		svc, _ := createTestKeyRotationService(t) //nolint:contextcheck
 
 		// 创建两个密钥
 		_, err := svc.RotateKey(ctx)
@@ -229,7 +229,7 @@ func TestKeyRotationService_InitializeFirstKey(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("首次初始化", func(t *testing.T) {
-		svc, _ := createTestKeyRotationService(t)
+		svc, _ := createTestKeyRotationService(t) //nolint:contextcheck
 
 		key, err := svc.InitializeFirstKey(ctx)
 
@@ -239,7 +239,7 @@ func TestKeyRotationService_InitializeFirstKey(t *testing.T) {
 	})
 
 	t.Run("已有活跃密钥时返回现有密钥", func(t *testing.T) {
-		svc, _ := createTestKeyRotationService(t)
+		svc, _ := createTestKeyRotationService(t) //nolint:contextcheck
 
 		// 先初始化一次
 		firstKey, err := svc.InitializeFirstKey(ctx)
