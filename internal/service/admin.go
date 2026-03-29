@@ -23,6 +23,10 @@ type AdminServiceInterface interface {
 	GetUser(ctx context.Context, userID string) (*model.User, error)
 	DisableUser(ctx context.Context, userID string) error
 	EnableUser(ctx context.Context, userID string) error
+	DeleteUser(ctx context.Context, userID string) error
+
+	// 审计日志
+	GetAuditLogs(ctx context.Context, offset, limit int, eventType string) ([]*model.AuditLog, int, error)
 
 	// 系统管理
 	SystemHealth(ctx context.Context) (*SystemHealthInfo, error)
@@ -139,6 +143,22 @@ func (s *AdminService) EnableUser(ctx context.Context, userID string) error {
 	user.UpdatedAt = time.Now()
 
 	return s.store.Update(ctx, user)
+}
+
+// DeleteUser 删除用户
+func (s *AdminService) DeleteUser(ctx context.Context, userID string) error {
+	// 先撤销所有Token
+	if err := s.store.RevokeAllUserTokens(ctx, userID); err != nil {
+		slog.Warn("撤销用户Token失败", "error", err, "user_id", userID)
+	}
+
+	// 删除用户
+	return s.store.Delete(ctx, userID)
+}
+
+// GetAuditLogs 获取审计日志
+func (s *AdminService) GetAuditLogs(ctx context.Context, offset, limit int, eventType string) ([]*model.AuditLog, int, error) {
+	return s.store.ListAuditLogs(ctx, "", eventType, offset, limit)
 }
 
 // ============================================================================

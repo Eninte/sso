@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	apperrors "github.com/your-org/sso/internal/errors"
+	"github.com/your-org/sso/internal/middleware"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/service"
 )
@@ -160,4 +161,23 @@ func (h *TokenHandler) HandleRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeSuccess(w, http.StatusOK, "Token已撤销", nil)
+}
+
+// HandleLogoutAll 处理登出所有设备请求
+// POST /api/v1/logout-all
+func (h *TokenHandler) HandleLogoutAll(w http.ResponseWriter, r *http.Request) {
+	// 从上下文获取用户ID（由认证中间件设置）
+	userID := middleware.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, getMessage(r, apperrors.ErrCodeUnauthorized))
+		return
+	}
+
+	// 撤销用户所有Token
+	if err := h.authSvc.LogoutAllDevices(r.Context(), userID); err != nil {
+		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeRevokeTokenFailed))
+		return
+	}
+
+	writeSuccess(w, http.StatusOK, "已登出所有设备", nil)
 }

@@ -145,15 +145,30 @@ func (h *AdminHandler) handleUserStatusChange(
 	action func(context.Context, string) error,
 	successMessage string,
 ) {
-	var req struct {
-		UserID string `json:"user_id"`
+	var userID string
+
+	// 优先从URL路径参数获取user_id
+	vars := mux.Vars(r)
+	if id, ok := vars["id"]; ok && id != "" {
+		userID = id
+	} else {
+		// 兼容旧的请求体方式
+		var req struct {
+			UserID string `json:"user_id"`
+		}
+		if err := decodeJSON(r, &req); err != nil {
+			handleDecodeJSONError(w, r, err)
+			return
+		}
+		userID = req.UserID
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		handleDecodeJSONError(w, r, err)
+
+	if userID == "" {
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeMissingUserID))
 		return
 	}
 
-	if err := action(r.Context(), req.UserID); err != nil {
+	if err := action(r.Context(), userID); err != nil {
 		writeError(w, http.StatusNotFound, getMessage(r, apperrors.ErrCodeNotFound))
 		return
 	}
@@ -162,17 +177,93 @@ func (h *AdminHandler) handleUserStatusChange(
 }
 
 // HandleDisableUser 处理禁用用户请求
-// POST /admin/users/disable
+// POST /admin/users/{id}/disable 或 POST /admin/users/disable
 // 注意：管理员权限检查由 AdminMiddleware 处理
 func (h *AdminHandler) HandleDisableUser(w http.ResponseWriter, r *http.Request) {
 	h.handleUserStatusChange(w, r, h.adminSvc.DisableUser, "用户已禁用")
 }
 
 // HandleEnableUser 处理启用用户请求
-// POST /admin/users/enable
+// POST /admin/users/{id}/enable 或 POST /admin/users/enable
 // 注意：管理员权限检查由 AdminMiddleware 处理
 func (h *AdminHandler) HandleEnableUser(w http.ResponseWriter, r *http.Request) {
 	h.handleUserStatusChange(w, r, h.adminSvc.EnableUser, "用户已启用")
+}
+
+// HandleDeleteUser 处理删除用户请求
+// DELETE /admin/users/{id}
+// 注意：管理员权限检查由 AdminMiddleware 处理
+func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	userID := vars["id"]
+
+	if userID == "" {
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeMissingUserID))
+		return
+	}
+
+	if err := h.adminSvc.DeleteUser(r.Context(), userID); err != nil {
+		writeError(w, http.StatusNotFound, getMessage(r, apperrors.ErrCodeNotFound))
+		return
+	}
+
+	writeSuccess(w, http.StatusOK, "用户已删除", nil)
+}
+
+// HandleAuditLogs 处理审计日志查询请求
+// GET /admin/audit-logs?page=1&pageSize=20
+// 注意：管理员权限检查由 AdminMiddleware 处理
+func (h *AdminHandler) HandleAuditLogs(w http.ResponseWriter, r *http.Request) {
+	// 解析分页参数
+	page := 1
+	pageSize := DefaultPageSize
+
+	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+
+	if pageSizeStr := r.URL.Query().Get("pageSize"); pageSizeStr != "" {
+		if ps, err := strconv.Atoi(pageSizeStr); err == nil && ps > 0 && ps <= MaxPageSize {
+			pageSize = ps
+		}
+	}
+
+	// 计算偏移量
+	offset := (page - 1) * pageSize
+
+	// 获取事件类型过滤
+	eventType := r.URL.Query().Get("event_type")
+
+	// 通过Service获取审计日志
+	logs, total, err := h.adminSvc.GetAuditLogs(r.Context(), offset, pageSize, eventType)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeInternal))
+		return
+	}
+
+	// 构建响应
+	logList := make([]map[string]interface{}, 0, len(logs))
+	for _, log := range logs {
+		logList = append(logList, map[string]interface{}{
+			"id":         log.ID,
+			"event_type": log.EventType,
+			"user_id":    log.UserID,
+			"ip_address": log.IPAddress,
+			"details":    log.Details,
+			"success":    log.Success,
+			"timestamp":  log.Timestamp,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"logs":        logList,
+		"total":       total,
+		"page":        page,
+		"page_size":   pageSize,
+		"total_pages": (total + pageSize - 1) / pageSize,
+	})
 }
 
 // ============================================================================
