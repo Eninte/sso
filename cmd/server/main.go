@@ -130,6 +130,7 @@ func main() {
 	tokenSvc := service.NewTokenService(jwtSvc, store)
 
 	// 8. 初始化业务服务（带缓存）
+	userSvc := service.NewUserService(store, passwordSvc, emailSvc, cfg.BaseURL())
 	authSvc := service.NewAuthServiceWithOptions(
 		store,
 		passwordSvc,
@@ -138,9 +139,9 @@ func main() {
 		cfg.LockoutDuration,
 		service.WithCache(cacheSvc),
 		service.WithMetrics(metricsSvc),
+		service.WithUserService(userSvc),
 	)
 	oauthSvc := service.NewOAuthServiceWithCache(store, cacheSvc, tokenSvc)
-	userSvc := service.NewUserService(store, passwordSvc, emailSvc, cfg.BaseURL())
 	auditSvc := service.NewAuditService(store)
 	mfaSvc := service.NewMFAService(store)
 	adminSvc := service.NewAdminServiceWithVersion(store, cacheSvc, Version)

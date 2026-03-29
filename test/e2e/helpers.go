@@ -203,7 +203,7 @@ func registerUser(email, password string) (map[string]interface{}, error) {
 	// 提取 data 字段
 	data, ok := response["data"].(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("响应格式错误: %s", body)
+		return nil, fmt.Errorf("响应格式错误: 缺少data字段")
 	}
 
 	return data, nil
@@ -231,7 +231,7 @@ func loginUser(email, password string) (*loginResponse, error) {
 
 	data, ok := response["data"].(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("响应格式错误: %s", body)
+		return nil, fmt.Errorf("响应格式错误: 缺少data字段")
 	}
 
 	dataBytes, _ := json.Marshal(data)

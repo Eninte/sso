@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -41,16 +42,22 @@ func (s *TokenService) GenerateTokenPair(
 	clientID string,
 ) (*model.LoginResponse, error) {
 	// 生成access token
+	slog.Debug("GenerateTokenPair: 生成access token", "userID", userID)
 	accessToken, err := s.jwtSvc.GenerateAccessToken(userID, email, role, scopes)
 	if err != nil {
+		slog.Error("GenerateTokenPair: 生成access token失败", "error", err, "userID", userID)
 		return nil, err
 	}
+	slog.Debug("GenerateTokenPair: access token生成成功", "length", len(accessToken))
 
 	// 生成refresh token
+	slog.Debug("GenerateTokenPair: 生成refresh token", "userID", userID)
 	refreshToken, err := s.jwtSvc.GenerateRefreshToken()
 	if err != nil {
+		slog.Error("GenerateTokenPair: 生成refresh token失败", "error", err, "userID", userID)
 		return nil, err
 	}
+	slog.Debug("GenerateTokenPair: refresh token生成成功", "length", len(refreshToken))
 
 	// 创建token记录
 	tokenRecord := &model.Token{
@@ -65,9 +72,12 @@ func (s *TokenService) GenerateTokenPair(
 	}
 
 	// 存储token到数据库
+	slog.Debug("GenerateTokenPair: 准备存储token", "userID", userID, "tokenID", tokenRecord.ID)
 	if err := s.store.StoreToken(ctx, tokenRecord); err != nil {
+		slog.Error("GenerateTokenPair: 存储token失败", "error", err, "userID", userID)
 		return nil, err
 	}
+	slog.Debug("GenerateTokenPair: token存储成功", "userID", userID)
 
 	// 返回登录响应
 	return &model.LoginResponse{

@@ -46,6 +46,7 @@ const (
 
 	// 邮箱验证相关错误
 	ErrCodeEmailAlreadyVerified    ErrorCode = "EMAIL_ALREADY_VERIFIED"    // 邮箱已验证
+	ErrCodeEmailNotVerified        ErrorCode = "EMAIL_NOT_VERIFIED"        // 邮箱未验证
 	ErrCodeVerificationCodeInvalid ErrorCode = "VERIFICATION_CODE_INVALID" // 验证码无效
 	ErrCodeVerificationCodeExpired ErrorCode = "VERIFICATION_CODE_EXPIRED" // 验证码过期
 	ErrCodeResetTokenInvalid       ErrorCode = "RESET_TOKEN_INVALID"       // 重置令牌无效
@@ -190,6 +191,7 @@ var (
 
 	// 邮箱验证错误
 	ErrEmailAlreadyVerified    = New(ErrCodeEmailAlreadyVerified, "邮箱已验证", 409)
+	ErrEmailNotVerified        = New(ErrCodeEmailNotVerified, "请先验证邮箱后再登录", 401)
 	ErrVerificationCodeInvalid = New(ErrCodeVerificationCodeInvalid, "验证码无效", 400)
 	ErrVerificationCodeExpired = New(ErrCodeVerificationCodeExpired, "验证码已过期", 400)
 	ErrResetTokenInvalid       = New(ErrCodeResetTokenInvalid, "重置令牌无效", 400)

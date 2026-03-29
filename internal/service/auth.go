@@ -29,6 +29,7 @@ var (
 	ErrAccountLocked      = apperrors.ErrAccountLocked
 	ErrAccountDisabled    = apperrors.ErrAccountDisabled
 	ErrInvalidToken       = apperrors.ErrInvalidToken
+	ErrEmailNotVerified   = apperrors.ErrEmailNotVerified
 )
 
 // ============================================================================
@@ -42,6 +43,13 @@ type AuthServiceOption func(*AuthService)
 func WithCache(cacheSvc cache.Cache) AuthServiceOption {
 	return func(s *AuthService) {
 		s.cache = cacheSvc
+	}
+}
+
+// WithUserService 设置用户服务
+func WithUserService(userSvc *UserService) AuthServiceOption {
+	return func(s *AuthService) {
+		s.userSvc = userSvc
 	}
 }
 
@@ -66,6 +74,7 @@ type AuthService struct {
 	passwordSvc     *crypto.PasswordService // 密码服务
 	jwtSvc          *crypto.JWTService      // JWT服务
 	tokenSvc        *TokenService           // Token生成服务
+	userSvc         *UserService            // 用户服务（用于发送验证邮件）
 	maxAttempts     int                     // 最大登录尝试次数
 	lockoutDuration time.Duration           // 锁定时长
 	metricsSvc      *metrics.Service        // 指标服务（可选）
@@ -177,10 +186,24 @@ func (s *AuthService) Register(ctx context.Context, req *model.RegisterRequest) 
 		return nil, err
 	}
 
+	// 5. 发送验证邮件
+	if err := s.sendVerificationEmail(ctx, user); err != nil {
+		// 记录错误但不阻止注册
+		slog.Warn("发送验证邮件失败", "error", err, "userID", user.ID)
+	}
+
 	// 记录注册成功指标
 	s.incrementMetric("auth_register_total")
 
 	return user, nil
+}
+
+// sendVerificationEmail 发送验证邮件（内部方法）
+func (s *AuthService) sendVerificationEmail(ctx context.Context, user *model.User) error {
+	if s.userSvc == nil {
+		return nil
+	}
+	return s.userSvc.SendVerificationEmail(ctx, user.ID)
 }
 
 // ============================================================================
@@ -211,9 +234,16 @@ func (s *AuthService) LoginWithAudit(ctx context.Context, req *model.LoginReques
 		return nil, err
 	}
 
+	// 检查邮箱是否已验证
+	if !user.EmailVerified {
+		slog.Warn("用户尝试使用未验证邮箱登录", "user_id", user.ID, "email", user.Email)
+		return nil, ErrEmailNotVerified
+	}
+
 	if user.Status == model.UserStatusDisabled {
 		return nil, ErrAccountDisabled
 	}
+
 	if user.Status == model.UserStatusLocked {
 		if user.LockedUntil != nil && user.LockedUntil.After(time.Now()) {
 			return nil, ErrAccountLocked
@@ -457,5 +487,10 @@ func (s *AuthService) generateTokenPair(
 	scopes []string,
 	clientID string,
 ) (*model.LoginResponse, error) {
-	return s.tokenSvc.GenerateTokenPair(ctx, userID, email, role, scopes, clientID)
+	slog.Debug("generateTokenPair开始", "userID", userID, "email", email)
+	resp, err := s.tokenSvc.GenerateTokenPair(ctx, userID, email, role, scopes, clientID)
+	if err != nil {
+		slog.Error("generateTokenPair失败", "error", err, "userID", userID)
+	}
+	return resp, err
 }

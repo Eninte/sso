@@ -136,12 +136,13 @@ func TestAuthService_Login(t *testing.T) {
 	require.NoError(t, err)
 
 	testUser := &model.User{
-		ID:           "test-user-id",
-		Email:        "test@example.com",
-		PasswordHash: hashedPassword,
-		Status:       model.UserStatusActive,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		ID:            "test-user-id",
+		Email:         "test@example.com",
+		PasswordHash:  hashedPassword,
+		Status:        model.UserStatusActive,
+		EmailVerified: true,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
 	}
 	store.AddUser(testUser)
 
@@ -185,14 +186,14 @@ func TestAuthService_Login(t *testing.T) {
 	})
 
 	t.Run("账户被禁用", func(t *testing.T) {
-		// 创建被禁用的用户
 		disabledUser := &model.User{
-			ID:           "disabled-user-id",
-			Email:        "disabled@example.com",
-			PasswordHash: hashedPassword,
-			Status:       model.UserStatusDisabled,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			ID:            "disabled-user-id",
+			Email:         "disabled@example.com",
+			PasswordHash:  hashedPassword,
+			Status:        model.UserStatusDisabled,
+			EmailVerified: true,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
 		}
 		store.AddUser(disabledUser)
 
@@ -208,16 +209,16 @@ func TestAuthService_Login(t *testing.T) {
 	})
 
 	t.Run("账户被锁定", func(t *testing.T) {
-		// 创建被锁定的用户
 		lockedUntil := time.Now().Add(30 * time.Minute)
 		lockedUser := &model.User{
-			ID:           "locked-user-id",
-			Email:        "locked@example.com",
-			PasswordHash: hashedPassword,
-			Status:       model.UserStatusLocked,
-			LockedUntil:  &lockedUntil,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			ID:            "locked-user-id",
+			Email:         "locked@example.com",
+			PasswordHash:  hashedPassword,
+			Status:        model.UserStatusLocked,
+			LockedUntil:   &lockedUntil,
+			EmailVerified: true,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
 		}
 		store.AddUser(lockedUser)
 
@@ -233,16 +234,16 @@ func TestAuthService_Login(t *testing.T) {
 	})
 
 	t.Run("账户锁定已过期-自动解锁", func(t *testing.T) {
-		// 创建锁定已过期的用户
-		lockedUntil := time.Now().Add(-10 * time.Minute) // 10分钟前过期
+		lockedUntil := time.Now().Add(-10 * time.Minute)
 		unlockedUser := &model.User{
-			ID:           "unlocked-user-id",
-			Email:        "unlocked@example.com",
-			PasswordHash: hashedPassword,
-			Status:       model.UserStatusLocked,
-			LockedUntil:  &lockedUntil,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			ID:            "unlocked-user-id",
+			Email:         "unlocked@example.com",
+			PasswordHash:  hashedPassword,
+			Status:        model.UserStatusLocked,
+			LockedUntil:   &lockedUntil,
+			EmailVerified: true,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
 		}
 		store.AddUser(unlockedUser)
 
@@ -258,13 +259,13 @@ func TestAuthService_Login(t *testing.T) {
 	})
 
 	t.Run("连续失败触发账户锁定", func(t *testing.T) {
-		// maxAttempts默认为5
 		failUser := &model.User{
 			ID:            "fail-user-id",
 			Email:         "fail@example.com",
 			PasswordHash:  hashedPassword,
 			Status:        model.UserStatusActive,
-			LoginAttempts: 4, // 已经失败4次，再失败1次就锁定
+			LoginAttempts: 4,
+			EmailVerified: true,
 			CreatedAt:     time.Now(),
 			UpdatedAt:     time.Now(),
 		}
@@ -298,12 +299,13 @@ func TestAuthService_RefreshToken(t *testing.T) {
 	store.Reset()
 	hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
 	testUser := &model.User{
-		ID:           "test-user-id",
-		Email:        "test@example.com",
-		PasswordHash: hashedPassword,
-		Status:       model.UserStatusActive,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		ID:            "test-user-id",
+		Email:         "test@example.com",
+		PasswordHash:  hashedPassword,
+		Status:        model.UserStatusActive,
+		EmailVerified: true,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
 	}
 	store.AddUser(testUser)
 
@@ -342,16 +344,16 @@ func TestAuthService_Logout(t *testing.T) {
 	authSvc, store := createTestAuthService(t)
 	ctx := context.Background()
 
-	// 先登录获取Token
 	store.Reset()
 	hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
 	testUser := &model.User{
-		ID:           "test-user-id",
-		Email:        "test@example.com",
-		PasswordHash: hashedPassword,
-		Status:       model.UserStatusActive,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		ID:            "test-user-id",
+		Email:         "test@example.com",
+		PasswordHash:  hashedPassword,
+		Status:        model.UserStatusActive,
+		EmailVerified: true,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
 	}
 	store.AddUser(testUser)
 
@@ -380,16 +382,16 @@ func TestAuthService_ValidateToken(t *testing.T) {
 	authSvc, store := createTestAuthService(t)
 	ctx := context.Background()
 
-	// 先登录获取Token
 	store.Reset()
 	hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
 	testUser := &model.User{
-		ID:           "test-user-id",
-		Email:        "test@example.com",
-		PasswordHash: hashedPassword,
-		Status:       model.UserStatusActive,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		ID:            "test-user-id",
+		Email:         "test@example.com",
+		PasswordHash:  hashedPassword,
+		Status:        model.UserStatusActive,
+		EmailVerified: true,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
 	}
 	store.AddUser(testUser)
 
@@ -437,19 +439,18 @@ func TestAuthService_LogoutAll(t *testing.T) {
 	t.Run("成功登出所有设备", func(t *testing.T) {
 		store.Reset()
 
-		// 创建测试用户
 		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
 		testUser := &model.User{
-			ID:           "test-user-logoutall",
-			Email:        "logoutall@example.com",
-			PasswordHash: hashedPassword,
-			Status:       model.UserStatusActive,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			ID:            "test-user-logoutall",
+			Email:         "logoutall@example.com",
+			PasswordHash:  hashedPassword,
+			Status:        model.UserStatusActive,
+			EmailVerified: true,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
 		}
 		store.AddUser(testUser)
 
-		// 多次登录获取多个Token
 		var tokens []string
 		for i := 0; i < 3; i++ {
 			resp, err := authSvc.Login(ctx, &model.LoginRequest{
@@ -483,19 +484,18 @@ func TestAuthService_ValidateToken_Extended(t *testing.T) {
 	t.Run("验证有效Token", func(t *testing.T) {
 		store.Reset()
 
-		// 创建测试用户
 		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
 		testUser := &model.User{
-			ID:           "test-user-validate",
-			Email:        "validate@example.com",
-			PasswordHash: hashedPassword,
-			Status:       model.UserStatusActive,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			ID:            "test-user-validate",
+			Email:         "validate@example.com",
+			PasswordHash:  hashedPassword,
+			Status:        model.UserStatusActive,
+			EmailVerified: true,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
 		}
 		store.AddUser(testUser)
 
-		// 登录获取Token
 		loginResp, err := authSvc.Login(ctx, &model.LoginRequest{
 			Email:    "validate@example.com",
 			Password: "Password123!",
@@ -555,12 +555,13 @@ func TestAuthService_LoginWithAudit(t *testing.T) {
 		// 创建测试用户
 		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
 		testUser := &model.User{
-			ID:           "test-user-audit-login",
-			Email:        "auditlogin@example.com",
-			PasswordHash: hashedPassword,
-			Status:       model.UserStatusActive,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			ID:            "test-user-audit-login",
+			Email:         "auditlogin@example.com",
+			PasswordHash:  hashedPassword,
+			Status:        model.UserStatusActive,
+			EmailVerified: true,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
 		}
 		store.AddUser(testUser)
 
@@ -635,16 +636,16 @@ func TestAuthService_LogoutWithAudit(t *testing.T) {
 	t.Run("带审计上下文的登出", func(t *testing.T) {
 		store.Reset()
 
-		// 创建测试用户
 		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
 		testUser := &model.User{
-			ID:           "test-user-logout",
-			Email:        "logout@example.com",
-			PasswordHash: hashedPassword,
-			Role:         model.UserRoleUser,
-			Status:       model.UserStatusActive,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			ID:            "test-user-logout",
+			Email:         "logout@example.com",
+			PasswordHash:  hashedPassword,
+			Role:          model.UserRoleUser,
+			Status:        model.UserStatusActive,
+			EmailVerified: true,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
 		}
 		store.AddUser(testUser)
 
@@ -686,20 +687,19 @@ func TestAuthService_LogoutAllWithAudit(t *testing.T) {
 	t.Run("带审计上下文的登出所有设备", func(t *testing.T) {
 		store.Reset()
 
-		// 创建测试用户
 		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
 		testUser := &model.User{
-			ID:           "test-user-logoutall",
-			Email:        "logoutall@example.com",
-			PasswordHash: hashedPassword,
-			Role:         model.UserRoleUser,
-			Status:       model.UserStatusActive,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			ID:            "test-user-logoutall",
+			Email:         "logoutall@example.com",
+			PasswordHash:  hashedPassword,
+			Role:          model.UserRoleUser,
+			Status:        model.UserStatusActive,
+			EmailVerified: true,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
 		}
 		store.AddUser(testUser)
 
-		// 带审计上下文登出所有设备
 		auditCtx := &service.AuditContext{
 			IPAddress: "192.168.1.1",
 			UserAgent: "Mozilla/5.0",
@@ -744,20 +744,19 @@ func TestAuthService_RefreshTokenWithAudit(t *testing.T) {
 	t.Run("带审计上下文的刷新token", func(t *testing.T) {
 		store.Reset()
 
-		// 创建测试用户
 		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
 		testUser := &model.User{
-			ID:           "test-user-refresh",
-			Email:        "refresh@example.com",
-			PasswordHash: hashedPassword,
-			Role:         model.UserRoleUser,
-			Status:       model.UserStatusActive,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			ID:            "test-user-refresh",
+			Email:         "refresh@example.com",
+			PasswordHash:  hashedPassword,
+			Role:          model.UserRoleUser,
+			Status:        model.UserStatusActive,
+			EmailVerified: true,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
 		}
 		store.AddUser(testUser)
 
-		// 登录获取token
 		loginResp, err := authSvc.Login(ctx, &model.LoginRequest{
 			Email:    "refresh@example.com",
 			Password: "Password123!",
@@ -819,20 +818,19 @@ func TestAuthService_WithMetrics(t *testing.T) {
 	t.Run("登录触发metrics", func(t *testing.T) {
 		store.Reset()
 
-		// 创建测试用户
 		hashedPassword, _ := passwordSvc.HashPassword("Password123!")
 		testUser := &model.User{
-			ID:           "test-user-metrics",
-			Email:        "metrics@example.com",
-			PasswordHash: hashedPassword,
-			Role:         model.UserRoleUser,
-			Status:       model.UserStatusActive,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			ID:            "test-user-metrics",
+			Email:         "metrics@example.com",
+			PasswordHash:  hashedPassword,
+			Role:          model.UserRoleUser,
+			Status:        model.UserStatusActive,
+			EmailVerified: true,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
 		}
 		store.AddUser(testUser)
 
-		// 登录应该触发metrics
 		loginResp, err := authSvc.Login(ctx, &model.LoginRequest{
 			Email:    "metrics@example.com",
 			Password: "Password123!",
@@ -844,20 +842,19 @@ func TestAuthService_WithMetrics(t *testing.T) {
 	t.Run("登录失败触发metrics", func(t *testing.T) {
 		store.Reset()
 
-		// 创建测试用户
 		hashedPassword, _ := passwordSvc.HashPassword("Password123!")
 		testUser := &model.User{
-			ID:           "test-user-metrics-fail",
-			Email:        "metricsfail@example.com",
-			PasswordHash: hashedPassword,
-			Role:         model.UserRoleUser,
-			Status:       model.UserStatusActive,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			ID:            "test-user-metrics-fail",
+			Email:         "metricsfail@example.com",
+			PasswordHash:  hashedPassword,
+			Role:          model.UserRoleUser,
+			Status:        model.UserStatusActive,
+			EmailVerified: true,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
 		}
 		store.AddUser(testUser)
 
-		// 错误密码登录应该触发metrics
 		_, err := authSvc.Login(ctx, &model.LoginRequest{
 			Email:    "metricsfail@example.com",
 			Password: "WrongPassword!",

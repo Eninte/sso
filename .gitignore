@@ -25,6 +25,12 @@ coverage.html
 
 # 依赖
 vendor/
+node_modules/
+dist/
+
+# Python
+__pycache__/
+*.pyc
 
 # 日志
 *.log

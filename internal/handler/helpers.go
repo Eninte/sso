@@ -126,6 +126,8 @@ func writeOAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		writeJSON(w, http.StatusForbidden, apperrors.ErrAccountDisabled.ToLocalizedResponse(lang))
 	case errors.Is(err, service.ErrInvalidToken):
 		writeJSON(w, http.StatusUnauthorized, apperrors.ErrInvalidToken.ToLocalizedResponse(lang))
+	case errors.Is(err, service.ErrEmailNotVerified):
+		writeJSON(w, http.StatusUnauthorized, apperrors.ErrEmailNotVerified.ToLocalizedResponse(lang))
 	default:
 		writeJSON(w, http.StatusInternalServerError, apperrors.ErrInternal.ToLocalizedResponse(lang))
 	}

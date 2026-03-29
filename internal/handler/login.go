@@ -3,6 +3,7 @@
 package handler
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/your-org/sso/internal/model"
@@ -26,6 +27,13 @@ func NewLoginHandler(authSvc service.AuthServiceInterface) *LoginHandler {
 // Handle 处理登录请求
 // POST /api/v1/login
 func (h *LoginHandler) Handle(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if err := recover(); err != nil {
+			slog.Error("LoginHandler panic", "error", err)
+			writeError(w, http.StatusInternalServerError, getMessage(r, "INTERNAL_ERROR"))
+		}
+	}()
+
 	// 1. 解析请求体 (带大小限制)
 	var req model.LoginRequest
 	if err := decodeJSON(r, &req); err != nil {
