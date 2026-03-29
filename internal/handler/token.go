@@ -4,6 +4,7 @@ package handler
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -42,6 +43,7 @@ func (h *TokenHandler) HandleToken(w http.ResponseWriter, r *http.Request) {
 	// 根据授权类型分发处理
 	switch req.GrantType {
 	case model.GrantTypeRefreshToken:
+		slog.Debug("HandleToken: 收到刷新Token请求", "refresh_token_length", len(req.RefreshToken))
 		h.handleRefreshToken(w, r, req.RefreshToken)
 	case model.GrantTypeAuthorizationCode:
 		h.handleAuthorizationCode(w, r, &req)
@@ -52,13 +54,17 @@ func (h *TokenHandler) HandleToken(w http.ResponseWriter, r *http.Request) {
 
 // handleRefreshToken 处理刷新Token请求
 func (h *TokenHandler) handleRefreshToken(w http.ResponseWriter, r *http.Request, refreshToken string) {
+	slog.Debug("handleRefreshToken: 开始处理", "refresh_token_length", len(refreshToken))
 	if refreshToken == "" {
+		slog.Warn("handleRefreshToken: refresh_token为空")
 		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeMissingRefreshToken))
 		return
 	}
 
+	slog.Debug("handleRefreshToken: 调用authSvc.RefreshToken")
 	resp, err := h.authSvc.RefreshToken(r.Context(), refreshToken)
 	if err != nil {
+		slog.Error("handleRefreshToken: 刷新失败", "error", err)
 		if errors.Is(err, service.ErrInvalidToken) {
 			writeError(w, http.StatusUnauthorized, getMessage(r, apperrors.ErrCodeInvalidRefreshToken))
 			return
@@ -67,6 +73,7 @@ func (h *TokenHandler) handleRefreshToken(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	slog.Debug("handleRefreshToken: 刷新成功")
 	writeJSON(w, http.StatusOK, resp)
 }
 

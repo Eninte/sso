@@ -10,6 +10,8 @@
 | JavaScript/TypeScript | [`js/`](js/) | `@sso/sdk` | ✅ 可用 |
 | Python | [`python/`](python/) | `sso-sdk` | ✅ 可用 |
 | Rust | [`rust/`](rust/) | `sso-sdk` | ✅ 可用 |
+| Swift (iOS/macOS) | [`swift/`](swift/) | `SSOSDK` | ✅ 可用 |
+| Kotlin (Android) | [`kotlin/`](kotlin/) | `com.sso:sso-sdk` | ✅ 可用 |
 
 ## 快速开始（以 Go 为例）
 
@@ -44,5 +46,7 @@ sdks/
 ├── js/         # JavaScript/TypeScript
 ├── python/     # Python
 ├── rust/       # Rust
+├── swift/      # Swift (iOS/macOS)
+├── kotlin/     # Kotlin (Android)
 └── <lang>/     # 其他语言
 ```

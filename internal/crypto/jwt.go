@@ -200,9 +200,17 @@ func (s *JWTService) GenerateAccessTokenWithKeyID(userID, email, role string, sc
 		return "", ErrNoActiveKey
 	}
 
+	// 生成唯一的jti（JWT ID）确保token唯一性
+	jtiBytes := make([]byte, 16)
+	if _, err := rand.Read(jtiBytes); err != nil {
+		return "", fmt.Errorf("生成jti失败: %w", err)
+	}
+	jti := base64.URLEncoding.EncodeToString(jtiBytes)
+
 	now := time.Now()
 	claims := AccessTokenClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        jti,
 			Issuer:    issuer,
 			Subject:   userID,
 			ExpiresAt: jwt.NewNumericDate(now.Add(accessTokenTTL)),

@@ -625,17 +625,22 @@ func (s *Store) getTokenByField(ctx context.Context, field, value string) (*mode
 		WHERE ` + field + ` = $1`
 
 	token := &model.Token{}
+	var clientID sql.NullString
 	err := s.db.QueryRowContext(ctx, query, value).Scan(
 		&token.ID,
 		&token.AccessToken,
 		&token.RefreshToken,
 		&token.UserID,
-		&token.ClientID,
+		&clientID,
 		pq.Array(&token.Scopes),
 		&token.ExpiresAt,
 		&token.CreatedAt,
 		&token.RevokedAt,
 	)
+
+	if clientID.Valid {
+		token.ClientID = clientID.String
+	}
 
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

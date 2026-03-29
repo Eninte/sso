@@ -22,12 +22,16 @@
 # 测试覆盖率
 coverage.out
 coverage.html
+test-results.xml
 
 # 依赖
 vendor/
 node_modules/
 dist/
 target/
+.build/
+.gradle/
+build/
 
 # Python
 __pycache__/

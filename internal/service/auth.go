@@ -334,19 +334,25 @@ func (s *AuthService) revokeTokenWithRetry(ctx context.Context, accessToken stri
 
 // RefreshToken 刷新Token
 func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken string, auditCtx *AuditContext) (*model.LoginResponse, error) {
+	slog.Debug("RefreshToken: 开始刷新Token", "refresh_token_length", len(refreshToken))
 	tokenRecord, err := s.store.GetTokenByRefreshToken(ctx, refreshToken)
 	if err != nil {
+		slog.Error("RefreshToken: 查询Token失败", "error", err, "refresh_token", refreshToken)
 		return nil, ErrInvalidToken
 	}
+	slog.Debug("RefreshToken: 查询到Token", "token_id", tokenRecord.ID, "user_id", tokenRecord.UserID)
 
 	if tokenRecord.RevokedAt != nil {
+		slog.Warn("RefreshToken: Token已撤销", "token_id", tokenRecord.ID, "revoked_at", tokenRecord.RevokedAt)
 		return nil, ErrInvalidToken
 	}
 
 	user, err := s.store.GetByID(ctx, tokenRecord.UserID)
 	if err != nil {
+		slog.Error("RefreshToken: 查询用户失败", "error", err, "user_id", tokenRecord.UserID)
 		return nil, err
 	}
+	slog.Debug("RefreshToken: 查询到用户", "user_id", user.ID, "email", user.Email)
 
 	if revokeErr := s.revokeTokenWithRetry(ctx, tokenRecord.AccessToken); revokeErr != nil {
 		slog.Error("撤销旧Token失败，已达到最大重试次数",
@@ -354,7 +360,10 @@ func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken st
 			"user_id", tokenRecord.UserID,
 			"token_id", tokenRecord.ID,
 		)
+		// 撤销失败时返回错误，避免生成冲突的access_token
+		return nil, fmt.Errorf("撤销旧Token失败: %w", revokeErr)
 	}
+	slog.Debug("RefreshToken: 旧Token已撤销", "token_id", tokenRecord.ID)
 
 	s.incrementMetric("auth_token_refresh_total")
 
