@@ -39,9 +39,8 @@ func (s *TokenService) GenerateTokenPair(
 	ctx context.Context,
 	userID, email, role string,
 	scopes []string,
-	clientID string,
+	clientID *string,
 ) (*model.LoginResponse, error) {
-	// 生成access token
 	slog.Debug("GenerateTokenPair: 生成access token", "userID", userID)
 	accessToken, err := s.jwtSvc.GenerateAccessToken(userID, email, role, scopes)
 	if err != nil {
@@ -50,7 +49,6 @@ func (s *TokenService) GenerateTokenPair(
 	}
 	slog.Debug("GenerateTokenPair: access token生成成功", "length", len(accessToken))
 
-	// 生成refresh token
 	slog.Debug("GenerateTokenPair: 生成refresh token", "userID", userID)
 	refreshToken, err := s.jwtSvc.GenerateRefreshToken()
 	if err != nil {
@@ -59,7 +57,6 @@ func (s *TokenService) GenerateTokenPair(
 	}
 	slog.Debug("GenerateTokenPair: refresh token生成成功", "length", len(refreshToken))
 
-	// 创建token记录
 	tokenRecord := &model.Token{
 		ID:           uuid.New().String(),
 		AccessToken:  accessToken,
@@ -71,7 +68,6 @@ func (s *TokenService) GenerateTokenPair(
 		CreatedAt:    time.Now(),
 	}
 
-	// 存储token到数据库
 	slog.Debug("GenerateTokenPair: 准备存储token", "userID", userID, "tokenID", tokenRecord.ID)
 	if err := s.store.StoreToken(ctx, tokenRecord); err != nil {
 		slog.Error("GenerateTokenPair: 存储token失败", "error", err, "userID", userID)
@@ -79,7 +75,6 @@ func (s *TokenService) GenerateTokenPair(
 	}
 	slog.Debug("GenerateTokenPair: token存储成功", "userID", userID)
 
-	// 返回登录响应
 	return &model.LoginResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,

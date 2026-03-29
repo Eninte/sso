@@ -183,7 +183,7 @@ func TestFullAuthFlow(t *testing.T) {
 	t.Logf("Token刷新成功")
 
 	// 5. 登出
-	revokeReq := revokeRequest{AccessToken: tokens.AccessToken}
+	revokeReq := revokeRequest{Token: tokens.AccessToken}
 	logoutResp, _, err := doRequest("POST", "/api/v1/token/revoke", revokeReq, "")
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, logoutResp.StatusCode)

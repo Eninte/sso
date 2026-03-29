@@ -159,7 +159,7 @@ func main() {
 	registerHandler := handler.NewRegisterHandler(authSvc)
 	loginHandler := handler.NewLoginHandler(authSvc)
 	tokenHandler := handler.NewTokenHandler(authSvc, oauthSvc)
-	userInfoHandler := handler.NewUserInfoHandler(authSvc)
+	userInfoHandler := handler.NewUserInfoHandler(store)
 	authorizeHandler := handler.NewAuthorizeHandler(oauthSvc)
 	userHandler := handler.NewUserHandler(userSvc)
 	mfaHandler := handler.NewMFAHandler(mfaSvc)

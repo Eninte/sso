@@ -71,7 +71,7 @@ type verifyEmailRequest struct {
 }
 
 type revokeRequest struct {
-	AccessToken string `json:"access_token"`
+	Token string `json:"token"`
 }
 
 type adminUserActionRequest struct {

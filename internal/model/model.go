@@ -107,11 +107,18 @@ type Token struct {
 	AccessToken  string     `json:"access_token" db:"access_token"`
 	RefreshToken string     `json:"refresh_token" db:"refresh_token"`
 	UserID       string     `json:"user_id" db:"user_id"`
-	ClientID     string     `json:"client_id" db:"client_id"`
+	ClientID     *string    `json:"client_id,omitempty" db:"client_id"`
 	Scopes       []string   `json:"scopes" db:"scopes"`
 	ExpiresAt    time.Time  `json:"expires_at" db:"expires_at"`
 	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
 	RevokedAt    *time.Time `json:"revoked_at" db:"revoked_at"`
+}
+
+func (t *Token) GetClientID() string {
+	if t.ClientID != nil {
+		return *t.ClientID
+	}
+	return ""
 }
 
 type AuthorizationCode struct {

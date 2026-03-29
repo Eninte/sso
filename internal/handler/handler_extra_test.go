@@ -41,10 +41,7 @@ func createTestJWTService() *crypto.JWTService {
 
 func createTestUserInfoHandlerFull(t *testing.T) *handler.UserInfoHandler {
 	storeInst := mock.New()
-	passwordSvc := crypto.NewPasswordService(10)
-	jwtSvc := createTestJWTService()
-	authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*60*1000000000)
-	return handler.NewUserInfoHandler(authSvc)
+	return handler.NewUserInfoHandler(storeInst)
 }
 
 func TestUserInfoHandler_HandleFull(t *testing.T) {

@@ -287,7 +287,7 @@ func (s *AuthService) LoginWithAudit(ctx context.Context, req *model.LoginReques
 		s.auditSvc.LogUserLogin(ctx, user.ID, user.Email, auditCtx.IPAddress, auditCtx.UserAgent, true)
 	}
 
-	return s.generateTokenPair(ctx, user.ID, user.Email, user.Role, []string{"openid", "profile", "email"}, "")
+	return s.generateTokenPair(ctx, user.ID, user.Email, user.Role, []string{"openid", "profile", "email"}, nil)
 }
 
 func (s *AuthService) Login(ctx context.Context, req *model.LoginRequest) (*model.LoginResponse, error) {
@@ -368,7 +368,7 @@ func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken st
 	s.incrementMetric("auth_token_refresh_total")
 
 	if s.auditSvc != nil && auditCtx != nil {
-		s.auditSvc.LogTokenRefresh(ctx, user.ID, tokenRecord.ClientID, auditCtx.IPAddress)
+		s.auditSvc.LogTokenRefresh(ctx, user.ID, tokenRecord.GetClientID(), auditCtx.IPAddress)
 	}
 
 	return s.generateTokenPair(ctx, user.ID, user.Email, user.Role, tokenRecord.Scopes, tokenRecord.ClientID)
@@ -494,7 +494,7 @@ func (s *AuthService) generateTokenPair(
 	ctx context.Context,
 	userID, email, role string,
 	scopes []string,
-	clientID string,
+	clientID *string,
 ) (*model.LoginResponse, error) {
 	slog.Debug("generateTokenPair开始", "userID", userID, "email", email)
 	resp, err := s.tokenSvc.GenerateTokenPair(ctx, userID, email, role, scopes, clientID)

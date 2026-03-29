@@ -310,18 +310,18 @@ func (s *OAuthService) generateTokenResponse(
 		return nil, fmt.Errorf("获取用户信息失败: %w", err)
 	}
 
-	// 使用TokenService生成令牌对
 	if s.tokenSvc == nil {
 		return nil, fmt.Errorf("token服务未初始化")
 	}
 
+	clientID := &authCode.ClientID
 	return s.tokenSvc.GenerateTokenPair(
 		ctx,
 		user.ID,
 		user.Email,
 		user.Role,
 		authCode.Scopes,
-		authCode.ClientID,
+		clientID,
 	)
 }
 

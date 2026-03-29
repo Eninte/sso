@@ -108,10 +108,15 @@ func TestEmailVerifyLoginAssociation(t *testing.T) {
 	password := generateTestPassword()
 
 	// 注册用户
-	_, err := registerUser(email, password)
+	user, err := registerUser(email, password)
 	require.NoError(t, err)
 
-	// 未验证邮箱应该可以登录
+	// 验证邮箱
+	userID := user["user_id"].(string)
+	err = verifyEmail(userID)
+	require.NoError(t, err)
+
+	// 验证邮箱后可以登录
 	tokens, err := loginUser(email, password)
 	require.NoError(t, err)
 	assert.NotEmpty(t, tokens.AccessToken)
@@ -121,7 +126,7 @@ func TestEmailVerifyLoginAssociation(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	t.Logf("未验证邮箱用户可以正常登录和访问基本资源")
+	t.Logf("已验证邮箱用户可以正常登录和访问基本资源")
 }
 
 // ============================================================================
@@ -133,7 +138,12 @@ func TestResendVerificationEmail(t *testing.T) {
 	password := generateTestPassword()
 
 	// 注册用户
-	_, err := registerUser(email, password)
+	user, err := registerUser(email, password)
+	require.NoError(t, err)
+
+	// 验证邮箱（为了登录）
+	userID := user["user_id"].(string)
+	err = verifyEmail(userID)
 	require.NoError(t, err)
 
 	// 登录获取Token
@@ -173,7 +183,12 @@ func TestEmailVerificationStatus(t *testing.T) {
 	password := generateTestPassword()
 
 	// 注册用户
-	_, err := registerUser(email, password)
+	user, err := registerUser(email, password)
+	require.NoError(t, err)
+
+	// 验证邮箱
+	userID := user["user_id"].(string)
+	err = verifyEmail(userID)
 	require.NoError(t, err)
 
 	// 登录获取Token

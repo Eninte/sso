@@ -577,14 +577,6 @@ func (s *Store) MarkAuthorizationCodeUsed(ctx context.Context, code string) erro
 
 // StoreToken 存储Token记录
 func (s *Store) StoreToken(ctx context.Context, token *model.Token) error {
-	// 处理空的client_id，转换为nil以满足外键约束
-	var clientID interface{}
-	if token.ClientID != "" {
-		clientID = token.ClientID
-	} else {
-		clientID = nil
-	}
-
 	query := `
 		INSERT INTO tokens (id, access_token, refresh_token, user_id, client_id, scopes, expires_at, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -594,7 +586,7 @@ func (s *Store) StoreToken(ctx context.Context, token *model.Token) error {
 		token.AccessToken,
 		token.RefreshToken,
 		token.UserID,
-		clientID,
+		token.ClientID,
 		pq.Array(token.Scopes),
 		token.ExpiresAt,
 		token.CreatedAt,
@@ -614,7 +606,6 @@ func (s *Store) GetTokenByAccessToken(ctx context.Context, accessToken string) (
 
 // getTokenByField 通用Token查询函数
 func (s *Store) getTokenByField(ctx context.Context, field, value string) (*model.Token, error) {
-	// 验证字段名是否在白名单中
 	if !allowedTokenFields[field] {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidFieldName, field)
 	}
@@ -625,22 +616,17 @@ func (s *Store) getTokenByField(ctx context.Context, field, value string) (*mode
 		WHERE ` + field + ` = $1`
 
 	token := &model.Token{}
-	var clientID sql.NullString
 	err := s.db.QueryRowContext(ctx, query, value).Scan(
 		&token.ID,
 		&token.AccessToken,
 		&token.RefreshToken,
 		&token.UserID,
-		&clientID,
+		&token.ClientID,
 		pq.Array(&token.Scopes),
 		&token.ExpiresAt,
 		&token.CreatedAt,
 		&token.RevokedAt,
 	)
-
-	if clientID.Valid {
-		token.ClientID = clientID.String
-	}
 
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

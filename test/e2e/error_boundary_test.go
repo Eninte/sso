@@ -161,7 +161,12 @@ func TestSQLInjectionAttempt(t *testing.T) {
 	}
 
 	for _, payload := range sqlPayloads {
-		t.Run(fmt.Sprintf("SQL注入_%s", payload[:10]), func(t *testing.T) {
+		// 生成安全的测试名称，避免切片越界
+		testName := payload
+		if len(testName) > 10 {
+			testName = testName[:10]
+		}
+		t.Run(fmt.Sprintf("SQL注入_%s", testName), func(t *testing.T) {
 			req := registerRequest{
 				Email:    fmt.Sprintf("test%s@example.com", payload),
 				Password: "TestPassword123!",

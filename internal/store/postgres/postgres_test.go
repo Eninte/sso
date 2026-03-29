@@ -53,6 +53,10 @@ func cleanupTestData(t *testing.T, db *sql.DB) {
 	_, _ = db.ExecContext(ctx, "DELETE FROM users WHERE email LIKE 'test-%@%'")
 }
 
+func ptrTo(s string) *string {
+	return &s
+}
+
 func newTestUser(email string) *model.User {
 	return &model.User{
 		ID:            uuid.New().String(),
@@ -368,7 +372,7 @@ func TestStore_TokenOperations(t *testing.T) {
 			AccessToken:  "test-access-" + uuid.New().String(),
 			RefreshToken: "test-refresh-" + uuid.New().String(),
 			UserID:       user.ID,
-			ClientID:     "test-token-client",
+			ClientID:     ptrTo("test-token-client"),
 			Scopes:       []string{"openid", "profile"},
 			ExpiresAt:    time.Now().Add(1 * time.Hour),
 			CreatedAt:    time.Now(),
@@ -390,7 +394,7 @@ func TestStore_TokenOperations(t *testing.T) {
 			AccessToken:  "test-access-revoke-" + uuid.New().String(),
 			RefreshToken: "test-refresh-revoke-" + uuid.New().String(),
 			UserID:       user.ID,
-			ClientID:     "test-token-client",
+			ClientID:     ptrTo("test-token-client"),
 			Scopes:       []string{"openid"},
 			ExpiresAt:    time.Now().Add(1 * time.Hour),
 			CreatedAt:    time.Now(),
@@ -410,7 +414,7 @@ func TestStore_TokenOperations(t *testing.T) {
 				AccessToken:  fmt.Sprintf("test-all-%d-%s", i, uuid.New().String()),
 				RefreshToken: fmt.Sprintf("test-all-r-%d-%s", i, uuid.New().String()),
 				UserID:       user.ID,
-				ClientID:     "test-token-client",
+				ClientID:     ptrTo("test-token-client"),
 				Scopes:       []string{"openid"},
 				ExpiresAt:    time.Now().Add(1 * time.Hour),
 				CreatedAt:    time.Now(),
@@ -856,9 +860,9 @@ func TestStore_CleanupExpired(t *testing.T) {
 		AccessToken:  "test-cleanup-access-" + uuid.New().String(),
 		RefreshToken: "test-cleanup-refresh-" + uuid.New().String(),
 		UserID:       user.ID,
-		ClientID:     "test-cleanup-client",
+		ClientID:     ptrTo("test-cleanup-client"),
 		Scopes:       []string{"openid"},
-		ExpiresAt:    time.Now().Add(-1 * time.Hour), // 已过期
+		ExpiresAt:    time.Now().Add(-1 * time.Hour),
 		CreatedAt:    time.Now().Add(-2 * time.Hour),
 	}
 	require.NoError(t, store.StoreToken(ctx, expiredToken))

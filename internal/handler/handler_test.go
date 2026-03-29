@@ -347,8 +347,8 @@ func TestUserInfoHandler_Handle(t *testing.T) {
 		15*time.Minute,
 		7*24*time.Hour,
 	)
-	authSvc := service.NewAuthService(store, passwordSvc, jwtSvc, 5, 30*time.Minute)
-	h := handler.NewUserInfoHandler(authSvc)
+	_ = service.NewAuthService(store, passwordSvc, jwtSvc, 5, 30*time.Minute)
+	h := handler.NewUserInfoHandler(store)
 
 	t.Run("未认证-返回401", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/api/v1/userinfo", nil)

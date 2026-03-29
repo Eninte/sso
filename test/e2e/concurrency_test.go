@@ -70,8 +70,12 @@ func TestConcurrentLogin(t *testing.T) {
 	email := generateUniqueEmail("concurrentlogin")
 	password := generateTestPassword()
 
-	// 先注册用户
-	_, err := registerUser(email, password)
+	// 先注册用户并验证邮箱
+	user, err := registerUser(email, password)
+	require.NoError(t, err)
+
+	userID := user["user_id"].(string)
+	err = verifyEmail(userID)
 	require.NoError(t, err)
 
 	const concurrency = 10

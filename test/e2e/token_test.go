@@ -106,7 +106,7 @@ func TestTokenRevoked(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// 撤销Token
-	revokeReq := revokeRequest{AccessToken: tokens.AccessToken}
+	revokeReq := revokeRequest{Token: tokens.AccessToken}
 	revokeResp, _, err := doRequest("POST", "/api/v1/token/revoke", revokeReq, "")
 	require.NoError(t, err)
 
