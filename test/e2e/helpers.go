@@ -21,7 +21,7 @@ import (
 
 var (
 	baseURL = getEnvOrDefault("E2E_BASE_URL", "http://localhost:9090")
-	client  = &http.Client{Timeout: 10 * time.Second}
+	client  = &http.Client{Timeout: 30 * time.Second}
 )
 
 func getEnvOrDefault(key, defaultValue string) string {

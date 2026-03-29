@@ -115,12 +115,13 @@ func TestLoginHandler_Handle(t *testing.T) {
 	require.NoError(t, err)
 
 	testUser := &model.User{
-		ID:           "test-user-id",
-		Email:        "test@example.com",
-		PasswordHash: hashedPassword,
-		Status:       model.UserStatusActive,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		ID:            "test-user-id",
+		Email:         "test@example.com",
+		PasswordHash:  hashedPassword,
+		EmailVerified: true,
+		Status:        model.UserStatusActive,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
 	}
 	store.AddUser(testUser)
 
@@ -199,12 +200,13 @@ func TestLoginHandler_Handle(t *testing.T) {
 	t.Run("账户被禁用", func(t *testing.T) {
 		// 创建被禁用的用户
 		disabledUser := &model.User{
-			ID:           "disabled-user-id",
-			Email:        "disabled@example.com",
-			PasswordHash: hashedPassword,
-			Status:       model.UserStatusDisabled,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			ID:            "disabled-user-id",
+			Email:         "disabled@example.com",
+			PasswordHash:  hashedPassword,
+			EmailVerified: true,
+			Status:        model.UserStatusDisabled,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
 		}
 		store.AddUser(disabledUser)
 
@@ -414,12 +416,13 @@ func TestTokenHandler_HandleToken_RefreshToken(t *testing.T) {
 	hashedPassword, _ := passwordSvc.HashPassword("Password123!")
 
 	user := &model.User{
-		ID:           "test-user-id",
-		Email:        "test@example.com",
-		PasswordHash: hashedPassword,
-		Status:       model.UserStatusActive,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		ID:            "test-user-id",
+		Email:         "test@example.com",
+		PasswordHash:  hashedPassword,
+		EmailVerified: true,
+		Status:        model.UserStatusActive,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
 	}
 	store.AddUser(user)
 
@@ -529,10 +532,11 @@ func TestTokenHandler_HandleToken_AuthorizationCode(t *testing.T) {
 
 	// 创建用户
 	user := &model.User{
-		ID:           "test-user-id",
-		Email:        "test@example.com",
-		PasswordHash: "hash",
-		Status:       model.UserStatusActive,
+		ID:            "test-user-id",
+		Email:         "test@example.com",
+		PasswordHash:  "hash",
+		EmailVerified: true,
+		Status:        model.UserStatusActive,
 	}
 	store.AddUser(user)
 
@@ -619,10 +623,11 @@ func TestTokenHandler_HandleRevoke(t *testing.T) {
 	hashedPassword, _ := passwordSvc.HashPassword("Password123!")
 
 	user := &model.User{
-		ID:           "test-user-id",
-		Email:        "test@example.com",
-		PasswordHash: hashedPassword,
-		Status:       model.UserStatusActive,
+		ID:            "test-user-id",
+		Email:         "test@example.com",
+		PasswordHash:  hashedPassword,
+		EmailVerified: true,
+		Status:        model.UserStatusActive,
 	}
 	store.AddUser(user)
 

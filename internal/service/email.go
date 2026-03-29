@@ -225,7 +225,7 @@ func (s *EmailService) SendVerificationEmail(ctx context.Context, to, username, 
             <a href="{{.VerifyLink}}" style="color: #667eea;">{{.VerifyLink}}</a>
         </p>
         <p style="color: #999; font-size: 12px;">
-            此链接将在24小时后失效。<br>
+            此链接将在15分钟后失效。<br>
             如果您没有注册此账户，请忽略此邮件。
         </p>
     </div>

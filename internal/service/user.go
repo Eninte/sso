@@ -32,8 +32,8 @@ var (
 // ============================================================================
 
 const (
-	VerificationTokenTTL = 24 * time.Hour
-	ResetTokenTTL        = 1 * time.Hour
+	VerificationTokenTTL = 15 * time.Minute // 验证令牌有效期（15分钟）
+	ResetTokenTTL        = 1 * time.Hour    // 重置令牌有效期（1小时）
 )
 
 // ============================================================================

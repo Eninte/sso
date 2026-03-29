@@ -9,6 +9,7 @@
 | Go | [`golang/`](golang/) | `github.com/your-org/sso/sdks/golang` | ✅ 可用 |
 | JavaScript/TypeScript | [`js/`](js/) | `@sso/sdk` | ✅ 可用 |
 | Python | [`python/`](python/) | `sso-sdk` | ✅ 可用 |
+| Rust | [`rust/`](rust/) | `sso-sdk` | ✅ 可用 |
 
 ## 快速开始（以 Go 为例）
 
@@ -42,5 +43,6 @@ sdks/
 ├── golang/     # Go
 ├── js/         # JavaScript/TypeScript
 ├── python/     # Python
+├── rust/       # Rust
 └── <lang>/     # 其他语言
 ```
