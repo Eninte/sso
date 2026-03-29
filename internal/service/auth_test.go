@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"fmt"
 	"testing"
 	"time"
 
@@ -474,48 +475,6 @@ func TestAuthService_LogoutAll(t *testing.T) {
 }
 
 // ============================================================================
-// ValidateToken 测试
-// ============================================================================
-
-func TestAuthService_ValidateToken_Extended(t *testing.T) {
-	authSvc, store := createTestAuthService(t)
-	ctx := context.Background()
-
-	t.Run("验证有效Token", func(t *testing.T) {
-		store.Reset()
-
-		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
-		testUser := &model.User{
-			ID:            "test-user-validate",
-			Email:         "validate@example.com",
-			PasswordHash:  hashedPassword,
-			Status:        model.UserStatusActive,
-			EmailVerified: true,
-			CreatedAt:     time.Now(),
-			UpdatedAt:     time.Now(),
-		}
-		store.AddUser(testUser)
-
-		loginResp, err := authSvc.Login(ctx, &model.LoginRequest{
-			Email:    "validate@example.com",
-			Password: "Password123!",
-		})
-		require.NoError(t, err)
-
-		// 验证Token
-		claims, err := authSvc.ValidateToken(ctx, loginResp.AccessToken)
-		require.NoError(t, err)
-		assert.Equal(t, testUser.ID, claims.Subject)
-		assert.Equal(t, testUser.Email, claims.Email)
-	})
-
-	t.Run("验证无效Token", func(t *testing.T) {
-		_, err := authSvc.ValidateToken(ctx, "invalid-token")
-		assert.ErrorIs(t, err, service.ErrInvalidToken)
-	})
-}
-
-// ============================================================================
 // NewAuthServiceWithAudit 测试
 // ============================================================================
 
@@ -860,5 +819,295 @@ func TestAuthService_WithMetrics(t *testing.T) {
 			Password: "WrongPassword!",
 		})
 		assert.Error(t, err)
+	})
+}
+
+// ============================================================================
+// Mock Store 错误注入测试
+// 验证存储层故障时服务的错误处理行为
+// ============================================================================
+
+func TestAuthService_Register_StoreErrors(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("GetByEmail失败-返回错误", func(t *testing.T) {
+		storeInst := mock.New()
+		storeInst.GetUserByEmailErr = fmt.Errorf("database connection lost")
+		passwordSvc := crypto.NewPasswordService(10)
+		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test", 15*time.Minute, 7*24*time.Hour)
+		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
+
+		_, err := authSvc.Register(ctx, &model.RegisterRequest{
+			Email:    "test@example.com",
+			Password: "Password123!!",
+		})
+
+		assert.Error(t, err)
+	})
+
+	t.Run("Create失败-返回错误", func(t *testing.T) {
+		storeInst := mock.New()
+		storeInst.CreateUserErr = fmt.Errorf("disk full")
+		passwordSvc := crypto.NewPasswordService(10)
+		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test", 15*time.Minute, 7*24*time.Hour)
+		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
+
+		_, err := authSvc.Register(ctx, &model.RegisterRequest{
+			Email:    "test@example.com",
+			Password: "Password123!!",
+		})
+
+		assert.Error(t, err)
+	})
+}
+
+func TestAuthService_Login_StoreErrors(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("GetByEmail失败-返回InvalidCredentials", func(t *testing.T) {
+		storeInst := mock.New()
+		storeInst.GetUserByEmailErr = fmt.Errorf("database timeout")
+		passwordSvc := crypto.NewPasswordService(10)
+		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test", 15*time.Minute, 7*24*time.Hour)
+		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
+
+		_, err := authSvc.Login(ctx, &model.LoginRequest{
+			Email:    "test@example.com",
+			Password: "Password123!",
+		})
+
+		assert.Error(t, err)
+	})
+}
+
+func TestAuthService_RefreshToken_StoreErrors(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("GetTokenByRefreshToken失败-返回InvalidToken", func(t *testing.T) {
+		storeInst := mock.New()
+		storeInst.GetTokenByRefreshTokenErr = fmt.Errorf("database error")
+		passwordSvc := crypto.NewPasswordService(10)
+		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test", 15*time.Minute, 7*24*time.Hour)
+		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
+
+		_, err := authSvc.RefreshToken(ctx, "some-refresh-token")
+
+		assert.ErrorIs(t, err, service.ErrInvalidToken)
+	})
+
+	t.Run("GetByID失败-返回错误", func(t *testing.T) {
+		storeInst := mock.New()
+		// 先创建token记录
+		storeInst.AddToken(&model.Token{
+			ID:           "token-1",
+			UserID:       "user-1",
+			RefreshToken: "valid-refresh",
+			AccessToken:  "valid-access",
+		})
+		// 然后让GetByID失败
+		storeInst.GetUserByIDErr = fmt.Errorf("user not found in db")
+		passwordSvc := crypto.NewPasswordService(10)
+		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test", 15*time.Minute, 7*24*time.Hour)
+		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
+
+		_, err := authSvc.RefreshToken(ctx, "valid-refresh")
+
+		assert.Error(t, err)
+	})
+}
+
+func TestAuthService_Logout_StoreErrors(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("RevokeToken失败-返回错误", func(t *testing.T) {
+		storeInst := mock.New()
+		storeInst.RevokeTokenErr = fmt.Errorf("token table locked")
+		passwordSvc := crypto.NewPasswordService(10)
+		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test", 15*time.Minute, 7*24*time.Hour)
+		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
+
+		err := authSvc.Logout(ctx, "some-access-token")
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "登出失败")
+	})
+}
+
+func TestAuthService_LogoutAll_StoreErrors(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("RevokeAllUserTokens失败-返回错误", func(t *testing.T) {
+		storeInst := mock.New()
+		storeInst.RevokeAllUserTokensErr = fmt.Errorf("database error")
+		passwordSvc := crypto.NewPasswordService(10)
+		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test", 15*time.Minute, 7*24*time.Hour)
+		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
+
+		err := authSvc.LogoutAll(ctx, "user-123")
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "登出所有设备失败")
+	})
+}
+
+// ============================================================================
+// 审计日志写入验证测试
+// ============================================================================
+
+func TestAuthService_LoginWithAudit_VerifyLog(t *testing.T) {
+	authSvc, storeInst := createTestAuthService(t)
+	ctx := context.Background()
+
+	t.Run("登录成功写入审计日志", func(t *testing.T) {
+		storeInst.Reset()
+
+		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
+		storeInst.AddUser(&model.User{
+			ID:            "audit-login-user",
+			Email:         "auditlogin@example.com",
+			PasswordHash:  hashedPassword,
+			Status:        model.UserStatusActive,
+			EmailVerified: true,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
+		})
+
+		auditCtx := &service.AuditContext{
+			IPAddress: "192.168.1.100",
+			UserAgent: "TestAgent/1.0",
+		}
+		_, err := authSvc.LoginWithAudit(ctx, &model.LoginRequest{
+			Email:    "auditlogin@example.com",
+			Password: "Password123!",
+		}, auditCtx)
+		require.NoError(t, err)
+
+		// 验证审计日志已写入
+		require.Eventually(t, func() bool {
+			logs, _, err := storeInst.ListAuditLogs(ctx, "audit-login-user", string(model.EventUserLogin), 0, 10)
+			return err == nil && len(logs) >= 1
+		}, 2*time.Second, 10*time.Millisecond, "审计日志未写入")
+
+		logs, _, _ := storeInst.ListAuditLogs(ctx, "audit-login-user", string(model.EventUserLogin), 0, 10)
+		assert.Equal(t, "192.168.1.100", logs[0].IPAddress)
+		assert.True(t, logs[0].Success)
+	})
+
+	t.Run("登录失败写入审计日志", func(t *testing.T) {
+		storeInst.Reset()
+
+		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
+		storeInst.AddUser(&model.User{
+			ID:            "audit-login-fail-user",
+			Email:         "auditfail@example.com",
+			PasswordHash:  hashedPassword,
+			Status:        model.UserStatusActive,
+			EmailVerified: true,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
+		})
+
+		auditCtx := &service.AuditContext{
+			IPAddress: "10.0.0.1",
+		}
+		_, err := authSvc.LoginWithAudit(ctx, &model.LoginRequest{
+			Email:    "auditfail@example.com",
+			Password: "WrongPassword!",
+		}, auditCtx)
+		assert.Error(t, err)
+
+		// 验证登录事件审计日志已写入（success=false）
+		require.Eventually(t, func() bool {
+			logs, _, err := storeInst.ListAuditLogs(ctx, "audit-login-fail-user", string(model.EventUserLogin), 0, 10)
+			return err == nil && len(logs) >= 1
+		}, 2*time.Second, 10*time.Millisecond, "登录失败审计日志未写入")
+
+		logs, _, _ := storeInst.ListAuditLogs(ctx, "audit-login-fail-user", string(model.EventUserLogin), 0, 10)
+		assert.False(t, logs[0].Success)
+	})
+}
+
+func TestAuthService_LogoutWithAudit_VerifyLog(t *testing.T) {
+	authSvc, storeInst := createTestAuthService(t)
+	ctx := context.Background()
+
+	t.Run("登出写入审计日志", func(t *testing.T) {
+		storeInst.Reset()
+
+		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
+		storeInst.AddUser(&model.User{
+			ID:            "audit-logout-user",
+			Email:         "auditlogout@example.com",
+			PasswordHash:  hashedPassword,
+			Role:          model.UserRoleUser,
+			Status:        model.UserStatusActive,
+			EmailVerified: true,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
+		})
+
+		loginResp, err := authSvc.Login(ctx, &model.LoginRequest{
+			Email:    "auditlogout@example.com",
+			Password: "Password123!",
+		})
+		require.NoError(t, err)
+
+		auditCtx := &service.AuditContext{IPAddress: "172.16.0.1"}
+		err = authSvc.LogoutWithAudit(ctx, loginResp.AccessToken, auditCtx)
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			logs, _, err := storeInst.ListAuditLogs(ctx, "audit-logout-user", string(model.EventUserLogout), 0, 10)
+			return err == nil && len(logs) >= 1
+		}, 2*time.Second, 10*time.Millisecond, "登出审计日志未写入")
+
+		logs, _, _ := storeInst.ListAuditLogs(ctx, "audit-logout-user", string(model.EventUserLogout), 0, 10)
+		assert.Equal(t, "172.16.0.1", logs[0].IPAddress)
+	})
+}
+
+func TestAuthService_RefreshTokenWithAudit_VerifyLog(t *testing.T) {
+	authSvc, storeInst := createTestAuthService(t)
+	ctx := context.Background()
+
+	t.Run("刷新Token写入审计日志", func(t *testing.T) {
+		storeInst.Reset()
+
+		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
+		storeInst.AddUser(&model.User{
+			ID:            "audit-refresh-user",
+			Email:         "auditrefresh@example.com",
+			PasswordHash:  hashedPassword,
+			Role:          model.UserRoleUser,
+			Status:        model.UserStatusActive,
+			EmailVerified: true,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
+		})
+
+		loginResp, err := authSvc.Login(ctx, &model.LoginRequest{
+			Email:    "auditrefresh@example.com",
+			Password: "Password123!",
+		})
+		require.NoError(t, err)
+
+		auditCtx := &service.AuditContext{IPAddress: "192.168.2.1"}
+		_, err = authSvc.RefreshTokenWithAudit(ctx, loginResp.RefreshToken, auditCtx)
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			logs, _, err := storeInst.ListAuditLogs(ctx, "audit-refresh-user", string(model.EventTokenRefresh), 0, 10)
+			return err == nil && len(logs) >= 1
+		}, 2*time.Second, 10*time.Millisecond, "Token刷新审计日志未写入")
+
+		logs, _, _ := storeInst.ListAuditLogs(ctx, "audit-refresh-user", string(model.EventTokenRefresh), 0, 10)
+		assert.Equal(t, "192.168.2.1", logs[0].IPAddress)
 	})
 }

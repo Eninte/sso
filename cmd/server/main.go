@@ -225,7 +225,7 @@ func main() {
 
 	// 受保护的端点 (需要认证)
 	protected := api.PathPrefix("").Subrouter()
-	protected.Use(middleware.AuthMiddlewareWithStore(jwtSvc, store))
+	protected.Use(middleware.AuthMiddlewareWithCache(jwtSvc, store, cacheSvc))
 	protected.HandleFunc("/userinfo", userInfoHandler.Handle).Methods("GET")
 	protected.HandleFunc("/authorize", authorizeHandler.HandleAuthorize).Methods("GET")
 	protected.HandleFunc("/authorize/approve", authorizeHandler.HandleApprove).Methods("POST")
@@ -238,8 +238,8 @@ func main() {
 	protected.HandleFunc("/mfa/status", mfaHandler.HandleMFAStatus).Methods("GET")
 
 	// 管理员端点 (需要认证 + 管理员角色)
-	admin := router.PathPrefix("/admin").Subrouter()
-	admin.Use(middleware.AuthMiddlewareWithStore(jwtSvc, store))
+	admin := api.PathPrefix("/admin").Subrouter()
+	admin.Use(middleware.AuthMiddlewareWithCache(jwtSvc, store, cacheSvc))
 	admin.Use(middleware.RequireAdmin())
 	admin.HandleFunc("/health", adminHandler.HandleSystemHealth).Methods("GET")
 	admin.HandleFunc("/cleanup", adminHandler.HandleCleanup).Methods("POST")
@@ -249,9 +249,6 @@ func main() {
 	admin.HandleFunc("/users/{id}/enable", adminHandler.HandleEnableUser).Methods("POST")
 	admin.HandleFunc("/users/{id}", adminHandler.HandleDeleteUser).Methods("DELETE")
 	admin.HandleFunc("/audit-logs", adminHandler.HandleAuditLogs).Methods("GET")
-	// 兼容旧的路径格式
-	admin.HandleFunc("/users/disable", adminHandler.HandleDisableUser).Methods("POST")
-	admin.HandleFunc("/users/enable", adminHandler.HandleEnableUser).Methods("POST")
 
 	// 13.5 测试专用API（仅在开发/测试环境启用）
 	if cfg.Env == "development" || os.Getenv("E2E_ENABLED") == "true" {

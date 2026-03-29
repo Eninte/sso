@@ -252,7 +252,24 @@ Authorization: Bearer <access_token>
   "sub": "550e8400-e29b-41d4-a716-446655440000",
   "email": "user@example.com",
   "email_verified": true,
+  "scope": ["openid", "profile", "email"],
   "created_at": "2024-01-01T00:00:00Z"
+}
+```
+
+### 登出所有设备
+
+撤销当前用户的所有Token，实现全部设备登出。需要认证。
+
+```
+POST /api/v1/logout-all
+Authorization: Bearer <access_token>
+```
+
+**成功响应** `200 OK`:
+```json
+{
+  "message": "已登出所有设备"
 }
 ```
 
@@ -620,7 +637,7 @@ GET /auth/{provider}/callback?code=<code>&state=<state>
 获取详细的系统健康信息。
 
 ```
-GET /admin/health
+GET /api/v1/api/v1/admin/health
 Authorization: Bearer <access_token>
 ```
 
@@ -640,7 +657,7 @@ Authorization: Bearer <access_token>
 清理过期的Token和其他数据。
 
 ```
-POST /admin/cleanup
+POST /api/v1/api/v1/admin/cleanup
 Authorization: Bearer <access_token>
 ```
 
@@ -657,7 +674,7 @@ Authorization: Bearer <access_token>
 获取用户列表。
 
 ```
-GET /admin/users?page=1&limit=20&status=active
+GET /api/v1/admin/users?page=1&limit=20&status=active
 Authorization: Bearer <access_token>
 ```
 
@@ -692,7 +709,7 @@ Authorization: Bearer <access_token>
 获取指定用户信息。
 
 ```
-GET /admin/users/{id}
+GET /api/v1/admin/users/{id}
 Authorization: Bearer <access_token>
 ```
 
@@ -716,7 +733,7 @@ Authorization: Bearer <access_token>
 禁用指定用户账户。
 
 ```
-POST /admin/users/{id}/disable
+POST /api/v1/admin/users/{id}/disable
 Authorization: Bearer <access_token>
 ```
 
@@ -738,7 +755,7 @@ Authorization: Bearer <access_token>
 启用指定用户账户。
 
 ```
-POST /admin/users/{id}/enable
+POST /api/v1/admin/users/{id}/enable
 Authorization: Bearer <access_token>
 ```
 
@@ -760,7 +777,7 @@ Authorization: Bearer <access_token>
 删除指定用户账户。
 
 ```
-DELETE /admin/users/{id}
+DELETE /api/v1/admin/users/{id}
 Authorization: Bearer <access_token>
 ```
 
@@ -782,7 +799,7 @@ Authorization: Bearer <access_token>
 获取审计日志列表。
 
 ```
-GET /admin/audit-logs?page=1&pageSize=20
+GET /api/v1/admin/audit-logs?page=1&pageSize=20
 Authorization: Bearer <access_token>
 ```
 

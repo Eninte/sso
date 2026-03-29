@@ -7,6 +7,8 @@
 ### Added
 - 多语言支持（i18n）
 - 更多第三方登录提供商支持
+- **Mock Store 错误注入测试**：新增 7 个测试覆盖 `GetUserByEmailErr`、`CreateUserErr`、`GetTokenByRefreshTokenErr`、`GetUserByIDErr`、`RevokeTokenErr`、`RevokeAllUserTokensErr` 等关键存储故障路径
+- **审计日志写入验证测试**：新增 4 个测试验证 `LoginWithAudit`、`LogoutWithAudit`、`RefreshTokenWithAudit` 实际写入审计日志并验证事件类型、IP 地址、Success 标志
 
 ### Security
 
@@ -30,6 +32,7 @@
 - 修复 `AdminService` 结构体中未使用的 `client` 字段
 - 修复 `admin.go` 状态字符串硬编码问题，改用 `model.UserStatusDisabled` / `model.UserStatusActive` 常量
 - 修复 `admin.go` 版本号硬编码 `1.0.0`，改用 `Version` 变量（支持 `-ldflags` 注入）
+- **修复管理员路由前缀**：管理员端点从 `/admin/...` 移至 `/api/v1/admin/...`，与其他 API 端点保持一致，修复 E2E 测试中 11 个因 URL 不匹配导致的假阳性跳过
 
 ### Changed
 
@@ -40,6 +43,10 @@
 - `config.go` 新增 `ShutdownTimeout` 配置项（环境变量 `SHUTDOWN_TIMEOUT`，默认 30s）
 - CI 测试步骤添加覆盖率阈值检查（≥70%）
 - Makefile 新增 `test-coverage-check` 目标
+- **测试质量审计**：删除 15 个空壳/重复测试函数，新增 11 个有价值的测试函数
+- **审计测试可靠性**：`audit_test.go` 中 23 处 `time.Sleep(100ms)` 替换为 `require.Eventually` 轮询（10ms 间隔，2s 超时）
+- **Redis 测试隔离**：`cache/redis_test.go` 添加 `//go:build integration` 标签，避免无 Redis 环境下测试失败
+- **Mock Store 错误注入覆盖率**：从 3/32 (9.4%) 提升至 10/32 (31.3%)
 
 ---
 

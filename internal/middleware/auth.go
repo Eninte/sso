@@ -7,9 +7,12 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
+	"github.com/your-org/sso/internal/cache"
 	"github.com/your-org/sso/internal/crypto"
 	"github.com/your-org/sso/internal/store"
 )
@@ -55,16 +58,49 @@ func AuthMiddleware(jwtSvc *crypto.JWTService) func(http.Handler) http.Handler {
 
 // AuthMiddlewareWithStore 带数据库检查的认证中间件
 // 会检查token是否被撤销
+// 注意：此方法每次请求都查询数据库，建议使用AuthMiddlewareWithCache以获得更好性能
 func AuthMiddlewareWithStore(jwtSvc *crypto.JWTService, store store.Store) func(http.Handler) http.Handler {
 	return authMiddlewareWithBlacklist(jwtSvc, func(token string) bool {
-		// 检查token是否被撤销
 		ctx := context.Background()
 		tokenRecord, err := store.GetTokenByAccessToken(ctx, token)
 		if err != nil {
-			// token不存在，视为无效
 			return true
 		}
 		return tokenRecord.RevokedAt != nil
+	})
+}
+
+// AuthMiddlewareWithCache 带缓存层的认证中间件
+// 使用缓存存储Token撤销状态，减少数据库查询
+// 缓存TTL设置为与Access Token TTL一致，确保撤销状态及时更新
+func AuthMiddlewareWithCache(jwtSvc *crypto.JWTService, store store.Store, cacheSvc cache.Cache) func(http.Handler) http.Handler {
+	return authMiddlewareWithBlacklist(jwtSvc, func(token string) bool {
+		ctx := context.Background()
+		cacheKey := cache.TokenKey(token)
+
+		var revoked bool
+		err := cacheSvc.Get(ctx, cacheKey, &revoked)
+		if err == nil {
+			return revoked
+		}
+
+		if err != nil && !errors.Is(err, cache.ErrCacheMiss) {
+			tokenPreview := token
+			if len(token) > 8 {
+				tokenPreview = token[:8] + "..."
+			}
+			slog.Error("缓存查询失败", "error", err, "token", tokenPreview)
+		}
+
+		tokenRecord, err := store.GetTokenByAccessToken(ctx, token)
+		if err != nil {
+			_ = cacheSvc.Set(ctx, cacheKey, true, cache.TokenTTL)
+			return true
+		}
+
+		revoked = tokenRecord.RevokedAt != nil
+		_ = cacheSvc.Set(ctx, cacheKey, revoked, cache.TokenTTL)
+		return revoked
 	})
 }
 
