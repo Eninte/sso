@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/your-org/sso/internal/crypto"
+	"github.com/your-org/sso/internal/store"
 )
 
 // ============================================================================
@@ -49,6 +50,26 @@ const (
 // 验证请求中的Bearer Token
 // 将验证通过的用户信息添加到请求上下文
 func AuthMiddleware(jwtSvc *crypto.JWTService) func(http.Handler) http.Handler {
+	return authMiddlewareWithBlacklist(jwtSvc, nil)
+}
+
+// AuthMiddlewareWithStore 带数据库检查的认证中间件
+// 会检查token是否被撤销
+func AuthMiddlewareWithStore(jwtSvc *crypto.JWTService, store store.Store) func(http.Handler) http.Handler {
+	return authMiddlewareWithBlacklist(jwtSvc, func(token string) bool {
+		// 检查token是否被撤销
+		ctx := context.Background()
+		tokenRecord, err := store.GetTokenByAccessToken(ctx, token)
+		if err != nil {
+			// token不存在，视为无效
+			return true
+		}
+		return tokenRecord.RevokedAt != nil
+	})
+}
+
+// authMiddlewareWithBlacklist 内部实现
+func authMiddlewareWithBlacklist(jwtSvc *crypto.JWTService, blacklistedFunc func(token string) bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// 1. 从Authorization头获取Token
@@ -66,20 +87,28 @@ func AuthMiddleware(jwtSvc *crypto.JWTService) func(http.Handler) http.Handler {
 				return
 			}
 
-			// 3. 验证Token
-			claims, err := jwtSvc.ValidateAccessToken(parts[1])
+			token := parts[1]
+
+			// 3. 检查黑名单
+			if blacklistedFunc != nil && blacklistedFunc(token) {
+				writeAdminError(w, http.StatusUnauthorized, "Token已失效")
+				return
+			}
+
+			// 4. 验证Token
+			claims, err := jwtSvc.ValidateAccessToken(token)
 			if err != nil {
 				writeAdminError(w, http.StatusUnauthorized, "无效或过期的Token")
 				return
 			}
 
-			// 4. 将用户信息添加到上下文
+			// 5. 将用户信息添加到上下文
 			ctx := context.WithValue(r.Context(), UserIDKey, claims.RegisteredClaims.Subject)
 			ctx = context.WithValue(ctx, UserEmailKey, claims.Email)
 			ctx = context.WithValue(ctx, UserScopesKey, claims.Scopes)
 			ctx = context.WithValue(ctx, UserRoleKey, claims.Role)
 
-			// 5. 继续处理请求
+			// 6. 继续处理请求
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

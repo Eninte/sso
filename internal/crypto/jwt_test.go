@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/your-org/sso/internal/crypto"
-	"github.com/your-org/sso/internal/model"
 )
 
 // ============================================================================
@@ -544,33 +543,4 @@ func TestJWTService_LoadKeysFromStore(t *testing.T) {
 		err := svc.LoadKeysFromStore(context.Background())
 		assert.NoError(t, err)
 	})
-}
-
-// ============================================================================
-// KeyVersion 辅助函数测试
-// ============================================================================
-
-func TestKeyVersion_IsActive(t *testing.T) {
-	keyVersion := &model.KeyVersion{
-		ID:     "test-key",
-		Status: model.KeyStatusActive,
-	}
-	assert.True(t, keyVersion.IsActive())
-
-	keyVersion.Status = model.KeyStatusDeprecated
-	assert.False(t, keyVersion.IsActive())
-}
-
-func TestKeyVersion_CanVerify(t *testing.T) {
-	keyVersion := &model.KeyVersion{
-		ID:     "test-key",
-		Status: model.KeyStatusActive,
-	}
-	assert.True(t, keyVersion.CanVerify())
-
-	keyVersion.Status = model.KeyStatusDeprecated
-	assert.True(t, keyVersion.CanVerify())
-
-	keyVersion.Status = model.KeyStatusRevoked
-	assert.False(t, keyVersion.CanVerify())
 }

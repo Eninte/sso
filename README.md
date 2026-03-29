@@ -194,9 +194,10 @@ make docker-logs
 
 | 方法 | 路径 | 描述 | 认证 |
 |------|------|------|------|
-| GET | /api/v1/userinfo | 获取用户信息 | 是 |
+| GET | /api/v1/userinfo | 获取用户信息（含email_verified） | 是 |
 | POST | /api/v1/verify-email/send | 发送验证邮件 | 是 |
 | POST | /api/v1/change-password | 修改密码 | 是 |
+| POST | /api/v1/logout-all | 登出所有设备 | 是 |
 
 ### MFA端点（需认证）
 
@@ -228,10 +229,12 @@ make docker-logs
 |------|------|------|------|
 | GET | /admin/health | 系统健康检查 | 是 |
 | POST | /admin/cleanup | 清理过期数据 | 是 |
-| GET | /admin/users | 用户列表 | 是 |
+| GET | /admin/users | 用户列表（分页） | 是 |
 | GET | /admin/users/{id} | 用户详情 | 是 |
-| POST | /admin/users/disable | 禁用用户 | 是 |
-| POST | /admin/users/enable | 启用用户 | 是 |
+| POST | /admin/users/{id}/disable | 禁用用户 | 是 |
+| POST | /admin/users/{id}/enable | 启用用户 | 是 |
+| DELETE | /admin/users/{id} | 删除用户 | 是 |
+| GET | /admin/audit-logs | 审计日志（分页） | 是 |
 
 ## 目录结构
 
@@ -275,6 +278,7 @@ sso/
 - Refresh Token有效期7天
 - Token轮换机制（每次刷新生成新Token）
 - Token撤销支持
+- Token黑名单检查（已撤销Token无法使用）
 
 ### 账户安全
 - 登录失败锁定机制（默认5次失败锁定30分钟）

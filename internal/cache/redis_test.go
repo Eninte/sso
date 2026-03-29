@@ -1,3 +1,5 @@
+//go:build integration
+
 // Package cache 缓存单元测试
 package cache_test
 

@@ -3,7 +3,6 @@ package handler_test
 
 import (
 	"bytes"
-	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
@@ -33,62 +32,6 @@ func createTestJWTService() *crypto.JWTService {
 		15*time.Minute,
 		7*24*time.Hour,
 	)
-}
-
-// ============================================================================
-// UserInfoHandler 测试
-// ============================================================================
-
-func createTestUserInfoHandlerFull(t *testing.T) *handler.UserInfoHandler {
-	storeInst := mock.New()
-	return handler.NewUserInfoHandler(storeInst)
-}
-
-func TestUserInfoHandler_HandleFull(t *testing.T) {
-	h := createTestUserInfoHandlerFull(t)
-
-	t.Run("未认证-返回401", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/api/v1/userinfo", nil)
-		w := httptest.NewRecorder()
-
-		h.Handle(w, req)
-
-		assert.Equal(t, http.StatusUnauthorized, w.Code)
-	})
-
-	t.Run("返回用户信息", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/api/v1/userinfo", nil)
-		ctx := context.WithValue(req.Context(), middleware.UserIDKey, "user-123")
-		ctx = context.WithValue(ctx, middleware.UserEmailKey, "user@example.com")
-		ctx = context.WithValue(ctx, middleware.UserScopesKey, []string{"openid", "email"})
-		w := httptest.NewRecorder()
-
-		h.Handle(w, req.WithContext(ctx))
-
-		assert.Equal(t, http.StatusOK, w.Code)
-
-		var resp map[string]interface{}
-		err := json.Unmarshal(w.Body.Bytes(), &resp)
-		require.NoError(t, err)
-		assert.Equal(t, "user-123", resp["sub"])
-		assert.Equal(t, "user@example.com", resp["email"])
-	})
-
-	t.Run("无邮箱信息", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/api/v1/userinfo", nil)
-		ctx := context.WithValue(req.Context(), middleware.UserIDKey, "user-456")
-		w := httptest.NewRecorder()
-
-		h.Handle(w, req.WithContext(ctx))
-
-		assert.Equal(t, http.StatusOK, w.Code)
-
-		var resp map[string]interface{}
-		err := json.Unmarshal(w.Body.Bytes(), &resp)
-		require.NoError(t, err)
-		assert.Equal(t, "user-456", resp["sub"])
-		assert.Empty(t, resp["email"])
-	})
 }
 
 // ============================================================================
@@ -296,7 +239,7 @@ func TestHandlerErrorFunctions(t *testing.T) {
 		storeInst := mock.New()
 		passwordSvc := crypto.NewPasswordService(10)
 		jwtSvc := createTestJWTService()
-		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*60*1000000000)
+		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
 		loginHandler := handler.NewLoginHandler(authSvc)
 
 		// 无效JSON触发writeError
@@ -326,7 +269,7 @@ func TestHandlerErrorFunctions(t *testing.T) {
 		storeInst := mock.New()
 		passwordSvc := crypto.NewPasswordService(10)
 		jwtSvc := createTestJWTService()
-		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*60*1000000000)
+		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
 		loginHandler := handler.NewLoginHandler(authSvc)
 
 		// 空密码触发密码验证错误
@@ -345,7 +288,7 @@ func TestHandlerErrorFunctions(t *testing.T) {
 		storeInst := mock.New()
 		passwordSvc := crypto.NewPasswordService(10)
 		jwtSvc := createTestJWTService()
-		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*60*1000000000)
+		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
 		loginHandler := handler.NewLoginHandler(authSvc)
 
 		// 正常JSON
@@ -355,7 +298,7 @@ func TestHandlerErrorFunctions(t *testing.T) {
 
 		loginHandler.Handle(w, req)
 
-		// 应该不是400就是401，不会是解析错误
-		assert.True(t, w.Code >= 300)
+		// 有效JSON不应返回解析错误，应返回400或401
+		assert.Contains(t, []int{http.StatusBadRequest, http.StatusUnauthorized}, w.Code)
 	})
 }

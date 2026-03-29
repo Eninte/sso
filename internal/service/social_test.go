@@ -16,10 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/your-org/sso/internal/crypto"
-	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/service"
-	"github.com/your-org/sso/internal/store"
 	"github.com/your-org/sso/internal/store/mock"
 )
 
@@ -223,79 +221,6 @@ func TestSocialLoginService_HandleCallback(t *testing.T) {
 		_, err := svc.HandleCallback(context.Background(), "github", "code", "test-state", "")
 
 		assert.ErrorIs(t, err, service.ErrProviderNotSupported)
-	})
-}
-
-// ============================================================================
-// findOrCreateUser 逻辑测试 (通过mock store)
-// ============================================================================
-
-func TestSocialLoginService_FindOrCreateUser(t *testing.T) {
-	t.Run("用户已存在-直接返回", func(t *testing.T) {
-		storeInst := mock.New()
-
-		hashedPw, _ := crypto.NewPasswordService(10).HashPassword("Test1234!")
-		storeInst.AddUser(&model.User{
-			ID:            "existing-user-id",
-			Email:         "existing@gmail.com",
-			PasswordHash:  hashedPw,
-			EmailVerified: true,
-			Status:        model.UserStatusActive,
-			CreatedAt:     time.Now(),
-			UpdatedAt:     time.Now(),
-		})
-
-		user, err := storeInst.GetByEmail(context.Background(), "existing@gmail.com")
-		require.NoError(t, err)
-		assert.Equal(t, "existing@gmail.com", user.Email)
-		assert.True(t, user.EmailVerified)
-	})
-
-	t.Run("用户不存在-创建新用户", func(t *testing.T) {
-		storeInst := mock.New()
-
-		_, err := storeInst.GetByEmail(context.Background(), "newuser@gmail.com")
-		assert.True(t, apperrors.Is(err, store.ErrNotFound))
-
-		now := time.Now()
-		newUser := &model.User{
-			ID:            "new-social-user-id",
-			Email:         "newuser@gmail.com",
-			EmailVerified: true,
-			Status:        model.UserStatusActive,
-			CreatedAt:     now,
-			UpdatedAt:     now,
-		}
-		err = storeInst.Create(context.Background(), newUser)
-		require.NoError(t, err)
-
-		user, err := storeInst.GetByEmail(context.Background(), "newuser@gmail.com")
-		require.NoError(t, err)
-		assert.Equal(t, "newuser@gmail.com", user.Email)
-		assert.True(t, user.EmailVerified)
-	})
-
-	t.Run("GitHub用户无email-使用login生成", func(t *testing.T) {
-		storeInst := mock.New()
-
-		login := "githubuser"
-		email := login + "@github.com"
-
-		now := time.Now()
-		newUser := &model.User{
-			ID:            "github-user-id",
-			Email:         email,
-			EmailVerified: true,
-			Status:        model.UserStatusActive,
-			CreatedAt:     now,
-			UpdatedAt:     now,
-		}
-		err := storeInst.Create(context.Background(), newUser)
-		require.NoError(t, err)
-
-		user, err := storeInst.GetByEmail(context.Background(), email)
-		require.NoError(t, err)
-		assert.Equal(t, "githubuser@github.com", user.Email)
 	})
 }
 

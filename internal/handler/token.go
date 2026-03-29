@@ -174,7 +174,7 @@ func (h *TokenHandler) HandleLogoutAll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 撤销用户所有Token
-	if err := h.authSvc.LogoutAllDevices(r.Context(), userID); err != nil {
+	if err := h.authSvc.LogoutAll(r.Context(), userID); err != nil {
 		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeRevokeTokenFailed))
 		return
 	}

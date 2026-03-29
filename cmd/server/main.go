@@ -225,12 +225,13 @@ func main() {
 
 	// 受保护的端点 (需要认证)
 	protected := api.PathPrefix("").Subrouter()
-	protected.Use(middleware.AuthMiddleware(jwtSvc))
+	protected.Use(middleware.AuthMiddlewareWithStore(jwtSvc, store))
 	protected.HandleFunc("/userinfo", userInfoHandler.Handle).Methods("GET")
 	protected.HandleFunc("/authorize", authorizeHandler.HandleAuthorize).Methods("GET")
 	protected.HandleFunc("/authorize/approve", authorizeHandler.HandleApprove).Methods("POST")
 	protected.HandleFunc("/verify-email/send", userHandler.HandleSendVerificationEmail).Methods("POST")
 	protected.HandleFunc("/change-password", userHandler.HandleChangePassword).Methods("POST")
+	protected.HandleFunc("/logout-all", tokenHandler.HandleLogoutAll).Methods("POST")
 	protected.HandleFunc("/mfa/setup", mfaHandler.HandleSetupMFA).Methods("POST")
 	protected.HandleFunc("/mfa/verify", mfaHandler.HandleVerifyMFA).Methods("POST")
 	protected.HandleFunc("/mfa/disable", mfaHandler.HandleDisableMFA).Methods("POST")
@@ -238,12 +239,17 @@ func main() {
 
 	// 管理员端点 (需要认证 + 管理员角色)
 	admin := router.PathPrefix("/admin").Subrouter()
-	admin.Use(middleware.AuthMiddleware(jwtSvc))
+	admin.Use(middleware.AuthMiddlewareWithStore(jwtSvc, store))
 	admin.Use(middleware.RequireAdmin())
 	admin.HandleFunc("/health", adminHandler.HandleSystemHealth).Methods("GET")
 	admin.HandleFunc("/cleanup", adminHandler.HandleCleanup).Methods("POST")
 	admin.HandleFunc("/users", adminHandler.HandleListUsers).Methods("GET")
 	admin.HandleFunc("/users/{id}", adminHandler.HandleGetUser).Methods("GET")
+	admin.HandleFunc("/users/{id}/disable", adminHandler.HandleDisableUser).Methods("POST")
+	admin.HandleFunc("/users/{id}/enable", adminHandler.HandleEnableUser).Methods("POST")
+	admin.HandleFunc("/users/{id}", adminHandler.HandleDeleteUser).Methods("DELETE")
+	admin.HandleFunc("/audit-logs", adminHandler.HandleAuditLogs).Methods("GET")
+	// 兼容旧的路径格式
 	admin.HandleFunc("/users/disable", adminHandler.HandleDisableUser).Methods("POST")
 	admin.HandleFunc("/users/enable", adminHandler.HandleEnableUser).Methods("POST")
 

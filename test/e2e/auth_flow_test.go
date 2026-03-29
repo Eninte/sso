@@ -269,22 +269,21 @@ func TestLogoutAllDevices(t *testing.T) {
 	require.NoError(t, err)
 
 	// 登出所有设备（使用第一个token）
-	logoutResp, _, err := doRequest("POST", "/api/v1/token/revoke-all", nil, tokens1.AccessToken)
-	// 如果端点不存在，跳过此测试
-	if err != nil || logoutResp.StatusCode == http.StatusNotFound {
-		t.Skip("登出所有设备端点未实现")
-		return
-	}
+	logoutResp, _, err := doRequest("POST", "/api/v1/logout-all", nil, tokens1.AccessToken)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, logoutResp.StatusCode)
 
 	// 验证两个Token都失效
 	time.Sleep(100 * time.Millisecond) // 等待异步操作
 
 	resp1, _, _ := doRequest("GET", "/api/v1/userinfo", nil, tokens1.AccessToken)
 	// 注意：根据实现，可能返回401或403
-	t.Logf("Token1状态: %d", resp1.StatusCode)
+	assert.True(t, resp1.StatusCode == http.StatusUnauthorized || resp1.StatusCode == http.StatusForbidden,
+		"Token1应该失效，实际状态码: %d", resp1.StatusCode)
 
 	resp2, _, _ := doRequest("GET", "/api/v1/userinfo", nil, tokens2.AccessToken)
-	t.Logf("Token2状态: %d", resp2.StatusCode)
+	assert.True(t, resp2.StatusCode == http.StatusUnauthorized || resp2.StatusCode == http.StatusForbidden,
+		"Token2应该失效，实际状态码: %d", resp2.StatusCode)
 }
 
 // ============================================================================

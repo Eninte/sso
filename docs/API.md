@@ -716,16 +716,15 @@ Authorization: Bearer <access_token>
 禁用指定用户账户。
 
 ```
-POST /admin/users/disable
+POST /admin/users/{id}/disable
 Authorization: Bearer <access_token>
-Content-Type: application/json
 ```
 
-**请求参数**:
+**路径参数**:
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| user_id | string | 是 | 用户ID |
+| 参数 | 说明 |
+|------|------|
+| id | 用户ID |
 
 **成功响应** `200 OK`:
 ```json
@@ -739,21 +738,79 @@ Content-Type: application/json
 启用指定用户账户。
 
 ```
-POST /admin/users/enable
+POST /admin/users/{id}/enable
 Authorization: Bearer <access_token>
-Content-Type: application/json
 ```
 
-**请求参数**:
+**路径参数**:
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| user_id | string | 是 | 用户ID |
+| 参数 | 说明 |
+|------|------|
+| id | 用户ID |
 
 **成功响应** `200 OK`:
 ```json
 {
   "message": "用户已启用"
+}
+```
+
+### 删除用户
+
+删除指定用户账户。
+
+```
+DELETE /admin/users/{id}
+Authorization: Bearer <access_token>
+```
+
+**路径参数**:
+
+| 参数 | 说明 |
+|------|------|
+| id | 用户ID |
+
+**成功响应** `200 OK`:
+```json
+{
+  "message": "用户已删除"
+}
+```
+
+### 审计日志
+
+获取审计日志列表。
+
+```
+GET /admin/audit-logs?page=1&pageSize=20
+Authorization: Bearer <access_token>
+```
+
+**查询参数**:
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| page | 否 | 页码（默认1） |
+| pageSize | 否 | 每页数量（默认20） |
+| event_type | 否 | 事件类型过滤 |
+
+**成功响应** `200 OK`:
+```json
+{
+  "logs": [
+    {
+      "id": "20260328153000-ABC123",
+      "event_type": "user.login",
+      "user_id": "550e8400-e29b-41d4-a716-446655440000",
+      "ip_address": "192.168.1.1",
+      "success": true,
+      "timestamp": "2026-03-28T15:30:00Z"
+    }
+  ],
+  "total": 1000,
+  "page": 1,
+  "page_size": 20,
+  "total_pages": 50
 }
 ```
 
