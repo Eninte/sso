@@ -194,11 +194,19 @@ func registerUser(email, password string) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("注册失败: %d", resp.StatusCode)
 	}
 
-	var user map[string]interface{}
-	if err := json.Unmarshal(body, &user); err != nil {
+	// 响应格式: {"data": {"email": "...", "user_id": "..."}, "message": "..."}
+	var response map[string]interface{}
+	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, err
 	}
-	return user, nil
+
+	// 提取 data 字段
+	data, ok := response["data"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("响应格式错误: %s", body)
+	}
+
+	return data, nil
 }
 
 // loginUser 登录用户并返回Token
@@ -215,8 +223,20 @@ func loginUser(email, password string) (*loginResponse, error) {
 		return nil, fmt.Errorf("登录失败: %d", resp.StatusCode)
 	}
 
+	// 响应格式: {"data": {"access_token": "...", ...}, ...}
+	var response map[string]interface{}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, err
+	}
+
+	data, ok := response["data"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("响应格式错误: %s", body)
+	}
+
+	dataBytes, _ := json.Marshal(data)
 	var tokens loginResponse
-	if err := json.Unmarshal(body, &tokens); err != nil {
+	if err := json.Unmarshal(dataBytes, &tokens); err != nil {
 		return nil, err
 	}
 	return &tokens, nil

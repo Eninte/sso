@@ -88,6 +88,9 @@ func TestLoginFlow(t *testing.T) {
 	_, err := registerUser(email, password)
 	require.NoError(t, err)
 
+	// 等待数据库完全提交
+	time.Sleep(100 * time.Millisecond)
+
 	t.Run("成功登录", func(t *testing.T) {
 		tokens, err := loginUser(email, password)
 		require.NoError(t, err)
