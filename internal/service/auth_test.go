@@ -707,6 +707,30 @@ func TestAuthService_LogoutAllWithAudit(t *testing.T) {
 		err := authSvc.LogoutAllWithAudit(ctx, testUser.ID, auditCtx)
 		assert.NoError(t, err)
 	})
+
+	t.Run("撤销Token失败", func(t *testing.T) {
+		store := mock.New()
+		store.RevokeAllUserTokensErr = assert.AnError
+		passwordSvc := crypto.NewPasswordService(10)
+		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test-issuer", 15*time.Minute, 7*24*time.Hour)
+		authSvc := service.NewAuthService(store, passwordSvc, jwtSvc, 5, 30*time.Minute)
+
+		// 创建测试用户
+		testUser := &model.User{
+			ID:           "test-user-revoke-fail",
+			Email:        "revokefail@example.com",
+			PasswordHash: "hash",
+			Status:       model.UserStatusActive,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}
+		store.AddUser(testUser)
+
+		err := authSvc.LogoutAllWithAudit(ctx, testUser.ID, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "登出所有设备失败")
+	})
 }
 
 // ============================================================================

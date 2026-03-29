@@ -10,7 +10,7 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    
+
     services:
       postgres:
         image: postgres:15
@@ -25,6 +25,17 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
+      redis:
+        image: redis:7-alpine
+        env:
+          REDIS_PASSWORD: testpassword
+        options: >-
+          --health-cmd "redis-cli -a testpassword ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
 
     steps:
       - name: Checkout code
@@ -34,28 +45,30 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+          cache: true
 
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-
-      - name: Download dependencies
-        run: go mod download
+      - name: Install gotestsum
+        run: go install gotest.tools/gotestsum@latest
 
       - name: Run tests
         env:
           DATABASE_URL: postgres://sso:testpassword@localhost:5432/sso_test?sslmode=disable
-        run: go test -v -race -coverprofile=coverage.out ./...
+          REDIS_TEST_ADDR: localhost:6379
+          REDIS_PASSWORD: testpassword
+        run: gotestsum --junitfile test-results.xml --format pkgname -- -race -coverprofile=coverage.out ./...
+
+      - name: Upload test report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: test-results.xml
 
       - name: Check coverage threshold
         run: |
           COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
-          if [ $(echo "$COVERAGE < 70" | bc) -eq 1 ]; then
-            echo "Coverage $COVERAGE% is below threshold 70%"
+          if [ $(echo "$COVERAGE < 75" | bc) -eq 1 ]; then
+            echo "Coverage $COVERAGE% is below threshold 75%"
             exit 1
           fi
           echo "Coverage: $COVERAGE%"
@@ -69,7 +82,7 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -78,6 +91,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+          cache: true
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v4
@@ -87,7 +101,7 @@ jobs:
   security:
     name: Security Scan
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -96,6 +110,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+          cache: true
 
       - name: Run gosec
         uses: securego/gosec@master
@@ -110,8 +125,8 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [test, lint]
-    
+    needs: [test, lint, security]
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -120,6 +135,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+          cache: true
 
       - name: Build
         run: go build -o bin/sso cmd/server/main.go
@@ -133,9 +149,9 @@ jobs:
   docker:
     name: Docker Build
     runs-on: ubuntu-latest
-    needs: [test, lint]
+    needs: [test, lint, security]
     if: github.ref == 'refs/heads/main'
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -155,6 +171,8 @@ jobs:
           context: .
           file: docker/Dockerfile
           push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/sso:latest
             ${{ secrets.DOCKER_USERNAME }}/sso:${{ github.sha }}

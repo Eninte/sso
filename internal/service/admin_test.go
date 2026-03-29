@@ -126,6 +126,33 @@ func TestAdminService_DisableUser(t *testing.T) {
 		err := adminSvc.DisableUser(ctx, "nonexistent-id")
 		assert.Error(t, err)
 	})
+
+	t.Run("禁用用户时撤销Token失败", func(t *testing.T) {
+		store := mock.New()
+		store.RevokeAllUserTokensErr = assert.AnError
+		adminSvc := service.NewAdminService(store)
+		ctx := context.Background()
+
+		// 添加测试用户
+		user := &model.User{
+			ID:           "disable-revoke-fail-id",
+			Email:        "disable-revoke@example.com",
+			PasswordHash: "hash",
+			Status:       model.UserStatusActive,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}
+		_ = store.Create(ctx, user)
+
+		// 撤销失败不应影响主流程
+		err := adminSvc.DisableUser(ctx, "disable-revoke-fail-id")
+		require.NoError(t, err)
+
+		// 验证用户状态已更改（主流程成功）
+		result, err := store.GetByID(ctx, "disable-revoke-fail-id")
+		require.NoError(t, err)
+		assert.Equal(t, "disabled", result.Status)
+	})
 }
 
 func TestAdminService_EnableUser(t *testing.T) {
@@ -175,6 +202,17 @@ func TestAdminService_SystemHealth(t *testing.T) {
 		assert.Equal(t, "ok", health.Database)
 		assert.Equal(t, "dev", health.Version)
 		assert.NotZero(t, health.Timestamp)
+	})
+
+	t.Run("数据库连接失败", func(t *testing.T) {
+		store := mock.New()
+		store.PingErr = assert.AnError
+		adminSvc := service.NewAdminService(store)
+
+		health, err := adminSvc.SystemHealth(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, "ok", health.Status)
+		assert.Equal(t, "error", health.Database)
 	})
 }
 

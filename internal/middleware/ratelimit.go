@@ -108,6 +108,11 @@ func getClientIP(r *http.Request) string {
 // Allow 检查是否允许请求
 // 返回true表示允许，false表示超过限制
 func (rl *RateLimiter) Allow(clientIP string) bool {
+	// limit <= 0 表示禁用限流
+	if rl.limit <= 0 {
+		return true
+	}
+
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 

@@ -6,6 +6,7 @@
 APP_NAME=sso
 BUILD_DIR=./bin
 MIGRATION_DIR=./migrations
+TEST_DATABASE_URL ?= postgres://sso:sso@192.168.1.3:5432/sso_test?sslmode=disable
 
 # ============================================================================
 # 默认目标
@@ -40,23 +41,29 @@ dev: ## 开发模式: 启动依赖服务并运行应用
 # ============================================================================
 .PHONY: test
 test: ## 运行所有测试
-	gotestsum --format pkgname -- -race ./...
+	DATABASE_URL="$(TEST_DATABASE_URL)" gotestsum --format pkgname -- -race ./...
 
 .PHONY: test-verbose
 test-verbose: ## 运行测试（详细输出）
-	gotestsum --format standard-verbose -- -race -count=1 ./...
+	DATABASE_URL="$(TEST_DATABASE_URL)" gotestsum --format standard-verbose -- -race -count=1 ./...
 
 .PHONY: test-unit
 test-unit: ## 运行单元测试 (短测试)
-	gotestsum --format pkgname -- -race -short ./...
+	DATABASE_URL="$(TEST_DATABASE_URL)" gotestsum --format pkgname -- -race -short ./...
 
 .PHONY: test-integration
 test-integration: ## 运行集成测试
 	gotestsum --format pkgname -- -race -tags=integration ./...
 
+.PHONY: test-e2e
+test-e2e: ## 运行端到端测试（需要服务运行中）
+	RATE_LIMIT_REQUESTS=0 DATABASE_URL="$(TEST_DATABASE_URL)" gotestsum --format pkgname -- -race -tags=e2e ./test/e2e/...
+
 .PHONY: test-coverage
 test-coverage: ## 生成测试覆盖率报告（HTML）
-	go test -coverprofile=coverage.out ./...
+	DATABASE_URL="$(TEST_DATABASE_URL)" go test -coverprofile=coverage.out $(shell go list ./internal/... | grep -v '/store/mock')
+	go tool cover -func=coverage.out | grep "total:"
+	@echo "---"
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "覆盖率报告: coverage.html"
 

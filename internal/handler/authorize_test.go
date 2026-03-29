@@ -165,7 +165,7 @@ func TestAuthorizeHandler_HandleApprove(t *testing.T) {
 
 		h.HandleApprove(w, req)
 
-		// 触发 writeOAuthError 路径
-		assert.True(t, w.Code >= 400)
+		// 无效客户端应返回400 Bad Request
+		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 }

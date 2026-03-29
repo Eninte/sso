@@ -169,17 +169,23 @@ func TestUserService_ForgotPassword(t *testing.T) {
 	})
 
 	t.Run("用户存在", func(t *testing.T) {
-		mockStore.Reset()
+		// 使用带mock邮件服务的UserService
+		userSvc, mockStore, mockSender := createTestUserServiceWithEmail()
+
 		user := &model.User{
 			ID:    "user-123",
 			Email: "test@example.com",
 		}
 		mockStore.AddUser(user)
 
-		// emailSvc为nil，会panic或返回错误
-		// 我们只测试用户存在的情况不会因为用户不存在而返回
-		// 实际发送邮件需要配置emailSvc，这里跳过
-		t.Skip("需要配置emailSvc才能测试")
+		ctx := context.Background()
+
+		err := userSvc.ForgotPassword(ctx, "test@example.com")
+
+		assert.NoError(t, err)
+		// 验证邮件已发送
+		assert.Len(t, mockSender.sentMessages, 1)
+		assert.Contains(t, string(mockSender.sentMessages[0].Msg), "重置密码")
 	})
 }
 

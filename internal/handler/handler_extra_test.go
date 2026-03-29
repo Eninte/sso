@@ -2,6 +2,7 @@
 package handler_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -307,6 +308,57 @@ func TestHandlerErrorFunctions(t *testing.T) {
 
 		loginHandler.Handle(w, req)
 
-		assert.True(t, w.Code >= 400)
+		assert.Equal(t, http.StatusBadRequest, w.Code,
+			"无效JSON请求应返回400 Bad Request")
+	})
+
+	t.Run("writeOAuthError - ErrInvalidClient", func(t *testing.T) {
+		storeInst := mock.New()
+		tokenSvc := service.NewTokenService(createTestJWTService(), storeInst)
+		oauthSvc := service.NewOAuthService(storeInst, tokenSvc)
+		h := handler.NewAuthorizeHandler(oauthSvc)
+
+		req := httptest.NewRequest("GET", "/authorize?client_id=invalid&redirect_uri=http://localhost", nil)
+		w := httptest.NewRecorder()
+		h.HandleAuthorize(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("writeValidationError - validation error triggers 400", func(t *testing.T) {
+		storeInst := mock.New()
+		passwordSvc := crypto.NewPasswordService(10)
+		jwtSvc := createTestJWTService()
+		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*60*1000000000)
+		loginHandler := handler.NewLoginHandler(authSvc)
+
+		// 空密码触发密码验证错误
+		req := httptest.NewRequest("POST", "/login", bytes.NewReader([]byte(`{"email":"test@example.com","password":""}`)))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		loginHandler.Handle(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code,
+			"空密码应返回400 Bad Request")
+	})
+
+	// 测试 helpers.go 中的工具函数
+	t.Run("decodeJSON - 正常解析", func(t *testing.T) {
+		storeInst := mock.New()
+		passwordSvc := crypto.NewPasswordService(10)
+		jwtSvc := createTestJWTService()
+		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*60*1000000000)
+		loginHandler := handler.NewLoginHandler(authSvc)
+
+		// 正常JSON
+		req := httptest.NewRequest("POST", "/login", bytes.NewReader([]byte(`{"email":"test@example.com","password":"Pass123!"}`)))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		loginHandler.Handle(w, req)
+
+		// 应该不是400就是401，不会是解析错误
+		assert.True(t, w.Code >= 300)
 	})
 }

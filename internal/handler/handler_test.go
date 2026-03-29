@@ -17,6 +17,7 @@ import (
 
 	"github.com/your-org/sso/internal/crypto"
 	"github.com/your-org/sso/internal/handler"
+	"github.com/your-org/sso/internal/middleware"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/service"
 	"github.com/your-org/sso/internal/store/mock"
@@ -334,8 +335,45 @@ func TestRegisterHandler_Handle(t *testing.T) {
 // ============================================================================
 
 func TestUserInfoHandler_Handle(t *testing.T) {
-	// 这个测试需要认证中间件，简化测试
-	t.Skip("需要认证中间件支持，将在集成测试中覆盖")
+	store := mock.New()
+	passwordSvc := crypto.NewPasswordService(10)
+	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	jwtSvc := crypto.NewJWTService(
+		privateKey,
+		&privateKey.PublicKey,
+		"test-issuer",
+		15*time.Minute,
+		7*24*time.Hour,
+	)
+	authSvc := service.NewAuthService(store, passwordSvc, jwtSvc, 5, 30*time.Minute)
+	h := handler.NewUserInfoHandler(authSvc)
+
+	t.Run("未认证-返回401", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v1/userinfo", nil)
+		w := httptest.NewRecorder()
+
+		h.Handle(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+
+	t.Run("已认证-返回用户信息", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v1/userinfo", nil)
+		ctx := context.WithValue(req.Context(), middleware.UserIDKey, "user-123")
+		ctx = context.WithValue(ctx, middleware.UserEmailKey, "user@example.com")
+		ctx = context.WithValue(ctx, middleware.UserScopesKey, []string{"openid", "email"})
+		w := httptest.NewRecorder()
+
+		h.Handle(w, req.WithContext(ctx))
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		assert.Equal(t, "user-123", resp["sub"])
+		assert.Equal(t, "user@example.com", resp["email"])
+	})
 }
 
 // ============================================================================
