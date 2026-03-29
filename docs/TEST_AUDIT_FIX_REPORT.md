@@ -40,10 +40,11 @@
 
 ### 1.3 E2E 测试跳过情况
 
-共 **25 处 `t.Skip()`**，主要集中在：
-- `admin_flow_test.go`：16 处（管理员端点未实现）
-- `email_verify_test.go`、`password_reset_test.go`：5 处（缺少测试基础设施）
-- `token_test.go`：2 处（过期 Token 测试）
+共 **24 处 `t.Skip()`**，主要集中在：
+- `admin_flow_test.go`：16 处（11 处因 URL 前缀不匹配，5 处因管理员账户未配置）
+- `email_verify_test.go`：3 处（缺少测试基础设施）
+- `token_test.go`：3 处（端点未实现 / 测试设计限制）
+- `password_reset_test.go`：2 处（端点未实现 / 缺少测试基础设施）
 
 ---
 
@@ -137,35 +138,35 @@
 
 ## 三、未修复问题（建议后续处理）
 
-### 3.1 Mock Store 29 个未使用错误注入字段
+### 3.1 Mock Store 24 个未使用错误注入字段
 
 **严重程度**: MEDIUM
 
-29 个错误注入字段从未在测试中设置。建议按优先级补充错误路径测试：
-1. `CreateUserErr`、`GetUserByEmailErr` — 用户 CRUD 故障路径
-2. `StoreTokenErr`、`GetTokenByRefreshTokenErr` — Token 存储故障路径
-3. `GetActiveKeyErr`、`StoreKeyErr` — 密钥管理故障路径
+24 个错误注入字段从未在测试中设置（已从 29 减少到 24）。建议按优先级补充错误路径测试：
+1. `StoreTokenErr`、`GetTokenByAccessTokenErr` — Token 存储故障路径
+2. `GetActiveKeyErr`、`StoreKeyErr` — 密钥管理故障路径
+3. `StoreAuditLogErr`、`CleanupExpiredErr` — 审计和清理故障路径
 
-### 3.2 `auth_test.go` 中 `ValidateToken` 近似重复
+### ~~3.2 `auth_test.go` 中 `ValidateToken` 近似重复~~
 
-**严重程度**: LOW
+**状态**: 已修复（第四轮）
 
-`TestAuthService_ValidateToken` 和 `TestAuthService_ValidateToken_Extended` 有相似的 "验证有效Token" 和 "验证无效Token" 子测试。建议合并。
+`TestAuthService_ValidateToken_Extended` 已删除。`TestAuthService_ValidateToken` 完整覆盖 3 种场景。
 
-### 3.3 `auth_test.go` 审计相关测试不验证审计内容
+### ~~3.3 `auth_test.go` 审计相关测试不验证审计内容~~
+
+**状态**: 已修复（第四轮）
+
+已新增 3 个 `VerifyLog` 测试函数，使用 `require.Eventually` 验证审计日志内容。
+
+### 3.4 E2E 测试 13 处 `t.Skip()`
 
 **严重程度**: MEDIUM
 
-`TestAuthService_LoginWithAudit`、`TestAuthService_LogoutWithAudit` 等测试只验证返回值，不验证审计日志是否实际写入。建议添加审计日志验证。
-
-### 3.4 E2E 测试 25 处 `t.Skip()`
-
-**严重程度**: MEDIUM
-
-- `admin_flow_test.go` 中 16 处跳过（管理员端点未实现）
-- 安全相关测试（Token 过期、密码重置安全性）始终跳过
-
-建议：要么实现缺失的端点，要么删除跳过测试以减少噪音。
+修复管理员路由前缀后，假阳性跳过从 24 降至 13：
+- 5 处因管理员账户未配置（需设置 `E2E_ADMIN_EMAIL` / `E2E_ADMIN_PASSWORD`）
+- 5 处因端点确实不存在（`/api/v1/resend-verification` 等）
+- 3 处因测试设计限制（Token 过期、密码重置安全性）
 
 ### 3.5 Linter 配置对测试文件过于宽松
 
@@ -179,9 +180,9 @@
 
 ### 4.1 `internal/service/auth_test.go` — Mock Store 错误注入测试
 
-**验证结果**：确认 29/32 错误注入字段从未被测试。已为 6 个关键字段补充错误路径测试。
+**验证结果**：确认 29/32 错误注入字段从未被测试。已为 5 个关键字段补充错误路径测试。
 
-**新增测试函数**：
+**新增测试函数**（5 个顶层函数，7 个子测试）：
 
 | 测试函数 | 覆盖的错误注入字段 | 验证行为 |
 |----------|-------------------|---------|
@@ -193,20 +194,20 @@
 | `TestAuthService_Logout_StoreErrors/RevokeToken失败` | `RevokeTokenErr` | 登出时撤销Token失败返回错误 |
 | `TestAuthService_LogoutAll_StoreErrors/RevokeAllUserTokens失败` | `RevokeAllUserTokensErr` | 登出所有设备时失败返回错误 |
 
-**影响**：错误注入字段使用率从 3/32 (9.4%) 提升至 10/32 (31.3%)。
+**影响**：错误注入字段使用率从 3/32 (9.4%) 提升至 8/32 (25.0%)。新增 5 个独立错误注入字段覆盖。
 
 ### 4.2 `internal/service/auth_test.go` — 审计日志写入验证
 
 **验证结果**：确认 `LoginWithAudit`、`LogoutWithAudit`、`RefreshTokenWithAudit` 等测试仅验证返回值，不验证审计日志是否实际写入。
 
-**新增测试函数**：
+**新增测试函数**（3 个顶层函数，4 个子测试）：
 
-| 测试函数 | 验证内容 |
-|----------|---------|
-| `TestAuthService_LoginWithAudit_VerifyLog/登录成功写入审计日志` | 验证 `EventUserLogin` 日志写入、IP 地址正确、Success=true |
-| `TestAuthService_LoginWithAudit_VerifyLog/登录失败写入审计日志` | 验证 `EventUserLogin` 日志写入、Success=false |
-| `TestAuthService_LogoutWithAudit_VerifyLog/登出写入审计日志` | 验证 `EventUserLogout` 日志写入、IP 地址正确 |
-| `TestAuthService_RefreshTokenWithAudit_VerifyLog/刷新Token写入审计日志` | 验证 `EventTokenRefresh` 日志写入、IP 地址正确 |
+| 测试函数 | 子测试 | 验证内容 |
+|----------|--------|---------|
+| `TestAuthService_LoginWithAudit_VerifyLog` | `登录成功写入审计日志` | 验证 `EventUserLogin` 日志写入、IP 地址正确、Success=true |
+| `TestAuthService_LoginWithAudit_VerifyLog` | `登录失败写入审计日志` | 验证 `EventUserLogin` 日志写入、Success=false |
+| `TestAuthService_LogoutWithAudit_VerifyLog` | `登出写入审计日志` | 验证 `EventUserLogout` 日志写入、IP 地址正确 |
+| `TestAuthService_RefreshTokenWithAudit_VerifyLog` | `刷新Token写入审计日志` | 验证 `EventTokenRefresh` 日志写入、IP 地址正确 |
 
 **影响**：审计相关测试从"仅验证返回值"升级为"验证审计日志内容"，确保审计功能真正工作。
 
@@ -230,9 +231,9 @@
 |------|--------|--------|
 | URL 前缀不匹配导致的假阳性跳过 | 11 | 0 |
 | 管理员账户未配置导致的跳过 | 5 | 5（需环境变量） |
-| 端点确实不存在导致的跳过 | 3 | 3 |
+| 端点确实不存在导致的跳过 | 5 | 5 |
 | 测试设计限制导致的跳过 | 3 | 3 |
-| **总计** | **19** | **8** |
+| **总计** | **24** | **13** |
 
 ---
 
@@ -243,15 +244,16 @@
 | 修改文件数 | 7 | 2 | 9 |
 | 删除代码行数 | ~400 | ~37 | ~437 |
 | 删除测试函数 | 14 | 1 | 15 |
-| 新增测试函数 | 0 | 11 | 11 |
+| 新增顶层测试函数 | 0 | 8 | 8 |
+| 新增子测试 | 0 | 11 | 11 |
 | 修复硬编码魔法数字 | 3 | 0 | 3 |
 | 修复弱断言 | 1 | 0 | 1 |
 | 修复死代码 | 2 | 0 | 2 |
 | 修复 time.Sleep 模式 | 23 | 0 | 23 |
 | 新增 Build Tag | 1 | 0 | 1 |
 | 新增辅助函数 | 1 | 0 | 1 |
-| 新增错误注入测试 | 0 | 7 | 7 |
-| 新增审计验证测试 | 0 | 4 | 4 |
+| 新增错误注入字段覆盖 | 0 | 5 | 5 |
+| 新增审计验证测试 | 0 | 3 | 3 |
 
 ---
 
@@ -265,14 +267,16 @@
 | `go test ./internal/crypto/...` | PASS | 9.5s |
 | `go test ./internal/model/...` | PASS | 0.008s |
 | `go test ./internal/cache/...` | PASS (no tests to run) | 0.004s |
-| Mock Store 错误注入字段利用率 | 10/32 (31.3%) | ↑ from 9.4% |
-| E2E 假阳性跳过 | 0 | ↓ from 11 |
+| Mock Store 错误注入字段利用率 | 8/32 (25.0%) | ↑ from 9.4% |
+| E2E 假阳性跳过 | 0 (admin URL 前缀) | ↓ from 11 |
+| E2E 总跳过数 | 13 | ↓ from 24 |
 
 ---
 
 ## 七、后续建议优先级
 
-1. **P1**: 继续补充 Mock Store 错误注入测试（剩余 22 个字段），优先覆盖 Token 存储和密钥管理相关字段
+1. **P1**: 继续补充 Mock Store 错误注入测试（剩余 24 个字段），优先覆盖 Token 存储和密钥管理相关字段
 2. **P1**: 配置 E2E 测试环境变量（`E2E_ADMIN_EMAIL`、`E2E_ADMIN_PASSWORD`）以启用 5 个管理员测试
 3. **P2**: 启用 `testifylint` 自动检测弱断言
 4. **P2**: 注册或修复 `/api/v1/resend-verification` 端点（E2E 测试中引用但不存在）
+5. **P2**: 修复 E2E 中 `token_test.go:114` 的 Token 撤销端点跳过（端点已存在 `/api/v1/token/revoke`）

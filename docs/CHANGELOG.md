@@ -7,8 +7,8 @@
 ### Added
 - 多语言支持（i18n）
 - 更多第三方登录提供商支持
-- **Mock Store 错误注入测试**：新增 7 个测试覆盖 `GetUserByEmailErr`、`CreateUserErr`、`GetTokenByRefreshTokenErr`、`GetUserByIDErr`、`RevokeTokenErr`、`RevokeAllUserTokensErr` 等关键存储故障路径
-- **审计日志写入验证测试**：新增 4 个测试验证 `LoginWithAudit`、`LogoutWithAudit`、`RefreshTokenWithAudit` 实际写入审计日志并验证事件类型、IP 地址、Success 标志
+- **Mock Store 错误注入测试**：新增 5 个顶层测试函数（7 个子测试）覆盖 `GetUserByEmailErr`、`CreateUserErr`、`GetTokenByRefreshTokenErr`、`GetUserByIDErr`、`RevokeTokenErr` 等关键存储故障路径
+- **审计日志写入验证测试**：新增 3 个顶层测试函数（4 个子测试）验证 `LoginWithAudit`、`LogoutWithAudit`、`RefreshTokenWithAudit` 实际写入审计日志并验证事件类型、IP 地址、Success 标志
 
 ### Security
 
@@ -46,7 +46,7 @@
 - **测试质量审计**：删除 15 个空壳/重复测试函数，新增 11 个有价值的测试函数
 - **审计测试可靠性**：`audit_test.go` 中 23 处 `time.Sleep(100ms)` 替换为 `require.Eventually` 轮询（10ms 间隔，2s 超时）
 - **Redis 测试隔离**：`cache/redis_test.go` 添加 `//go:build integration` 标签，避免无 Redis 环境下测试失败
-- **Mock Store 错误注入覆盖率**：从 3/32 (9.4%) 提升至 10/32 (31.3%)
+- **Mock Store 错误注入覆盖率**：从 3/32 (9.4%) 提升至 8/32 (25.0%)
 
 ---
 

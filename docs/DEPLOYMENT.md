@@ -704,7 +704,7 @@ redis-cli ping
 curl http://localhost:9090/health
 
 # 管理员健康检查（需要认证）
-curl -H "Authorization: Bearer <token>" http://localhost:9090/admin/health
+curl -H "Authorization: Bearer <token>" http://localhost:9090/api/v1/admin/health
 ```
 
 ---
