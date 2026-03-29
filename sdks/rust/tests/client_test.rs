@@ -217,7 +217,7 @@ mod mock_tests {
             .mock("GET", "/admin/health")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"status":"ok","database":"pg","version":"1.0"}"#)
+            .with_body(r#"{"status":"ok","timestamp":"2026-01-01T00:00:00Z","database":"pg","version":"1.0"}"#)
             .create_async()
             .await;
 
@@ -236,7 +236,7 @@ mod mock_tests {
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(
-                r#"{"issuer":"http://t","grant_types_supported":["authorization_code"],"code_challenge_methods_supported":["S256"]}"#,
+                r#"{"issuer":"http://t","authorization_endpoint":"http://t/authorize","token_endpoint":"http://t/token","userinfo_endpoint":"http://t/userinfo","jwks_uri":"http://t/jwks","revocation_endpoint":"http://t/revoke","grant_types_supported":["authorization_code"],"code_challenge_methods_supported":["S256"]}"#,
             )
             .create_async()
             .await;
@@ -270,10 +270,10 @@ mod mock_tests {
     async fn test_list_users() {
         let mut server = Server::new_async().await;
         server
-            .mock("GET", "/admin/users")
+            .mock("GET", "/admin/users?page=1&pageSize=10")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"users":[{"id":"u1","email":"a@b.com"}],"total":1,"page":1,"page_size":10,"total_pages":1}"#)
+            .with_body(r#"{"users":[{"id":"u1","email":"a@b.com","email_verified":true,"mfa_enabled":false,"status":"active","created_at":"","updated_at":""}],"total":1,"page":1,"page_size":10,"total_pages":1}"#)
             .create_async()
             .await;
 

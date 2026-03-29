@@ -120,8 +120,12 @@ func TestConcurrentTokenRefreshFull(t *testing.T) {
 	email := generateUniqueEmail("concrefreshfull")
 	password := generateTestPassword()
 
-	// 注册并登录
-	_, err := registerUser(email, password)
+	// 注册并验证邮箱
+	user, err := registerUser(email, password)
+	require.NoError(t, err)
+
+	userID := user["user_id"].(string)
+	err = verifyEmail(userID)
 	require.NoError(t, err)
 
 	// 登录多次获取多个RefreshToken
@@ -168,8 +172,12 @@ func TestConcurrentResourceAccess(t *testing.T) {
 	email := generateUniqueEmail("concurrentaccess")
 	password := generateTestPassword()
 
-	// 注册并登录
-	_, err := registerUser(email, password)
+	// 注册并验证邮箱
+	user, err := registerUser(email, password)
+	require.NoError(t, err)
+
+	userID := user["user_id"].(string)
+	err = verifyEmail(userID)
 	require.NoError(t, err)
 
 	tokens, err := loginUser(email, password)

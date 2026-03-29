@@ -85,8 +85,13 @@ func TestLoginFlow(t *testing.T) {
 	password := generateTestPassword()
 
 	// 先注册用户
-	_, err := registerUser(email, password)
+	user, err := registerUser(email, password)
 	require.NoError(t, err)
+
+	// 验证邮箱（使用测试专用API）
+	userID := user["user_id"].(string)
+	err = verifyEmail(userID)
+	require.NoError(t, err, "验证邮箱失败")
 
 	// 等待数据库完全提交
 	time.Sleep(100 * time.Millisecond)
@@ -139,7 +144,12 @@ func TestFullAuthFlow(t *testing.T) {
 	// 1. 注册
 	user, err := registerUser(email, password)
 	require.NoError(t, err)
-	t.Logf("注册成功: %s", user["id"])
+	t.Logf("注册成功: %s", user["user_id"])
+
+	// 1.5 验证邮箱
+	userID := user["user_id"].(string)
+	err = verifyEmail(userID)
+	require.NoError(t, err, "验证邮箱失败")
 
 	// 2. 登录
 	tokens, err := loginUser(email, password)
@@ -207,7 +217,12 @@ func TestMultiDeviceLogin(t *testing.T) {
 	password := generateTestPassword()
 
 	// 注册用户
-	_, err := registerUser(email, password)
+	user, err := registerUser(email, password)
+	require.NoError(t, err)
+
+	// 验证邮箱
+	userID := user["user_id"].(string)
+	err = verifyEmail(userID)
 	require.NoError(t, err)
 
 	// 模拟多个设备登录
@@ -238,7 +253,12 @@ func TestLogoutAllDevices(t *testing.T) {
 	password := generateTestPassword()
 
 	// 注册用户
-	_, err := registerUser(email, password)
+	user, err := registerUser(email, password)
+	require.NoError(t, err)
+
+	// 验证邮箱
+	userID := user["user_id"].(string)
+	err = verifyEmail(userID)
 	require.NoError(t, err)
 
 	// 模拟多个设备登录

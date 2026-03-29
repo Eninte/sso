@@ -209,6 +209,21 @@ func registerUser(email, password string) (map[string]interface{}, error) {
 	return data, nil
 }
 
+// verifyEmail 使用测试API验证邮箱
+// 注意：这是一个测试专用API，生产环境不存在
+func verifyEmail(userID string) error {
+	// 使用测试专用API验证邮箱
+	req := map[string]string{"user_id": userID}
+	resp, _, err := doRequest("POST", "/api/v1/test/verify-email", req, "")
+	if err != nil {
+		return fmt.Errorf("验证邮箱请求失败: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("验证邮箱失败: %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // loginUser 登录用户并返回Token
 func loginUser(email, password string) (*loginResponse, error) {
 	req := loginRequest{
@@ -223,22 +238,12 @@ func loginUser(email, password string) (*loginResponse, error) {
 		return nil, fmt.Errorf("登录失败: %d", resp.StatusCode)
 	}
 
-	// 响应格式: {"data": {"access_token": "...", ...}, ...}
-	var response map[string]interface{}
-	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, err
-	}
-
-	data, ok := response["data"].(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("响应格式错误: 缺少data字段")
-	}
-
-	dataBytes, _ := json.Marshal(data)
+	// 响应格式: {"access_token": "...", "refresh_token": "...", ...}
 	var tokens loginResponse
-	if err := json.Unmarshal(dataBytes, &tokens); err != nil {
+	if err := json.Unmarshal(body, &tokens); err != nil {
 		return nil, err
 	}
+
 	return &tokens, nil
 }
 

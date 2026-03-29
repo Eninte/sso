@@ -247,6 +247,14 @@ func main() {
 	admin.HandleFunc("/users/disable", adminHandler.HandleDisableUser).Methods("POST")
 	admin.HandleFunc("/users/enable", adminHandler.HandleEnableUser).Methods("POST")
 
+	// 13.5 测试专用API（仅在开发/测试环境启用）
+	if cfg.Env == "development" || os.Getenv("E2E_ENABLED") == "true" {
+		testHandler := handler.NewTestHandler(store, cfg.Env)
+		test := api.PathPrefix("/test").Subrouter()
+		test.HandleFunc("/verify-email", testHandler.HandleVerifyEmail).Methods("POST")
+		slog.Info("测试专用API已启用")
+	}
+
 	// 14. 创建HTTP服务器
 	server := &http.Server{
 		Addr:         cfg.ServerHost + ":" + cfg.ServerPort,

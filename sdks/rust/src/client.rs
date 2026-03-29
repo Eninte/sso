@@ -155,26 +155,43 @@ impl SSOClient {
             guard.as_ref().unwrap().refresh_token.clone()
         };
 
-        let resp: TokenResponse = self
-            .request(
-                Method::POST,
-                "/api/v1/token",
-                Some(&TokenRequest {
-                    grant_type: "refresh_token".to_string(),
-                    refresh_token: Some(refresh_token),
-                    code: None,
-                    redirect_uri: None,
-                    client_id: None,
-                    client_secret: None,
-                    code_verifier: None,
-                }),
-                false,
-            )
-            .await?;
+        // 直接使用 http 客户端发送请求，避免与 request 方法形成递归
+        let url = format!("{}/api/v1/token", self.base_url);
+        let body = serde_json::json!({
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        });
 
-        self.set_tokens(&resp.access_token, &resp.refresh_token, resp.expires_in)
+        let resp = self
+            .http
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| SSOError {
+                http_status: 0,
+                code: crate::errors::ErrorCode::Other("REQUEST_FAILED".to_string()),
+                message: e.to_string(),
+                raw_body: String::new(),
+            })?;
+
+        let status = resp.status().as_u16();
+        let text = resp.text().await.unwrap_or_default();
+
+        if status >= 400 {
+            return Err(parse_error(status, &text));
+        }
+
+        let token_resp: TokenResponse = serde_json::from_str(&text).map_err(|e| SSOError {
+            http_status: status,
+            code: crate::errors::ErrorCode::Internal,
+            message: format!("parse token response: {e}"),
+            raw_body: text,
+        })?;
+
+        self.set_tokens(&token_resp.access_token, &token_resp.refresh_token, token_resp.expires_in)
             .await;
-        Ok(resp.access_token)
+        Ok(token_resp.access_token)
     }
 
     // =======================================================================

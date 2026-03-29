@@ -27,6 +27,7 @@ coverage.html
 vendor/
 node_modules/
 dist/
+target/
 
 # Python
 __pycache__/

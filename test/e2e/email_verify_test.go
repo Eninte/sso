@@ -53,14 +53,19 @@ func TestFullEmailVerifyFlow(t *testing.T) {
 	// 1. 注册用户
 	user, err := registerUser(email, password)
 	require.NoError(t, err)
-	t.Logf("注册成功: %v", user["id"])
+	userID := user["user_id"].(string)
+	t.Logf("注册成功: %v", userID)
 
-	// 2. 登录（未验证邮箱可能限制某些功能）
+	// 2. 验证邮箱（使用测试专用API）
+	err = verifyEmail(userID)
+	require.NoError(t, err, "验证邮箱失败")
+
+	// 3. 登录
 	tokens, err := loginUser(email, password)
 	require.NoError(t, err)
 	assert.NotEmpty(t, tokens.AccessToken)
 
-	// 3. 获取用户信息，检查邮箱验证状态
+	// 4. 获取用户信息，检查邮箱验证状态
 	resp, body, err := doRequest("GET", "/api/v1/userinfo", nil, tokens.AccessToken)
 	require.NoError(t, err)
 
@@ -68,13 +73,11 @@ func TestFullEmailVerifyFlow(t *testing.T) {
 		userInfo, err := parseUserInfo(body)
 		if err == nil {
 			t.Logf("邮箱验证状态: %v", userInfo.EmailVerified)
-			// 新注册用户邮箱应该未验证
-			assert.False(t, userInfo.EmailVerified)
+			// 已验证邮箱
+			assert.True(t, userInfo.EmailVerified)
 		}
 	}
 
-	// 注意：完整验证流程需要从邮件中获取验证令牌
-	// 这里只测试API端点的基本逻辑
 	t.Logf("邮箱验证流程测试完成")
 }
 
