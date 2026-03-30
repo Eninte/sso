@@ -21,8 +21,11 @@ func TestTokenValid(t *testing.T) {
 	email := generateUniqueEmail("tokenvalid")
 	password := generateTestPassword()
 
-	// 注册并登录
-	_, err := registerUser(email, password)
+	// 注册、验证邮箱并登录
+	user, err := registerUser(email, password)
+	require.NoError(t, err)
+	userID := user["user_id"].(string)
+	err = verifyEmail(userID)
 	require.NoError(t, err)
 
 	tokens, err := loginUser(email, password)
@@ -68,10 +71,12 @@ func TestTokenInvalid(t *testing.T) {
 	})
 
 	t.Run("截断Token", func(t *testing.T) {
-		// 注册并登录获取有效Token
+		// 注册、验证邮箱并登录获取有效Token
 		email := generateUniqueEmail("trunc")
 		password := generateTestPassword()
-		_, err := registerUser(email, password)
+		user, err := registerUser(email, password)
+		require.NoError(t, err)
+		err = verifyEmail(user["user_id"].(string))
 		require.NoError(t, err)
 
 		tokens, err := loginUser(email, password)
@@ -93,8 +98,10 @@ func TestTokenRevoked(t *testing.T) {
 	email := generateUniqueEmail("revoked")
 	password := generateTestPassword()
 
-	// 注册并登录
-	_, err := registerUser(email, password)
+	// 注册、验证邮箱并登录
+	user, err := registerUser(email, password)
+	require.NoError(t, err)
+	err = verifyEmail(user["user_id"].(string))
 	require.NoError(t, err)
 
 	tokens, err := loginUser(email, password)
@@ -129,8 +136,10 @@ func TestTokenRefresh(t *testing.T) {
 	email := generateUniqueEmail("refresh")
 	password := generateTestPassword()
 
-	// 注册并登录
-	_, err := registerUser(email, password)
+	// 注册、验证邮箱并登录
+	user, err := registerUser(email, password)
+	require.NoError(t, err)
+	err = verifyEmail(user["user_id"].(string))
 	require.NoError(t, err)
 
 	tokens, err := loginUser(email, password)
@@ -183,7 +192,9 @@ func TestTokenExpired(t *testing.T) {
 	email := generateUniqueEmail("expired")
 	password := generateTestPassword()
 
-	_, err := registerUser(email, password)
+	user, err := registerUser(email, password)
+	require.NoError(t, err)
+	err = verifyEmail(user["user_id"].(string))
 	require.NoError(t, err)
 
 	tokens, err := loginUser(email, password)
@@ -212,8 +223,10 @@ func TestConcurrentTokenRefresh(t *testing.T) {
 	email := generateUniqueEmail("concrefresh")
 	password := generateTestPassword()
 
-	// 注册并登录
-	_, err := registerUser(email, password)
+	// 注册、验证邮箱并登录
+	user, err := registerUser(email, password)
+	require.NoError(t, err)
+	err = verifyEmail(user["user_id"].(string))
 	require.NoError(t, err)
 
 	tokens, err := loginUser(email, password)
@@ -262,8 +275,10 @@ func TestTokenPermissions(t *testing.T) {
 	email := generateUniqueEmail("perms")
 	password := generateTestPassword()
 
-	// 注册并登录
-	_, err := registerUser(email, password)
+	// 注册、验证邮箱并登录
+	user, err := registerUser(email, password)
+	require.NoError(t, err)
+	err = verifyEmail(user["user_id"].(string))
 	require.NoError(t, err)
 
 	tokens, err := loginUser(email, password)

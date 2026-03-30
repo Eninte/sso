@@ -140,28 +140,21 @@ func TestPasswordService_VerifyPassword(t *testing.T) {
 
 func TestNewPasswordService_CostNormalization(t *testing.T) {
 	tests := []struct {
-		name      string
-		inputCost int
-		skipShort bool
+		name         string
+		inputCost    int
+		expectedCost int
 	}{
-		{"过低cost提升到bcrypt最低", 1, false},
-		{"bcrypt最低cost", 4, false},
-		{"正常测试cost", 6, false},
-		{"正常生产cost", 12, true},
-		{"过高cost被限制", 20, true},
+		{"过低cost提升到12", 1, 12},
+		{"低于12提升到12", 5, 12},
+		{"正常cost不变", 12, 12},
+		{"13不变", 13, 13},
+		{"过高cost被限制到14", 20, 14},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skipShort && testing.Short() {
-				t.Skip("跳过慢速测试 (cost >= 12)")
-			}
-			svc := crypto.NewPasswordService(tt.inputCost)
-			hash, err := svc.HashPassword("TestPassword123")
-			require.NoError(t, err)
-			assert.NotEmpty(t, hash)
-			err = svc.VerifyPassword(hash, "TestPassword123")
-			assert.NoError(t, err)
+			got := crypto.NormalizeBcryptCost(tt.inputCost)
+			assert.Equal(t, tt.expectedCost, got)
 		})
 	}
 }
