@@ -132,7 +132,7 @@ func TestFullPasswordResetFlow(t *testing.T) {
 
 	// 如果忘记密码端点不存在，跳过后续测试
 	if forgotResp.StatusCode == http.StatusNotFound {
-		t.Skip("忘记密码端点未实现")
+		t.Error("忘记密码端点 /api/v1/forgot-password 返回404，端点未注册")
 		return
 	}
 

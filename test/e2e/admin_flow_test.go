@@ -18,8 +18,8 @@ import (
 // ============================================================================
 
 var (
-	adminEmail    = getEnvOrDefault("E2E_ADMIN_EMAIL", "admin@example.com")
-	adminPassword = getEnvOrDefault("E2E_ADMIN_PASSWORD", "AdminPassword123!")
+	adminEmail    = getEnvOrDefault("E2E_ADMIN_EMAIL", "system@eninte.com")
+	adminPassword = getEnvOrDefault("E2E_ADMIN_PASSWORD", "Admin123!")
 )
 
 // ============================================================================
@@ -41,22 +41,13 @@ func loginAdmin() (*loginResponse, error) {
 // ============================================================================
 
 func TestAdminListUsers(t *testing.T) {
-	// 尝试管理员登录
+	// 管理员登录（测试环境已配置管理员账户）
 	adminTokens, err := loginAdmin()
-	if err != nil {
-		t.Skip("管理员账户未配置，跳过管理员测试")
-		return
-	}
+	require.NoError(t, err, "管理员登录失败，请检查 E2E_ADMIN_EMAIL 和 E2E_ADMIN_PASSWORD")
 
 	t.Run("获取用户列表", func(t *testing.T) {
 		resp, body, err := doRequest("GET", "/api/v1/admin/users", nil, adminTokens.AccessToken)
 		require.NoError(t, err)
-
-		if resp.StatusCode == http.StatusNotFound {
-			t.Skip("管理员用户列表端点未实现")
-			return
-		}
-
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 		var userList userListResponse
@@ -69,12 +60,6 @@ func TestAdminListUsers(t *testing.T) {
 	t.Run("分页查询", func(t *testing.T) {
 		resp, _, err := doRequest("GET", "/api/v1/admin/users?page=1&limit=10", nil, adminTokens.AccessToken)
 		require.NoError(t, err)
-
-		if resp.StatusCode == http.StatusNotFound {
-			t.Skip("管理员用户列表端点未实现")
-			return
-		}
-
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
 }
@@ -85,10 +70,7 @@ func TestAdminListUsers(t *testing.T) {
 
 func TestAdminGetUser(t *testing.T) {
 	adminTokens, err := loginAdmin()
-	if err != nil {
-		t.Skip("管理员账户未配置，跳过管理员测试")
-		return
-	}
+	require.NoError(t, err, "管理员登录失败")
 
 	// 先创建一个测试用户
 	testEmail := generateUniqueEmail("admintest")
@@ -104,12 +86,6 @@ func TestAdminGetUser(t *testing.T) {
 	t.Run("获取用户详情", func(t *testing.T) {
 		resp, body, err := doRequest("GET", "/api/v1/admin/users/"+userID, nil, adminTokens.AccessToken)
 		require.NoError(t, err)
-
-		if resp.StatusCode == http.StatusNotFound {
-			t.Skip("管理员用户详情端点未实现")
-			return
-		}
-
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 		var user map[string]interface{}
@@ -140,10 +116,7 @@ func TestAdminGetUser(t *testing.T) {
 
 func TestAdminDisableEnableUser(t *testing.T) {
 	adminTokens, err := loginAdmin()
-	if err != nil {
-		t.Skip("管理员账户未配置，跳过管理员测试")
-		return
-	}
+	require.NoError(t, err, "管理员登录失败")
 
 	// 创建测试用户并验证邮箱
 	testEmail := generateUniqueEmail("disabletest")
@@ -160,26 +133,13 @@ func TestAdminDisableEnableUser(t *testing.T) {
 		req := adminUserActionRequest{UserID: userID}
 		resp, _, err := doRequest("POST", "/api/v1/admin/users/"+userID+"/disable", req, adminTokens.AccessToken)
 		require.NoError(t, err)
-
-		if resp.StatusCode == http.StatusNotFound {
-			t.Skip("禁用用户端点未实现")
-			return
-		}
-
 		assert.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent)
 	})
 
 	t.Run("禁用后用户无法登录", func(t *testing.T) {
-		// 先检查禁用功能是否实现
 		loginReq := loginRequest{Email: testEmail, Password: testPassword}
 		resp, _, err := doRequest("POST", "/api/v1/login", loginReq, "")
 		require.NoError(t, err)
-
-		// 如果禁用功能未实现，用户仍能登录，跳过此测试
-		if resp.StatusCode == http.StatusOK {
-			t.Skip("禁用用户功能未实现，跳过登录验证测试")
-			return
-		}
 
 		// 应该返回禁止或未授权
 		assert.True(t, resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized)
@@ -189,12 +149,6 @@ func TestAdminDisableEnableUser(t *testing.T) {
 		req := adminUserActionRequest{UserID: userID}
 		resp, _, err := doRequest("POST", "/api/v1/admin/users/"+userID+"/enable", req, adminTokens.AccessToken)
 		require.NoError(t, err)
-
-		if resp.StatusCode == http.StatusNotFound {
-			t.Skip("启用用户端点未实现")
-			return
-		}
-
 		assert.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent)
 	})
 
@@ -229,11 +183,6 @@ func TestAdminUnauthorized(t *testing.T) {
 		resp, _, err := doRequest("GET", "/api/v1/admin/users", nil, userTokens.AccessToken)
 		require.NoError(t, err)
 
-		if resp.StatusCode == http.StatusNotFound {
-			t.Skip("管理员端点未实现")
-			return
-		}
-
 		// 应该返回禁止
 		assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 	})
@@ -241,11 +190,6 @@ func TestAdminUnauthorized(t *testing.T) {
 	t.Run("未认证用户无法访问管理员接口", func(t *testing.T) {
 		resp, _, err := doRequest("GET", "/api/v1/admin/users", nil, "")
 		require.NoError(t, err)
-
-		if resp.StatusCode == http.StatusNotFound {
-			t.Skip("管理员端点未实现")
-			return
-		}
 
 		// 应该返回未授权
 		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
@@ -258,10 +202,7 @@ func TestAdminUnauthorized(t *testing.T) {
 
 func TestAdminDeleteUser(t *testing.T) {
 	adminTokens, err := loginAdmin()
-	if err != nil {
-		t.Skip("管理员账户未配置，跳过管理员测试")
-		return
-	}
+	require.NoError(t, err, "管理员登录失败")
 
 	// 创建测试用户
 	testEmail := generateUniqueEmail("deletetest")
@@ -273,12 +214,6 @@ func TestAdminDeleteUser(t *testing.T) {
 	t.Run("删除用户", func(t *testing.T) {
 		resp, _, err := doRequest("DELETE", "/api/v1/admin/users/"+userID, nil, adminTokens.AccessToken)
 		require.NoError(t, err)
-
-		if resp.StatusCode == http.StatusNotFound {
-			t.Skip("删除用户端点未实现")
-			return
-		}
-
 		assert.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent)
 	})
 
@@ -298,32 +233,17 @@ func TestAdminDeleteUser(t *testing.T) {
 
 func TestAdminAuditLogs(t *testing.T) {
 	adminTokens, err := loginAdmin()
-	if err != nil {
-		t.Skip("管理员账户未配置，跳过管理员测试")
-		return
-	}
+	require.NoError(t, err, "管理员登录失败")
 
 	t.Run("获取审计日志", func(t *testing.T) {
 		resp, _, err := doRequest("GET", "/api/v1/admin/audit-logs", nil, adminTokens.AccessToken)
 		require.NoError(t, err)
-
-		if resp.StatusCode == http.StatusNotFound {
-			t.Skip("审计日志端点未实现")
-			return
-		}
-
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
 
 	t.Run("按事件类型过滤", func(t *testing.T) {
 		resp, _, err := doRequest("GET", "/api/v1/admin/audit-logs?event_type=login", nil, adminTokens.AccessToken)
 		require.NoError(t, err)
-
-		if resp.StatusCode == http.StatusNotFound {
-			t.Skip("审计日志端点未实现")
-			return
-		}
-
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
 }

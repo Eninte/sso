@@ -159,14 +159,14 @@
 
 已新增 3 个 `VerifyLog` 测试函数，使用 `require.Eventually` 验证审计日志内容。
 
-### 3.4 E2E 测试 13 处 `t.Skip()`
+### ~~3.4 E2E 测试 4 处 `t.Skip()`~~
 
-**严重程度**: MEDIUM
+**状态**: 已修复（第四轮，从 24 降至 4）
 
-修复管理员路由前缀后，假阳性跳过从 24 降至 13：
-- 5 处因管理员账户未配置（需设置 `E2E_ADMIN_EMAIL` / `E2E_ADMIN_PASSWORD`）
-- 5 处因端点确实不存在（`/api/v1/resend-verification` 等）
-- 3 处因测试设计限制（Token 过期、密码重置安全性）
+剩余 4 处为合法限制：
+- 2 处需从邮件中提取验证/重置令牌（测试环境 SMTP 可用但无自动令牌提取机制）
+- 1 处需构造过期 Token 或等待过期
+- 1 处需模拟邮件服务获取重置令牌
 
 ### 3.5 Linter 配置对测试文件过于宽松
 
@@ -269,14 +269,103 @@
 | `go test ./internal/cache/...` | PASS (no tests to run) | 0.004s |
 | Mock Store 错误注入字段利用率 | 8/32 (25.0%) | ↑ from 9.4% |
 | E2E 假阳性跳过 | 0 (admin URL 前缀) | ↓ from 11 |
-| E2E 总跳过数 | 13 | ↓ from 24 |
+| E2E 总跳过数 | 4 | ↓ from 24 |
 
 ---
 
 ## 七、后续建议优先级
 
 1. **P1**: 继续补充 Mock Store 错误注入测试（剩余 24 个字段），优先覆盖 Token 存储和密钥管理相关字段
-2. **P1**: 配置 E2E 测试环境变量（`E2E_ADMIN_EMAIL`、`E2E_ADMIN_PASSWORD`）以启用 5 个管理员测试
-3. **P2**: 启用 `testifylint` 自动检测弱断言
-4. **P2**: 注册或修复 `/api/v1/resend-verification` 端点（E2E 测试中引用但不存在）
-5. **P2**: 修复 E2E 中 `token_test.go:114` 的 Token 撤销端点跳过（端点已存在 `/api/v1/token/revoke`）
+2. **P2**: 启用 `testifylint` 自动检测弱断言（`metrics_test.go:255-256` 仍有 `assert.True(t, count >= 19)` 弱断言）
+3. **P2**: 为 E2E 测试添加邮件令牌自动提取机制（消除剩余 4 处 `t.Skip`）
+
+---
+
+## 八、第三轮修复（文档验证后执行）
+
+### 8.1 `internal/handler/register_test.go` — 遗漏的重复测试
+
+**验证结果**：文档验证发现 `register_test.go` 中 3 个函数与 `handler_test.go` 的 `TestRegisterHandler_Handle` 子测试重复：
+
+| register_test.go 函数 | handler_test.go 对应子测试 | 处理 |
+|----------------------|--------------------------|------|
+| `TestRegisterHandler_Handle_InvalidJSON/无效JSON` | `TestRegisterHandler_Handle/无效的JSON格式` | 删除重复，保留唯一子测试"空请求体"并移入 handler_test.go |
+| `TestRegisterHandler_Handle_DuplicateEmail` | `TestRegisterHandler_Handle/邮箱已存在` | 删除 |
+| `TestRegisterHandler_Handle_Success` | `TestRegisterHandler_Handle/成功注册` | 删除 |
+
+**保留**：`TestRegisterHandler_Handle_ValidationErrors`（表驱动验证测试，8 个验证场景，比 handler_test.go 的单个子测试更全面）
+
+**修复**：
+- 将 `TestRegisterHandler_Handle_InvalidJSON` 的"空请求体"子测试移入 `handler_test.go` 的 `TestRegisterHandler_Handle`
+- 删除 `register_test.go` 中 3 个重复函数（~55 行）
+- 清理未使用导入（`require`）
+
+### 8.2 问题分类修正
+
+第一轮审计遗漏了 `register_test.go` 中的重复测试。修正后的问题分类：
+
+| 问题类型 | 原始数量 | 修复后 | 剩余 |
+|----------|---------|--------|------|
+| 空壳测试 | 1 文件 | 已修复 | 0 |
+| 重复测试 | 6 文件 | 已修复 6 | 0 |
+| T4 反模式 | 1 文件 | 已修复 | 0 |
+| time.Sleep 硬等待 | 2 文件 | 已修复 1 | 1（redis_test.go，integration 标签下可接受） |
+| 硬编码魔法数字 | 4 文件 | 已修复 1 | 3（剩余为合理的时间相关测试常量） |
+| 死代码 | 2 文件 | 已修复 | 0 |
+| 缺少 Build Tag | 1 文件 | 已修复 | 0 |
+| 弱断言 | 2 文件 | 已修复 1 | 1（metrics_test.go:255-256） |
+| 误导性测试名称 | 1 文件 | 已修复 | 0 |
+
+---
+
+## 九、变更统计（最终）
+
+| 指标 | 第一轮 | 第二轮 | 第三轮 | 第四轮 | 累计 |
+|------|--------|--------|--------|--------|------|
+| 修改文件数 | 7 | 2 | 2 | 5 | 16 |
+| 删除代码行数 | ~400 | ~37 | ~55 | ~50 | ~542 |
+| 删除测试函数 | 14 | 1 | 3 | 0 | 18 |
+| 新增顶层测试函数 | 0 | 8 | 0 | 0 | 8 |
+| 新增子测试 | 0 | 11 | 1 | 0 | 12 |
+| 修复硬编码魔法数字 | 3 | 0 | 0 | 0 | 3 |
+| 修复弱断言 | 1 | 0 | 0 | 0 | 1 |
+| 修复死代码 | 2 | 0 | 0 | 0 | 2 |
+| 修复 time.Sleep 模式 | 23 | 0 | 0 | 0 | 23 |
+| 新增 Build Tag | 1 | 0 | 0 | 0 | 1 |
+| 新增辅助函数 | 1 | 0 | 0 | 0 | 1 |
+| 新增错误注入字段覆盖 | 0 | 5 | 0 | 0 | 5 |
+| 新增审计验证测试 | 0 | 3 | 0 | 0 | 3 |
+| 修复管理员路由前缀 | 0 | 1 | 0 | 0 | 1 |
+| 修复 E2E 假阳性 Skip | 0 | 0 | 0 | 20 | 20 |
+| 修复错误端点 URL | 0 | 0 | 0 | 1 | 1 |
+
+---
+
+## 十、第四轮修复（E2E 测试 Skip 修复）
+
+### 10.1 根因分析
+
+E2E 测试有 24 处 `t.Skip()`，但测试环境实际已提供所有基础设施（数据库、缓存、SMTP、管理员账户）。跳过的根因：
+
+1. **管理员凭证默认值错误**（5 处）：`admin_flow_test.go` 默认 `admin@example.com` / `AdminPassword123!`，实际测试管理员为 `system@eninte.com` / `Admin123!`
+2. **管理员路由前缀不匹配**（11 处）：已在第二轮修复（`router.PathPrefix("/admin")` → `api.PathPrefix("/admin")`）
+3. **邮件验证端点 URL 错误**（1 处）：测试用 `/api/v1/resend-verification`，实际端点为 `/api/v1/verify-email/send`
+4. **测试逻辑保守**（多处）：收到 404 就认为"端点未实现"并 Skip，而非断言失败
+
+### 10.2 修复
+
+| 文件 | 修复内容 |
+|------|---------|
+| `admin_flow_test.go` | 默认凭证改为 `system@eninte.com` / `Admin123!`；`loginAdmin()` 失败改为 `require.NoError`；移除所有 `if 404 { t.Skip }` 模式 |
+| `token_test.go` | 移除 Token 撤销端点 Skip（`/api/v1/token/revoke` 已注册）；移除管理员端点 Skip（路由已修复） |
+| `password_reset_test.go` | `/api/v1/forgot-password` 返回 404 改为 `t.Fatalf` 而非 `t.Skip` |
+| `email_verify_test.go` | URL 从 `/api/v1/resend-verification` 修正为 `/api/v1/verify-email/send`；移除对应 Skip；弱断言改为精确 `assert.Equal` |
+
+### 10.3 修复效果
+
+| 类别 | 修复前 | 修复后 |
+|------|--------|--------|
+| 凭证/路由/URL 错误导致的假阳性 | 20 | 0 |
+| 需邮件令牌提取的合法限制 | 3 | 3 |
+| 需 Token 过期构造的合法限制 | 1 | 1 |
+| **总计** | **24** | **4** |

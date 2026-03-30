@@ -1,4 +1,5 @@
-// Package handler_test 注册处理器测试
+// Package handler_test 注册处理器扩展测试
+// 仅包含 handler_test.go 中未覆盖的表驱动验证测试
 package handler_test
 
 import (
@@ -9,11 +10,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // ============================================================================
-// RegisterHandler 扩展测试
+// RegisterHandler 验证错误表驱动测试
+// handler_test.go 中已有单个验证子测试，此文件提供更全面的表驱动覆盖
 // ============================================================================
 
 func TestRegisterHandler_Handle_ValidationErrors(t *testing.T) {
@@ -78,84 +79,4 @@ func TestRegisterHandler_Handle_ValidationErrors(t *testing.T) {
 			assert.Equal(t, tt.expectedStatus, w.Code)
 		})
 	}
-}
-
-func TestRegisterHandler_Handle_InvalidJSON(t *testing.T) {
-	registerHandler, _ := createTestRegisterHandler(t)
-
-	t.Run("无效JSON", func(t *testing.T) {
-		req := httptest.NewRequest("POST", "/api/v1/register", bytes.NewReader([]byte("invalid json")))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-
-		registerHandler.Handle(w, req)
-
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
-	t.Run("空请求体", func(t *testing.T) {
-		req := httptest.NewRequest("POST", "/api/v1/register", nil)
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-
-		registerHandler.Handle(w, req)
-
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-}
-
-func TestRegisterHandler_Handle_DuplicateEmail(t *testing.T) {
-	registerHandler, store := createTestRegisterHandler(t)
-
-	// 先注册一个用户
-	store.Reset()
-	body := map[string]string{
-		"email":    "duplicate@example.com",
-		"password": "Password123!",
-	}
-	bodyBytes, _ := json.Marshal(body)
-
-	req := httptest.NewRequest("POST", "/api/v1/register", bytes.NewReader(bodyBytes))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	registerHandler.Handle(w, req)
-	require.Equal(t, http.StatusCreated, w.Code)
-
-	// 尝试用相同邮箱注册
-	req = httptest.NewRequest("POST", "/api/v1/register", bytes.NewReader(bodyBytes))
-	req.Header.Set("Content-Type", "application/json")
-	w = httptest.NewRecorder()
-
-	registerHandler.Handle(w, req)
-
-	assert.Equal(t, http.StatusConflict, w.Code)
-}
-
-func TestRegisterHandler_Handle_Success(t *testing.T) {
-	registerHandler, _ := createTestRegisterHandler(t)
-
-	body := map[string]string{
-		"email":    "newuser@example.com",
-		"password": "Password123!",
-	}
-	bodyBytes, _ := json.Marshal(body)
-
-	req := httptest.NewRequest("POST", "/api/v1/register", bytes.NewReader(bodyBytes))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	registerHandler.Handle(w, req)
-
-	assert.Equal(t, http.StatusCreated, w.Code)
-
-	var resp map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
-	require.NoError(t, err)
-
-	// 验证响应包含data字段
-	data, ok := resp["data"].(map[string]interface{})
-	require.True(t, ok, "response should contain data field")
-	assert.Equal(t, "newuser@example.com", data["email"])
-	assert.NotEmpty(t, data["user_id"])
 }

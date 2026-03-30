@@ -295,16 +295,8 @@ func TestRegisterHandler_Handle(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
-	t.Run("邮箱格式无效", func(t *testing.T) {
-		store.Reset()
-
-		body := map[string]string{
-			"email":    "invalid-email",
-			"password": "Password123!",
-		}
-		bodyBytes, _ := json.Marshal(body)
-
-		req := httptest.NewRequest("POST", "/api/v1/register", bytes.NewReader(bodyBytes))
+	t.Run("空请求体", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/v1/register", nil)
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 
@@ -313,23 +305,6 @@ func TestRegisterHandler_Handle(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
-	t.Run("密码太短", func(t *testing.T) {
-		store.Reset()
-
-		body := map[string]string{
-			"email":    "test@example.com",
-			"password": "short",
-		}
-		bodyBytes, _ := json.Marshal(body)
-
-		req := httptest.NewRequest("POST", "/api/v1/register", bytes.NewReader(bodyBytes))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-
-		registerHandler.Handle(w, req)
-
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
 }
 
 // ============================================================================

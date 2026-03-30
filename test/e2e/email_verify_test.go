@@ -152,26 +152,19 @@ func TestResendVerificationEmail(t *testing.T) {
 
 	t.Run("请求重新发送验证邮件", func(t *testing.T) {
 		// 尝试发送重新验证请求
-		resp, _, err := doRequest("POST", "/api/v1/resend-verification", nil, tokens.AccessToken)
+		resp, _, err := doRequest("POST", "/api/v1/verify-email/send", nil, tokens.AccessToken)
 		require.NoError(t, err)
-
-		// 如果端点不存在，跳过
-		if resp.StatusCode == http.StatusNotFound {
-			t.Skip("重新发送验证邮件端点未实现")
-			return
-		}
 
 		// 应该返回成功
 		assert.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusAccepted)
 	})
 
 	t.Run("未认证请求重新发送", func(t *testing.T) {
-		resp, _, err := doRequest("POST", "/api/v1/resend-verification", nil, "")
+		resp, _, err := doRequest("POST", "/api/v1/verify-email/send", nil, "")
 		require.NoError(t, err)
 
-		// 端点不存在返回404，或者未认证返回401都是可接受的
-		assert.True(t, resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusNotFound,
-			"期望401或404，实际得到%d", resp.StatusCode)
+		// 未认证应返回401
+		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 	})
 }
 

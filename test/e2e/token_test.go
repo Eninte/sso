@@ -109,11 +109,7 @@ func TestTokenRevoked(t *testing.T) {
 	revokeReq := revokeRequest{Token: tokens.AccessToken}
 	revokeResp, _, err := doRequest("POST", "/api/v1/token/revoke", revokeReq, "")
 	require.NoError(t, err)
-
-	if revokeResp.StatusCode == http.StatusNotFound {
-		t.Skip("Token撤销端点未实现")
-		return
-	}
+	assert.True(t, revokeResp.StatusCode == http.StatusOK || revokeResp.StatusCode == http.StatusNoContent)
 
 	// 验证Token已失效
 	// 注意：根据实现，可能需要等待一段时间
@@ -266,11 +262,6 @@ func TestTokenPermissions(t *testing.T) {
 	t.Run("访问管理员接口", func(t *testing.T) {
 		resp, _, err := doRequest("GET", "/api/v1/admin/users", nil, tokens.AccessToken)
 		require.NoError(t, err)
-
-		if resp.StatusCode == http.StatusNotFound {
-			t.Skip("管理员端点未实现")
-			return
-		}
 
 		// 普通用户应该被拒绝
 		assert.Equal(t, http.StatusForbidden, resp.StatusCode)
