@@ -62,11 +62,7 @@ func TestForgotPassword(t *testing.T) {
 		require.NoError(t, err)
 
 		assertNotRateLimited(t, resp)
-		// 可能返回 400（严格校验）或 200（不泄露邮箱格式信息）
-		assert.True(t, resp.StatusCode == http.StatusBadRequest ||
-			resp.StatusCode == http.StatusOK ||
-			resp.StatusCode == http.StatusAccepted,
-			"期望 400/200/202，实际 %d", resp.StatusCode)
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	})
 }
 

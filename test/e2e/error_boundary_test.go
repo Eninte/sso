@@ -271,8 +271,7 @@ func TestPathTraversalAttempt(t *testing.T) {
 // ============================================================================
 
 func TestInvalidHTTPMethod(t *testing.T) {
-	// PATCH, PUT, DELETE 应返回 405
-	methods := []string{"PATCH", "PUT", "DELETE"}
+	methods := []string{"PATCH", "PUT", "DELETE", "HEAD", "OPTIONS"}
 
 	for _, method := range methods {
 		t.Run(fmt.Sprintf("无效方法_%s", method), func(t *testing.T) {
@@ -280,31 +279,11 @@ func TestInvalidHTTPMethod(t *testing.T) {
 			require.NoError(t, err)
 
 			assertNotRateLimited(t, resp)
+			// 应该返回405 Method Not Allowed
 			assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode,
 				"期望 405，实际 %d", resp.StatusCode)
 		})
 	}
-
-	// HEAD 和 OPTIONS 在 gorilla/mux 中有特殊处理
-	t.Run("HEAD方法", func(t *testing.T) {
-		resp, _, err := doRequest("HEAD", "/api/v1/login", nil, "")
-		require.NoError(t, err)
-		assertNotRateLimited(t, resp)
-		// HEAD 可能 fallback 到 GET（返回 405 因为路由只注册了 POST）或直接 405
-		assert.True(t, resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusBadRequest,
-			"期望 405 或 400，实际 %d", resp.StatusCode)
-	})
-
-	t.Run("OPTIONS方法", func(t *testing.T) {
-		resp, _, err := doRequest("OPTIONS", "/api/v1/login", nil, "")
-		require.NoError(t, err)
-		assertNotRateLimited(t, resp)
-		// OPTIONS 可能被 CORS 中间件处理返回 200/204
-		assert.True(t, resp.StatusCode == http.StatusMethodNotAllowed ||
-			resp.StatusCode == http.StatusOK ||
-			resp.StatusCode == http.StatusNoContent,
-			"期望 405/200/204，实际 %d", resp.StatusCode)
-	})
 }
 
 // ============================================================================
@@ -321,7 +300,7 @@ func TestSpecialCharacters(t *testing.T) {
 		require.NoError(t, err)
 
 		assertNotRateLimited(t, resp)
-		// Unicode 邮箱：取决于验证策略，可能接受(201)或拒绝(400)
+		// 可能返回400（无效邮箱）或201（成功），取决于邮箱验证策略
 		assert.True(t, resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusBadRequest,
 			"期望 201 或 400，实际 %d", resp.StatusCode)
 	})
@@ -369,7 +348,7 @@ func TestBoundaryValues(t *testing.T) {
 		require.NoError(t, err)
 
 		assertNotRateLimited(t, resp)
-		// 长邮箱：取决于验证策略，可能接受(201)或拒绝(400)
+		// 可能返回400（过长）或201（成功），取决于验证策略
 		assert.True(t, resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusBadRequest,
 			"期望 201 或 400，实际 %d", resp.StatusCode)
 	})
