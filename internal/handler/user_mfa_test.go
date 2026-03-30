@@ -33,7 +33,7 @@ func createContextWithUserID(userID string) context.Context {
 // createUserHandler 创建测试用的用户处理器
 func createUserHandler(t *testing.T) (*handler.UserHandler, *mock.Store) {
 	storeInst := mock.New()
-	passwordSvc := crypto.NewPasswordService(10)
+	passwordSvc := crypto.NewPasswordService(4)
 	emailSvc := service.NewEmailService(&service.EmailConfig{
 		SMTPHost: "localhost",
 		SMTPPort: 1,
@@ -335,7 +335,7 @@ func TestUserHandler_HandleChangePassword(t *testing.T) {
 	t.Run("旧密码错误", func(t *testing.T) {
 		storeInst.Reset()
 
-		hashedPw, _ := crypto.NewPasswordService(10).HashPassword("CorrectPass1!")
+		hashedPw, _ := crypto.NewPasswordService(4).HashPassword("CorrectPass1!")
 		storeInst.AddUser(&model.User{
 			ID:           "pwd-user",
 			Email:        "pwd@example.com",

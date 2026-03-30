@@ -23,7 +23,7 @@ func setupBenchAuthService(b *testing.B) (*service.AuthService, *mock.Store) {
 	b.Helper()
 
 	store := mock.New()
-	passwordSvc := crypto.NewPasswordService(10)
+	passwordSvc := crypto.NewPasswordService(4)
 
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -45,7 +45,7 @@ func setupBenchAuthService(b *testing.B) (*service.AuthService, *mock.Store) {
 func createBenchTestUser(b *testing.B, store *mock.Store, email, password string) *model.User {
 	b.Helper()
 
-	hashedPassword, err := crypto.NewPasswordService(10).HashPassword(password)
+	hashedPassword, err := crypto.NewPasswordService(4).HashPassword(password)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func createBenchTestUser(b *testing.B, store *mock.Store, email, password string
 // ============================================================================
 
 func BenchmarkPasswordService_Hash(b *testing.B) {
-	passwordSvc := crypto.NewPasswordService(10)
+	passwordSvc := crypto.NewPasswordService(4)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -79,7 +79,7 @@ func BenchmarkPasswordService_Hash(b *testing.B) {
 }
 
 func BenchmarkPasswordService_Verify(b *testing.B) {
-	passwordSvc := crypto.NewPasswordService(10)
+	passwordSvc := crypto.NewPasswordService(4)
 	hashedPassword, _ := passwordSvc.HashPassword("Password123!")
 
 	b.ResetTimer()
@@ -91,7 +91,7 @@ func BenchmarkPasswordService_Verify(b *testing.B) {
 }
 
 func BenchmarkPasswordService_HashVerify(b *testing.B) {
-	passwordSvc := crypto.NewPasswordService(10)
+	passwordSvc := crypto.NewPasswordService(4)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

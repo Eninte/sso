@@ -50,7 +50,7 @@ func createTestLoginHandler(t *testing.T) (*handler.LoginHandler, *mock.Store) {
 	store := mock.New()
 
 	// 创建密码服务
-	passwordSvc := crypto.NewPasswordService(10)
+	passwordSvc := crypto.NewPasswordService(4)
 
 	// 创建JWT服务
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -79,7 +79,7 @@ func createTestRegisterHandler(t *testing.T) (*handler.RegisterHandler, *mock.St
 	store := mock.New()
 
 	// 创建密码服务
-	passwordSvc := crypto.NewPasswordService(10)
+	passwordSvc := crypto.NewPasswordService(4)
 
 	// 创建JWT服务
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -110,7 +110,7 @@ func TestLoginHandler_Handle(t *testing.T) {
 	loginHandler, store := createTestLoginHandler(t)
 
 	// 创建测试用户
-	passwordSvc := crypto.NewPasswordService(10)
+	passwordSvc := crypto.NewPasswordService(4)
 	hashedPassword, err := passwordSvc.HashPassword("Password123!")
 	require.NoError(t, err)
 
@@ -351,7 +351,7 @@ func TestUserInfoHandler_Handle(t *testing.T) {
 func createTestTokenHandler(t *testing.T) (*handler.TokenHandler, *mock.Store) {
 	store := mock.New()
 
-	passwordSvc := crypto.NewPasswordService(10)
+	passwordSvc := crypto.NewPasswordService(4)
 
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
@@ -377,7 +377,7 @@ func TestTokenHandler_HandleToken_RefreshToken(t *testing.T) {
 	tokenHandler, store := createTestTokenHandler(t)
 
 	// 创建测试用户并登录获取Token
-	passwordSvc := crypto.NewPasswordService(10)
+	passwordSvc := crypto.NewPasswordService(4)
 	hashedPassword, _ := passwordSvc.HashPassword("Password123!")
 
 	user := &model.User{
@@ -584,7 +584,7 @@ func TestTokenHandler_HandleRevoke(t *testing.T) {
 	tokenHandler, store := createTestTokenHandler(t)
 
 	// 创建用户并登录
-	passwordSvc := crypto.NewPasswordService(10)
+	passwordSvc := crypto.NewPasswordService(4)
 	hashedPassword, _ := passwordSvc.HashPassword("Password123!")
 
 	user := &model.User{

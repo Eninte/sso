@@ -237,7 +237,7 @@ func TestHandlerErrorFunctions(t *testing.T) {
 	t.Run("writeLocalizedError", func(t *testing.T) {
 		// 通过验证失败触发写入错误
 		storeInst := mock.New()
-		passwordSvc := crypto.NewPasswordService(10)
+		passwordSvc := crypto.NewPasswordService(4)
 		jwtSvc := createTestJWTService()
 		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
 		loginHandler := handler.NewLoginHandler(authSvc)
@@ -267,7 +267,7 @@ func TestHandlerErrorFunctions(t *testing.T) {
 
 	t.Run("writeValidationError - validation error triggers 400", func(t *testing.T) {
 		storeInst := mock.New()
-		passwordSvc := crypto.NewPasswordService(10)
+		passwordSvc := crypto.NewPasswordService(4)
 		jwtSvc := createTestJWTService()
 		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
 		loginHandler := handler.NewLoginHandler(authSvc)
@@ -286,7 +286,7 @@ func TestHandlerErrorFunctions(t *testing.T) {
 	// 测试 helpers.go 中的工具函数
 	t.Run("decodeJSON - 正常解析", func(t *testing.T) {
 		storeInst := mock.New()
-		passwordSvc := crypto.NewPasswordService(10)
+		passwordSvc := crypto.NewPasswordService(4)
 		jwtSvc := createTestJWTService()
 		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
 		loginHandler := handler.NewLoginHandler(authSvc)

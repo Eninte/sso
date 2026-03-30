@@ -16,7 +16,7 @@ import (
 // ============================================================================
 
 func TestPasswordService_HashPassword(t *testing.T) {
-	svc := crypto.NewPasswordService(12)
+	svc := crypto.NewPasswordService(4)
 
 	tests := []struct {
 		name     string
@@ -86,7 +86,7 @@ func TestPasswordService_HashPassword(t *testing.T) {
 // ============================================================================
 
 func TestPasswordService_VerifyPassword(t *testing.T) {
-	svc := crypto.NewPasswordService(12)
+	svc := crypto.NewPasswordService(4)
 
 	password := "SecureP@ss123"
 	hash, err := svc.HashPassword(password)
@@ -140,22 +140,28 @@ func TestPasswordService_VerifyPassword(t *testing.T) {
 
 func TestNewPasswordService_CostNormalization(t *testing.T) {
 	tests := []struct {
-		name         string
-		inputCost    int
-		expectedCost int
+		name      string
+		inputCost int
+		skipShort bool
 	}{
-		{"过低的cost值", 5, 10},
-		{"正常的cost值", 12, 12},
-		{"过高的cost值", 20, 14},
+		{"过低cost提升到bcrypt最低", 1, false},
+		{"bcrypt最低cost", 4, false},
+		{"正常测试cost", 6, false},
+		{"正常生产cost", 12, true},
+		{"过高cost被限制", 20, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.skipShort && testing.Short() {
+				t.Skip("跳过慢速测试 (cost >= 12)")
+			}
 			svc := crypto.NewPasswordService(tt.inputCost)
-			// 验证服务可以正常工作
 			hash, err := svc.HashPassword("TestPassword123")
 			require.NoError(t, err)
 			assert.NotEmpty(t, hash)
+			err = svc.VerifyPassword(hash, "TestPassword123")
+			assert.NoError(t, err)
 		})
 	}
 }
@@ -165,7 +171,7 @@ func TestNewPasswordService_CostNormalization(t *testing.T) {
 // ============================================================================
 
 func TestPasswordService_UnicodePassword(t *testing.T) {
-	svc := crypto.NewPasswordService(10)
+	svc := crypto.NewPasswordService(4)
 
 	tests := []struct {
 		name     string
@@ -213,7 +219,7 @@ func TestPasswordService_UnicodePassword(t *testing.T) {
 }
 
 func TestPasswordService_VerifyPassword_InvalidHash(t *testing.T) {
-	svc := crypto.NewPasswordService(10)
+	svc := crypto.NewPasswordService(4)
 
 	tests := []struct {
 		name           string
@@ -246,7 +252,7 @@ func TestPasswordService_VerifyPassword_InvalidHash(t *testing.T) {
 }
 
 func TestPasswordService_SpecialCharacters(t *testing.T) {
-	svc := crypto.NewPasswordService(10)
+	svc := crypto.NewPasswordService(4)
 
 	tests := []struct {
 		name     string

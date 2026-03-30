@@ -5,6 +5,8 @@ package e2e
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -24,9 +26,9 @@ var (
 	baseURL = getEnvOrDefault("E2E_BASE_URL", "http://localhost:9090")
 	client  = &http.Client{Timeout: 30 * time.Second}
 
-	// 管理员账户配置
-	adminEmail    = getEnvOrDefault("E2E_ADMIN_EMAIL", "system@eninte.com")
-	adminPassword = getEnvOrDefault("E2E_ADMIN_PASSWORD", "Admin123!")
+	// 管理员账户配置 - 必须从环境变量读取，禁止硬编码默认值
+	adminEmail    = os.Getenv("E2E_ADMIN_EMAIL")
+	adminPassword = os.Getenv("E2E_ADMIN_PASSWORD")
 
 	// rateLimitDisabled 在 TestMain 中检测，为 true 表示限流已禁用
 	rateLimitDisabled bool
@@ -91,15 +93,37 @@ func TestMain(m *testing.M) {
 	}
 	fmt.Println("[OK] 测试专用 API 可用")
 
-	// 4. 确保管理员账户存在
+	// 4. 检查管理员账户环境变量是否设置
+	if adminEmail == "" || adminPassword == "" {
+		fmt.Println("FATAL: 管理员账户环境变量未设置")
+		fmt.Println("  必须设置 E2E_ADMIN_EMAIL 和 E2E_ADMIN_PASSWORD 环境变量")
+		fmt.Println("  示例: export E2E_ADMIN_EMAIL=admin@example.com")
+		fmt.Println("        export E2E_ADMIN_PASSWORD=YourSecurePassword123!")
+		os.Exit(1)
+	}
+
+	// 5. 检查管理员密码复杂度
+	if err := validatePasswordStrength(adminPassword); err != nil {
+		fmt.Printf("FATAL: 管理员密码不符合安全要求: %v\n", err)
+		fmt.Println("  密码必须满足以下条件:")
+		fmt.Println("    - 至少8个字符")
+		fmt.Println("    - 包含至少一个大写字母")
+		fmt.Println("    - 包含至少一个小写字母")
+		fmt.Println("    - 包含至少一个数字")
+		fmt.Println("    - 包含至少一个特殊字符 (!@#$%^&*()_+-=[]{}|;:,.<>?)")
+		os.Exit(1)
+	}
+
+	// 6. 确保管理员账户存在
 	if err := ensureAdminUser(); err != nil {
 		fmt.Printf("FATAL: 管理员账户准备失败: %v\n", err)
-		fmt.Println("  请确保数据库中存在管理员账户: system@eninte.com / Admin123!")
+		fmt.Printf("  请确保数据库中存在管理员账户: %s\n", adminEmail)
 		os.Exit(1)
 	}
 	fmt.Println("[OK] 管理员账户可用")
 
-	fmt.Println("=== 环境自检通过，开始运行测试 ===\n")
+	fmt.Println("=== 环境自检通过，开始运行测试 ===")
+	fmt.Println()
 
 	os.Exit(m.Run())
 }
@@ -121,6 +145,7 @@ func checkRateLimitDisabled() bool {
 }
 
 // ensureAdminUser 确保管理员账户存在且可登录
+// 注意：此函数仅在测试环境中使用，生产环境禁止自动创建管理员账户
 func ensureAdminUser() error {
 	req := loginRequest{Email: adminEmail, Password: adminPassword}
 	bodyBytes, _ := json.Marshal(req)
@@ -134,9 +159,28 @@ func ensureAdminUser() error {
 		return nil // 管理员已存在且可登录
 	}
 
-	// 管理员不存在，尝试注册
+	// 管理员不存在，检查是否允许自动创建
+	// 仅当 E2E_AUTO_CREATE_ADMIN=true 时才允许自动创建
+	if os.Getenv("E2E_AUTO_CREATE_ADMIN") != "true" {
+		return fmt.Errorf("管理员账户不存在且自动创建被禁用（设置 E2E_AUTO_CREATE_ADMIN=true 启用）")
+	}
+
+	// 生成随机密码用于自动创建的管理员账户（增强安全性）
+	autoPassword := adminPassword
+	if os.Getenv("E2E_AUTO_CREATE_ADMIN") == "true" {
+		// 如果环境变量设置了强制使用随机密码，则生成随机密码
+		if os.Getenv("E2E_USE_RANDOM_ADMIN_PASSWORD") == "true" {
+			randomPass, err := generateRandomPassword(16)
+			if err != nil {
+				return fmt.Errorf("生成随机密码失败: %w", err)
+			}
+			autoPassword = randomPass
+			fmt.Printf("[WARN] 使用随机生成的管理员密码（请记录）: %s\n", autoPassword)
+		}
+	}
+
 	fmt.Printf("[INFO] 管理员账户不存在，尝试自动创建...\n")
-	regReq := registerRequest{Email: adminEmail, Password: adminPassword}
+	regReq := registerRequest{Email: adminEmail, Password: autoPassword}
 	regBody, _ := json.Marshal(regReq)
 	regResp, err := client.Post(baseURL+"/api/v1/register", "application/json", bytes.NewReader(regBody))
 	if err != nil {
@@ -174,6 +218,56 @@ func ensureAdminUser() error {
 	}
 
 	fmt.Printf("[OK] 管理员账户已自动创建: %s\n", adminEmail)
+	return nil
+}
+
+// generateRandomPassword 生成随机密码
+func generateRandomPassword(length int) (string, error) {
+	bytes := make([]byte, length)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes)[:length], nil
+}
+
+// validatePasswordStrength 验证密码复杂度
+// 要求：至少8字符，包含大小写字母、数字和特殊字符
+func validatePasswordStrength(password string) error {
+	if len(password) < 8 {
+		return fmt.Errorf("密码长度不足8个字符")
+	}
+
+	hasUpper := false
+	hasLower := false
+	hasDigit := false
+	hasSpecial := false
+
+	for _, ch := range password {
+		switch {
+		case ch >= 'A' && ch <= 'Z':
+			hasUpper = true
+		case ch >= 'a' && ch <= 'z':
+			hasLower = true
+		case ch >= '0' && ch <= '9':
+			hasDigit = true
+		case strings.ContainsRune("!@#$%^&*()_+-=[]{}|;:,.<>?", ch):
+			hasSpecial = true
+		}
+	}
+
+	if !hasUpper {
+		return fmt.Errorf("密码必须包含至少一个大写字母")
+	}
+	if !hasLower {
+		return fmt.Errorf("密码必须包含至少一个小写字母")
+	}
+	if !hasDigit {
+		return fmt.Errorf("密码必须包含至少一个数字")
+	}
+	if !hasSpecial {
+		return fmt.Errorf("密码必须包含至少一个特殊字符")
+	}
+
 	return nil
 }
 

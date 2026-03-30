@@ -22,7 +22,7 @@ import (
 // createTestUserService 创建测试用的用户服务
 func createTestUserService() (*service.UserService, *mock.Store) {
 	mockStore := mock.New()
-	passwordSvc := crypto.NewPasswordService(10)
+	passwordSvc := crypto.NewPasswordService(4)
 	// 使用nil的emailSvc，测试时不实际发送邮件
 	var emailSvc *service.EmailService
 	userSvc := service.NewUserService(mockStore, passwordSvc, emailSvc, "http://localhost:9090")
@@ -32,7 +32,7 @@ func createTestUserService() (*service.UserService, *mock.Store) {
 // createTestUserServiceWithEmail 创建带mock邮件服务的用户服务
 func createTestUserServiceWithEmail() (*service.UserService, *mock.Store, *mockMailSender) {
 	mockStore := mock.New()
-	passwordSvc := crypto.NewPasswordService(10)
+	passwordSvc := crypto.NewPasswordService(4)
 	mockSender := &mockMailSender{}
 	emailSvc := service.NewEmailService(&service.EmailConfig{
 		SMTPHost: "localhost",
@@ -290,7 +290,7 @@ func TestUserService_ChangePassword(t *testing.T) {
 	ctx := context.Background()
 
 	// 创建密码哈希
-	passwordSvc := crypto.NewPasswordService(10)
+	passwordSvc := crypto.NewPasswordService(4)
 	hashedPassword, _ := passwordSvc.HashPassword("OldPassword123!")
 
 	t.Run("用户不存在", func(t *testing.T) {

@@ -298,7 +298,7 @@ func TestSocialLoginService_HandleCallback_FullFlow(t *testing.T) {
 		jwtSvc := createTestJWTService()
 
 		// 预先创建用户
-		hashedPw, _ := crypto.NewPasswordService(10).HashPassword("Pass123!")
+		hashedPw, _ := crypto.NewPasswordService(4).HashPassword("Pass123!")
 		storeInst.AddUser(&model.User{
 			ID:            "existing-id",
 			Email:         "existing@gmail.com",

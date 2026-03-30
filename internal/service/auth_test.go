@@ -32,7 +32,7 @@ func createTestAuthService(t *testing.T) (*service.AuthService, *mock.Store) {
 	store := mock.New()
 
 	// 创建密码服务
-	passwordSvc := crypto.NewPasswordService(10) // 使用较低的cost加快测试
+	passwordSvc := crypto.NewPasswordService(4) // 使用较低的cost加快测试
 
 	// 创建JWT服务
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -133,7 +133,7 @@ func TestAuthService_Login(t *testing.T) {
 
 	// 预先创建一个用户
 	store.Reset()
-	hashedPassword, err := crypto.NewPasswordService(10).HashPassword("Password123!")
+	hashedPassword, err := crypto.NewPasswordService(4).HashPassword("Password123!")
 	require.NoError(t, err)
 
 	testUser := &model.User{
@@ -298,7 +298,7 @@ func TestAuthService_RefreshToken(t *testing.T) {
 
 	// 先登录获取Token
 	store.Reset()
-	hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
+	hashedPassword, _ := crypto.NewPasswordService(4).HashPassword("Password123!")
 	testUser := &model.User{
 		ID:            "test-user-id",
 		Email:         "test@example.com",
@@ -346,7 +346,7 @@ func TestAuthService_Logout(t *testing.T) {
 	ctx := context.Background()
 
 	store.Reset()
-	hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
+	hashedPassword, _ := crypto.NewPasswordService(4).HashPassword("Password123!")
 	testUser := &model.User{
 		ID:            "test-user-id",
 		Email:         "test@example.com",
@@ -384,7 +384,7 @@ func TestAuthService_ValidateToken(t *testing.T) {
 	ctx := context.Background()
 
 	store.Reset()
-	hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
+	hashedPassword, _ := crypto.NewPasswordService(4).HashPassword("Password123!")
 	testUser := &model.User{
 		ID:            "test-user-id",
 		Email:         "test@example.com",
@@ -440,7 +440,7 @@ func TestAuthService_LogoutAll(t *testing.T) {
 	t.Run("成功登出所有设备", func(t *testing.T) {
 		store.Reset()
 
-		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
+		hashedPassword, _ := crypto.NewPasswordService(4).HashPassword("Password123!")
 		testUser := &model.User{
 			ID:            "test-user-logoutall",
 			Email:         "logoutall@example.com",
@@ -480,7 +480,7 @@ func TestAuthService_LogoutAll(t *testing.T) {
 
 func TestAuthService_NewAuthServiceWithAudit(t *testing.T) {
 	store := mock.New()
-	passwordSvc := crypto.NewPasswordService(10)
+	passwordSvc := crypto.NewPasswordService(4)
 	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 	jwtSvc := crypto.NewJWTService(
 		privateKey,
@@ -512,7 +512,7 @@ func TestAuthService_LoginWithAudit(t *testing.T) {
 		store.Reset()
 
 		// 创建测试用户
-		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
+		hashedPassword, _ := crypto.NewPasswordService(4).HashPassword("Password123!")
 		testUser := &model.User{
 			ID:            "test-user-audit-login",
 			Email:         "auditlogin@example.com",
@@ -545,7 +545,7 @@ func TestAuthService_LoginWithAudit(t *testing.T) {
 
 func TestNewAuthServiceWithCache(t *testing.T) {
 	store := mock.New()
-	passwordSvc := crypto.NewPasswordService(10)
+	passwordSvc := crypto.NewPasswordService(4)
 
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
@@ -595,7 +595,7 @@ func TestAuthService_LogoutWithAudit(t *testing.T) {
 	t.Run("带审计上下文的登出", func(t *testing.T) {
 		store.Reset()
 
-		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
+		hashedPassword, _ := crypto.NewPasswordService(4).HashPassword("Password123!")
 		testUser := &model.User{
 			ID:            "test-user-logout",
 			Email:         "logout@example.com",
@@ -646,7 +646,7 @@ func TestAuthService_LogoutAllWithAudit(t *testing.T) {
 	t.Run("带审计上下文的登出所有设备", func(t *testing.T) {
 		store.Reset()
 
-		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
+		hashedPassword, _ := crypto.NewPasswordService(4).HashPassword("Password123!")
 		testUser := &model.User{
 			ID:            "test-user-logoutall",
 			Email:         "logoutall@example.com",
@@ -670,7 +670,7 @@ func TestAuthService_LogoutAllWithAudit(t *testing.T) {
 	t.Run("撤销Token失败", func(t *testing.T) {
 		store := mock.New()
 		store.RevokeAllUserTokensErr = assert.AnError
-		passwordSvc := crypto.NewPasswordService(10)
+		passwordSvc := crypto.NewPasswordService(4)
 		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test-issuer", 15*time.Minute, 7*24*time.Hour)
 		authSvc := service.NewAuthService(store, passwordSvc, jwtSvc, 5, 30*time.Minute)
@@ -703,7 +703,7 @@ func TestAuthService_RefreshTokenWithAudit(t *testing.T) {
 	t.Run("带审计上下文的刷新token", func(t *testing.T) {
 		store.Reset()
 
-		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
+		hashedPassword, _ := crypto.NewPasswordService(4).HashPassword("Password123!")
 		testUser := &model.User{
 			ID:            "test-user-refresh",
 			Email:         "refresh@example.com",
@@ -752,7 +752,7 @@ func TestAuthService_WithMetrics(t *testing.T) {
 	store := mock.New()
 
 	// 创建密码服务
-	passwordSvc := crypto.NewPasswordService(10)
+	passwordSvc := crypto.NewPasswordService(4)
 
 	// 创建JWT服务
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -833,7 +833,7 @@ func TestAuthService_Register_StoreErrors(t *testing.T) {
 	t.Run("GetByEmail失败-返回错误", func(t *testing.T) {
 		storeInst := mock.New()
 		storeInst.GetUserByEmailErr = fmt.Errorf("database connection lost")
-		passwordSvc := crypto.NewPasswordService(10)
+		passwordSvc := crypto.NewPasswordService(4)
 		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test", 15*time.Minute, 7*24*time.Hour)
 		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
@@ -849,7 +849,7 @@ func TestAuthService_Register_StoreErrors(t *testing.T) {
 	t.Run("Create失败-返回错误", func(t *testing.T) {
 		storeInst := mock.New()
 		storeInst.CreateUserErr = fmt.Errorf("disk full")
-		passwordSvc := crypto.NewPasswordService(10)
+		passwordSvc := crypto.NewPasswordService(4)
 		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test", 15*time.Minute, 7*24*time.Hour)
 		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
@@ -869,7 +869,7 @@ func TestAuthService_Login_StoreErrors(t *testing.T) {
 	t.Run("GetByEmail失败-返回InvalidCredentials", func(t *testing.T) {
 		storeInst := mock.New()
 		storeInst.GetUserByEmailErr = fmt.Errorf("database timeout")
-		passwordSvc := crypto.NewPasswordService(10)
+		passwordSvc := crypto.NewPasswordService(4)
 		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test", 15*time.Minute, 7*24*time.Hour)
 		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
@@ -889,7 +889,7 @@ func TestAuthService_RefreshToken_StoreErrors(t *testing.T) {
 	t.Run("GetTokenByRefreshToken失败-返回InvalidToken", func(t *testing.T) {
 		storeInst := mock.New()
 		storeInst.GetTokenByRefreshTokenErr = fmt.Errorf("database error")
-		passwordSvc := crypto.NewPasswordService(10)
+		passwordSvc := crypto.NewPasswordService(4)
 		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test", 15*time.Minute, 7*24*time.Hour)
 		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
@@ -910,7 +910,7 @@ func TestAuthService_RefreshToken_StoreErrors(t *testing.T) {
 		})
 		// 然后让GetByID失败
 		storeInst.GetUserByIDErr = fmt.Errorf("user not found in db")
-		passwordSvc := crypto.NewPasswordService(10)
+		passwordSvc := crypto.NewPasswordService(4)
 		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test", 15*time.Minute, 7*24*time.Hour)
 		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
@@ -927,7 +927,7 @@ func TestAuthService_Logout_StoreErrors(t *testing.T) {
 	t.Run("RevokeToken失败-返回错误", func(t *testing.T) {
 		storeInst := mock.New()
 		storeInst.RevokeTokenErr = fmt.Errorf("token table locked")
-		passwordSvc := crypto.NewPasswordService(10)
+		passwordSvc := crypto.NewPasswordService(4)
 		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test", 15*time.Minute, 7*24*time.Hour)
 		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
@@ -945,7 +945,7 @@ func TestAuthService_LogoutAll_StoreErrors(t *testing.T) {
 	t.Run("RevokeAllUserTokens失败-返回错误", func(t *testing.T) {
 		storeInst := mock.New()
 		storeInst.RevokeAllUserTokensErr = fmt.Errorf("database error")
-		passwordSvc := crypto.NewPasswordService(10)
+		passwordSvc := crypto.NewPasswordService(4)
 		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test", 15*time.Minute, 7*24*time.Hour)
 		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
@@ -968,7 +968,7 @@ func TestAuthService_LoginWithAudit_VerifyLog(t *testing.T) {
 	t.Run("登录成功写入审计日志", func(t *testing.T) {
 		storeInst.Reset()
 
-		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
+		hashedPassword, _ := crypto.NewPasswordService(4).HashPassword("Password123!")
 		storeInst.AddUser(&model.User{
 			ID:            "audit-login-user",
 			Email:         "auditlogin@example.com",
@@ -1003,7 +1003,7 @@ func TestAuthService_LoginWithAudit_VerifyLog(t *testing.T) {
 	t.Run("登录失败写入审计日志", func(t *testing.T) {
 		storeInst.Reset()
 
-		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
+		hashedPassword, _ := crypto.NewPasswordService(4).HashPassword("Password123!")
 		storeInst.AddUser(&model.User{
 			ID:            "audit-login-fail-user",
 			Email:         "auditfail@example.com",
@@ -1041,7 +1041,7 @@ func TestAuthService_LogoutWithAudit_VerifyLog(t *testing.T) {
 	t.Run("登出写入审计日志", func(t *testing.T) {
 		storeInst.Reset()
 
-		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
+		hashedPassword, _ := crypto.NewPasswordService(4).HashPassword("Password123!")
 		storeInst.AddUser(&model.User{
 			ID:            "audit-logout-user",
 			Email:         "auditlogout@example.com",
@@ -1080,7 +1080,7 @@ func TestAuthService_RefreshTokenWithAudit_VerifyLog(t *testing.T) {
 	t.Run("刷新Token写入审计日志", func(t *testing.T) {
 		storeInst.Reset()
 
-		hashedPassword, _ := crypto.NewPasswordService(10).HashPassword("Password123!")
+		hashedPassword, _ := crypto.NewPasswordService(4).HashPassword("Password123!")
 		storeInst.AddUser(&model.User{
 			ID:            "audit-refresh-user",
 			Email:         "auditrefresh@example.com",
