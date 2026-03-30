@@ -37,8 +37,11 @@ func TestLargeRequestBody(t *testing.T) {
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
-		// 应该返回413 Request Entity Too Large或400
-		assert.True(t, resp.StatusCode == http.StatusRequestEntityTooLarge || resp.StatusCode == http.StatusBadRequest)
+		assertNotRateLimited(t, resp)
+		// 应该返回413 Request Entity Too Large或400，而不是500
+		assert.True(t, resp.StatusCode == http.StatusRequestEntityTooLarge || resp.StatusCode == http.StatusBadRequest,
+			"期望 413 或 400，实际 %d", resp.StatusCode)
+		assert.NotEqual(t, http.StatusInternalServerError, resp.StatusCode)
 	})
 
 	t.Run("超大URL参数", func(t *testing.T) {
@@ -49,8 +52,10 @@ func TestLargeRequestBody(t *testing.T) {
 		resp, _, err := doRequest("GET", url, nil, "")
 		require.NoError(t, err)
 
-		// 应该返回错误
-		assert.True(t, resp.StatusCode >= 400)
+		assertNotRateLimited(t, resp)
+		// 应该返回 400 或 414，而不是 500
+		assert.True(t, resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusRequestURITooLong,
+			"期望 400 或 414，实际 %d", resp.StatusCode)
 	})
 }
 
@@ -68,8 +73,10 @@ func TestInvalidContentType(t *testing.T) {
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
+		assertNotRateLimited(t, resp)
 		// 应该返回415或400
-		assert.True(t, resp.StatusCode == http.StatusUnsupportedMediaType || resp.StatusCode == http.StatusBadRequest)
+		assert.True(t, resp.StatusCode == http.StatusUnsupportedMediaType || resp.StatusCode == http.StatusBadRequest,
+			"期望 415 或 400，实际 %d", resp.StatusCode)
 	})
 
 	t.Run("Text Content-Type", func(t *testing.T) {
@@ -81,8 +88,10 @@ func TestInvalidContentType(t *testing.T) {
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
+		assertNotRateLimited(t, resp)
 		// 应该返回415或400
-		assert.True(t, resp.StatusCode == http.StatusUnsupportedMediaType || resp.StatusCode == http.StatusBadRequest)
+		assert.True(t, resp.StatusCode == http.StatusUnsupportedMediaType || resp.StatusCode == http.StatusBadRequest,
+			"期望 415 或 400，实际 %d", resp.StatusCode)
 	})
 
 	t.Run("缺少Content-Type", func(t *testing.T) {
@@ -94,8 +103,10 @@ func TestInvalidContentType(t *testing.T) {
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
+		assertNotRateLimited(t, resp)
 		// 应该返回400或415
-		assert.True(t, resp.StatusCode >= 400)
+		assert.True(t, resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnsupportedMediaType,
+			"期望 400 或 415，实际 %d", resp.StatusCode)
 	})
 }
 
@@ -110,6 +121,7 @@ func TestMissingRequiredFields(t *testing.T) {
 		}
 		resp, _, err := doRequest("POST", "/api/v1/register", req, "")
 		require.NoError(t, err)
+		assertNotRateLimited(t, resp)
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	})
 
@@ -119,6 +131,7 @@ func TestMissingRequiredFields(t *testing.T) {
 		}
 		resp, _, err := doRequest("POST", "/api/v1/register", req, "")
 		require.NoError(t, err)
+		assertNotRateLimited(t, resp)
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	})
 
@@ -128,6 +141,7 @@ func TestMissingRequiredFields(t *testing.T) {
 		}
 		resp, _, err := doRequest("POST", "/api/v1/login", req, "")
 		require.NoError(t, err)
+		assertNotRateLimited(t, resp)
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	})
 
@@ -137,13 +151,15 @@ func TestMissingRequiredFields(t *testing.T) {
 		}
 		resp, _, err := doRequest("POST", "/api/v1/login", req, "")
 		require.NoError(t, err)
+		assertNotRateLimited(t, resp)
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	})
 
 	t.Run("空请求体", func(t *testing.T) {
 		resp, _, err := doRequest("POST", "/api/v1/login", nil, "")
 		require.NoError(t, err)
-		assert.True(t, resp.StatusCode >= 400)
+		assertNotRateLimited(t, resp)
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	})
 }
 
@@ -175,7 +191,8 @@ func TestSQLInjectionAttempt(t *testing.T) {
 			require.NoError(t, err)
 
 			// 应该返回400（验证失败）而不是500（服务器错误）
-			assert.NotEqual(t, http.StatusInternalServerError, resp.StatusCode)
+			assert.NotEqual(t, http.StatusInternalServerError, resp.StatusCode,
+				"SQL 注入 payload 导致 500 内部错误，可能存在安全漏洞")
 			assert.True(t, resp.StatusCode >= 400)
 		})
 	}
@@ -189,7 +206,8 @@ func TestSQLInjectionAttempt(t *testing.T) {
 		require.NoError(t, err)
 
 		// 应该返回400或401，而不是500
-		assert.NotEqual(t, http.StatusInternalServerError, resp.StatusCode)
+		assert.NotEqual(t, http.StatusInternalServerError, resp.StatusCode,
+			"SQL 注入 payload 导致 500 内部错误，可能存在安全漏洞")
 	})
 }
 
@@ -220,7 +238,7 @@ func TestXSSAttempt(t *testing.T) {
 			assert.NotContains(t, bodyStr, "javascript:")
 
 			// 应该返回400（验证失败）
-			assert.True(t, resp.StatusCode >= 400)
+			assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 		})
 	}
 }
@@ -260,9 +278,10 @@ func TestInvalidHTTPMethod(t *testing.T) {
 			resp, _, err := doRequest(method, "/api/v1/login", nil, "")
 			require.NoError(t, err)
 
+			assertNotRateLimited(t, resp)
 			// 应该返回405 Method Not Allowed
-			// 注意：某些方法可能返回其他错误码
-			assert.True(t, resp.StatusCode >= 400)
+			assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode,
+				"期望 405，实际 %d", resp.StatusCode)
 		})
 	}
 }
@@ -280,8 +299,10 @@ func TestSpecialCharacters(t *testing.T) {
 		resp, _, err := doRequest("POST", "/api/v1/register", req, "")
 		require.NoError(t, err)
 
-		// 可能返回400（无效邮箱）或成功
-		t.Logf("Unicode邮箱响应状态: %d", resp.StatusCode)
+		assertNotRateLimited(t, resp)
+		// 可能返回400（无效邮箱）或201（成功），取决于邮箱验证策略
+		assert.True(t, resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusBadRequest,
+			"期望 201 或 400，实际 %d", resp.StatusCode)
 	})
 
 	t.Run("空字节", func(t *testing.T) {
@@ -292,6 +313,7 @@ func TestSpecialCharacters(t *testing.T) {
 		resp, _, err := doRequest("POST", "/api/v1/register", req, "")
 		require.NoError(t, err)
 
+		assertNotRateLimited(t, resp)
 		// 应该返回400
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	})
@@ -304,6 +326,7 @@ func TestSpecialCharacters(t *testing.T) {
 		resp, _, err := doRequest("POST", "/api/v1/register", req, "")
 		require.NoError(t, err)
 
+		assertNotRateLimited(t, resp)
 		// 应该返回400
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	})
@@ -324,8 +347,10 @@ func TestBoundaryValues(t *testing.T) {
 		resp, _, err := doRequest("POST", "/api/v1/register", req, "")
 		require.NoError(t, err)
 
-		// 可能返回400（过长）或成功
-		t.Logf("长邮箱响应状态: %d", resp.StatusCode)
+		assertNotRateLimited(t, resp)
+		// 可能返回400（过长）或201（成功），取决于验证策略
+		assert.True(t, resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusBadRequest,
+			"期望 201 或 400，实际 %d", resp.StatusCode)
 	})
 
 	t.Run("密码最小长度", func(t *testing.T) {
@@ -336,8 +361,10 @@ func TestBoundaryValues(t *testing.T) {
 		resp, _, err := doRequest("POST", "/api/v1/register", req, "")
 		require.NoError(t, err)
 
-		// 取决于密码策略
-		t.Logf("最小密码响应状态: %d", resp.StatusCode)
+		assertNotRateLimited(t, resp)
+		// 取决于密码策略，8位密码可能通过或不通过
+		assert.True(t, resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusBadRequest,
+			"期望 201 或 400，实际 %d", resp.StatusCode)
 	})
 
 	t.Run("密码边界长度", func(t *testing.T) {
@@ -348,6 +375,7 @@ func TestBoundaryValues(t *testing.T) {
 		resp, _, err := doRequest("POST", "/api/v1/register", req, "")
 		require.NoError(t, err)
 
+		assertNotRateLimited(t, resp)
 		// 应该返回400
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	})

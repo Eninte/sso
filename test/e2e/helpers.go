@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"testing"
 	"time"
 )
 
@@ -22,6 +23,13 @@ import (
 var (
 	baseURL = getEnvOrDefault("E2E_BASE_URL", "http://localhost:9090")
 	client  = &http.Client{Timeout: 30 * time.Second}
+
+	// 管理员账户配置
+	adminEmail    = getEnvOrDefault("E2E_ADMIN_EMAIL", "system@eninte.com")
+	adminPassword = getEnvOrDefault("E2E_ADMIN_PASSWORD", "Admin123!")
+
+	// rateLimitDisabled 在 TestMain 中检测，为 true 表示限流已禁用
+	rateLimitDisabled bool
 )
 
 func getEnvOrDefault(key, defaultValue string) string {
@@ -29,6 +37,159 @@ func getEnvOrDefault(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+// ============================================================================
+// TestMain 环境自检
+// ============================================================================
+
+func TestMain(m *testing.M) {
+	fmt.Println("=== E2E 测试环境自检 ===")
+
+	// 1. 检查服务可达性
+	resp, err := client.Get(baseURL + "/health")
+	if err != nil {
+		fmt.Printf("FATAL: SSO服务不可达 (%s)\n  错误: %v\n  请先启动服务: set -a; source .env.test; set +a; ./bin/sso &\n", baseURL, err)
+		os.Exit(1)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		fmt.Printf("FATAL: 健康检查返回 %d，期望 200\n", resp.StatusCode)
+		os.Exit(1)
+	}
+	fmt.Println("[OK] 服务可达")
+
+	// 2. 检测限流是否已禁用
+	rateLimitDisabled = checkRateLimitDisabled()
+	if !rateLimitDisabled {
+		fmt.Println("FATAL: 限流未禁用，大量测试将因 429 失败")
+		fmt.Println("  请以 RATE_LIMIT_REQUESTS=0 启动服务")
+		fmt.Println("  示例: RATE_LIMIT_REQUESTS=0 set -a; source .env.test; set +a; ./bin/sso &")
+		os.Exit(1)
+	}
+	fmt.Println("[OK] 限流已禁用")
+
+	// 3. 检查测试专用 API 可用性
+	probeReq := map[string]string{"user_id": "00000000-0000-0000-0000-000000000000"}
+	probeBody, _ := json.Marshal(probeReq)
+	probeResp, err := client.Post(baseURL+"/api/v1/test/verify-email", "application/json", bytes.NewReader(probeBody))
+	if err != nil {
+		fmt.Printf("FATAL: 测试专用 API 不可达: %v\n", err)
+		os.Exit(1)
+	}
+	probeResp.Body.Close()
+	// 404 表示端点未注册（非 dev 环境），403 表示环境不允许
+	if probeResp.StatusCode == http.StatusNotFound {
+		fmt.Println("FATAL: /api/v1/test/verify-email 返回 404")
+		fmt.Println("  服务需要以 SERVER_ENV=development 启用测试 API")
+		os.Exit(1)
+	}
+	if probeResp.StatusCode == http.StatusForbidden {
+		fmt.Println("FATAL: /api/v1/test/verify-email 返回 403")
+		fmt.Println("  服务需要 SERVER_ENV=development 或 E2E_ENABLED=true")
+		os.Exit(1)
+	}
+	fmt.Println("[OK] 测试专用 API 可用")
+
+	// 4. 确保管理员账户存在
+	if err := ensureAdminUser(); err != nil {
+		fmt.Printf("FATAL: 管理员账户准备失败: %v\n", err)
+		fmt.Println("  请确保数据库中存在管理员账户: system@eninte.com / Admin123!")
+		os.Exit(1)
+	}
+	fmt.Println("[OK] 管理员账户可用")
+
+	fmt.Println("=== 环境自检通过，开始运行测试 ===\n")
+
+	os.Exit(m.Run())
+}
+
+// checkRateLimitDisabled 快速检测限流是否已禁用
+func checkRateLimitDisabled() bool {
+	// 连续发 5 个请求到 /health，任一返回 429 则限流未禁用
+	for i := 0; i < 5; i++ {
+		resp, err := client.Get(baseURL + "/health")
+		if err != nil {
+			return false
+		}
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return false
+		}
+	}
+	return true
+}
+
+// ensureAdminUser 确保管理员账户存在且可登录
+func ensureAdminUser() error {
+	req := loginRequest{Email: adminEmail, Password: adminPassword}
+	bodyBytes, _ := json.Marshal(req)
+	resp, err := client.Post(baseURL+"/api/v1/login", "application/json", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return fmt.Errorf("登录请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		return nil // 管理员已存在且可登录
+	}
+
+	// 管理员不存在，尝试注册
+	fmt.Printf("[INFO] 管理员账户不存在，尝试自动创建...\n")
+	regReq := registerRequest{Email: adminEmail, Password: adminPassword}
+	regBody, _ := json.Marshal(regReq)
+	regResp, err := client.Post(baseURL+"/api/v1/register", "application/json", bytes.NewReader(regBody))
+	if err != nil {
+		return fmt.Errorf("注册管理员失败: %w", err)
+	}
+	defer regResp.Body.Close()
+
+	if regResp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("注册管理员返回 %d（期望 201）", regResp.StatusCode)
+	}
+
+	// 解析 user_id
+	var regResult map[string]interface{}
+	regRespBody, _ := io.ReadAll(regResp.Body)
+	if err := json.Unmarshal(regRespBody, &regResult); err != nil {
+		return fmt.Errorf("解析注册响应失败: %w", err)
+	}
+	data, _ := regResult["data"].(map[string]interface{})
+	userID, _ := data["user_id"].(string)
+	if userID == "" {
+		return fmt.Errorf("注册响应中无 user_id")
+	}
+
+	// 验证邮箱（使用测试 API）
+	verifyReq := map[string]string{"user_id": userID}
+	verifyBody, _ := json.Marshal(verifyReq)
+	verifyResp, err := client.Post(baseURL+"/api/v1/test/verify-email", "application/json", bytes.NewReader(verifyBody))
+	if err != nil {
+		return fmt.Errorf("验证邮箱失败: %w", err)
+	}
+	verifyResp.Body.Close()
+
+	if verifyResp.StatusCode != http.StatusOK {
+		return fmt.Errorf("验证邮箱返回 %d（期望 200）", verifyResp.StatusCode)
+	}
+
+	fmt.Printf("[OK] 管理员账户已自动创建: %s\n", adminEmail)
+	return nil
+}
+
+// ============================================================================
+// 测试断言辅助
+// ============================================================================
+
+// assertNotRateLimited 检查 HTTP 响应是否被限流。
+// 如果返回 429，标记测试失败并提示检查环境配置。
+func assertNotRateLimited(t *testing.T, resp *http.Response) bool {
+	t.Helper()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		t.Fatalf("请求被限流 (429)，请确认服务以 RATE_LIMIT_REQUESTS=0 启动")
+		return false
+	}
+	return true
 }
 
 // ============================================================================

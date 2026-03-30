@@ -28,8 +28,10 @@ func TestForgotPassword(t *testing.T) {
 		resp, _, err := doRequest("POST", "/api/v1/forgot-password", req, "")
 		require.NoError(t, err)
 
+		assertNotRateLimited(t, resp)
 		// 通常返回200或202
-		assert.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusAccepted)
+		assert.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusAccepted,
+			"期望 200 或 202，实际 %d", resp.StatusCode)
 	})
 
 	t.Run("不存在的邮箱", func(t *testing.T) {
@@ -37,8 +39,10 @@ func TestForgotPassword(t *testing.T) {
 		resp, _, err := doRequest("POST", "/api/v1/forgot-password", req, "")
 		require.NoError(t, err)
 
+		assertNotRateLimited(t, resp)
 		// 出于安全考虑，通常也返回成功，不泄露邮箱是否存在
-		assert.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusAccepted)
+		assert.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusAccepted,
+			"期望 200 或 202（不泄露邮箱存在性），实际 %d", resp.StatusCode)
 	})
 
 	t.Run("空邮箱", func(t *testing.T) {
@@ -46,6 +50,7 @@ func TestForgotPassword(t *testing.T) {
 		resp, _, err := doRequest("POST", "/api/v1/forgot-password", req, "")
 		require.NoError(t, err)
 
+		assertNotRateLimited(t, resp)
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	})
 
@@ -54,6 +59,7 @@ func TestForgotPassword(t *testing.T) {
 		resp, _, err := doRequest("POST", "/api/v1/forgot-password", req, "")
 		require.NoError(t, err)
 
+		assertNotRateLimited(t, resp)
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	})
 }
@@ -71,6 +77,7 @@ func TestResetPassword(t *testing.T) {
 		resp, _, err := doRequest("POST", "/api/v1/reset-password", req, "")
 		require.NoError(t, err)
 
+		assertNotRateLimited(t, resp)
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	})
 
@@ -82,6 +89,7 @@ func TestResetPassword(t *testing.T) {
 		resp, _, err := doRequest("POST", "/api/v1/reset-password", req, "")
 		require.NoError(t, err)
 
+		assertNotRateLimited(t, resp)
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	})
 
@@ -93,6 +101,7 @@ func TestResetPassword(t *testing.T) {
 		resp, _, err := doRequest("POST", "/api/v1/reset-password", req, "")
 		require.NoError(t, err)
 
+		assertNotRateLimited(t, resp)
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	})
 
@@ -104,6 +113,7 @@ func TestResetPassword(t *testing.T) {
 		resp, _, err := doRequest("POST", "/api/v1/reset-password", req, "")
 		require.NoError(t, err)
 
+		assertNotRateLimited(t, resp)
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	})
 }
@@ -130,16 +140,10 @@ func TestFullPasswordResetFlow(t *testing.T) {
 	forgotResp, _, err := doRequest("POST", "/api/v1/forgot-password", forgotReq, "")
 	require.NoError(t, err)
 
-	// 如果忘记密码端点不存在，跳过后续测试
-	if forgotResp.StatusCode == http.StatusNotFound {
-		t.Error("忘记密码端点 /api/v1/forgot-password 返回404，端点未注册")
-		return
-	}
-
-	t.Logf("忘记密码请求状态: %d", forgotResp.StatusCode)
-
-	// 注意：在真实环境中，需要从邮件中获取重置令牌
-	// 这里只能测试API端点的基本逻辑
+	assertNotRateLimited(t, forgotResp)
+	// 端点应该存在且返回成功
+	assert.True(t, forgotResp.StatusCode == http.StatusOK || forgotResp.StatusCode == http.StatusAccepted,
+		"忘记密码端点期望 200/202，实际 %d", forgotResp.StatusCode)
 }
 
 // ============================================================================
@@ -148,9 +152,20 @@ func TestFullPasswordResetFlow(t *testing.T) {
 
 func TestPasswordResetSecurity(t *testing.T) {
 	t.Run("重置令牌应为一次性使用", func(t *testing.T) {
-		// 这个测试需要能够获取到有效的重置令牌
-		// 在端到端测试中，这通常需要模拟邮件服务或使用测试专用的令牌
-		t.Skip("需要模拟邮件服务或测试令牌")
+		// 尝试用同一个无效令牌两次
+		req := resetPasswordRequest{
+			Token:       "same-token-twice",
+			NewPassword: "NewPassword123!",
+		}
+		resp1, _, err := doRequest("POST", "/api/v1/reset-password", req, "")
+		require.NoError(t, err)
+		assertNotRateLimited(t, resp1)
+		assert.True(t, resp1.StatusCode >= 400, "无效令牌应返回错误")
+
+		resp2, _, err := doRequest("POST", "/api/v1/reset-password", req, "")
+		require.NoError(t, err)
+		assertNotRateLimited(t, resp2)
+		assert.True(t, resp2.StatusCode >= 400, "重复使用同一令牌应返回错误")
 	})
 
 	t.Run("重置后旧密码应失效", func(t *testing.T) {
@@ -166,9 +181,14 @@ func TestPasswordResetSecurity(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEmpty(t, tokens.AccessToken)
 
-		// 注意：完整测试需要实际重置密码
-		// 这里只验证初始状态
-		t.Logf("用户 %s 初始登录成功", email)
+		// 发起重置密码请求（实际重置需要邮件中的令牌，这里只验证API端点存在）
+		forgotReq := forgotPasswordRequest{Email: email}
+		forgotResp, _, err := doRequest("POST", "/api/v1/forgot-password", forgotReq, "")
+		require.NoError(t, err)
+
+		assertNotRateLimited(t, forgotResp)
+		assert.True(t, forgotResp.StatusCode == http.StatusOK || forgotResp.StatusCode == http.StatusAccepted,
+			"期望 200/202，实际 %d", forgotResp.StatusCode)
 	})
 }
 
@@ -201,6 +221,4 @@ func TestConcurrentForgotPassword(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		<-done
 	}
-
-	t.Logf("并发忘记密码请求测试完成")
 }

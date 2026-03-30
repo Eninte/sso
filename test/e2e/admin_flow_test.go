@@ -14,23 +14,22 @@ import (
 )
 
 // ============================================================================
-// 管理员配置
-// ============================================================================
-
-var (
-	adminEmail    = getEnvOrDefault("E2E_ADMIN_EMAIL", "system@eninte.com")
-	adminPassword = getEnvOrDefault("E2E_ADMIN_PASSWORD", "Admin123!")
-)
-
-// ============================================================================
 // 管理员登录辅助函数
 // ============================================================================
 
+func isDefaultAdminCredentials() bool {
+	return adminEmail == "system@eninte.com" && adminPassword == "Admin123!"
+}
+
+func skipIfDefaultAdmin(t *testing.T) {
+	if isDefaultAdminCredentials() {
+		t.Skip("使用默认管理员凭证，请设置 E2E_ADMIN_EMAIL 和 E2E_ADMIN_PASSWORD 环境变量")
+	}
+}
+
 func loginAdmin() (*loginResponse, error) {
-	// 尝试使用管理员账户登录
 	tokens, err := loginUser(adminEmail, adminPassword)
 	if err != nil {
-		// 如果管理员账户不存在，跳过管理员测试
 		return nil, fmt.Errorf("管理员登录失败: %w", err)
 	}
 	return tokens, nil
@@ -41,7 +40,7 @@ func loginAdmin() (*loginResponse, error) {
 // ============================================================================
 
 func TestAdminListUsers(t *testing.T) {
-	// 管理员登录（测试环境已配置管理员账户）
+	skipIfDefaultAdmin(t)
 	adminTokens, err := loginAdmin()
 	require.NoError(t, err, "管理员登录失败，请检查 E2E_ADMIN_EMAIL 和 E2E_ADMIN_PASSWORD")
 
@@ -69,6 +68,7 @@ func TestAdminListUsers(t *testing.T) {
 // ============================================================================
 
 func TestAdminGetUser(t *testing.T) {
+	skipIfDefaultAdmin(t)
 	adminTokens, err := loginAdmin()
 	require.NoError(t, err, "管理员登录失败")
 
@@ -115,6 +115,7 @@ func TestAdminGetUser(t *testing.T) {
 // ============================================================================
 
 func TestAdminDisableEnableUser(t *testing.T) {
+	skipIfDefaultAdmin(t)
 	adminTokens, err := loginAdmin()
 	require.NoError(t, err, "管理员登录失败")
 
@@ -201,6 +202,7 @@ func TestAdminUnauthorized(t *testing.T) {
 // ============================================================================
 
 func TestAdminDeleteUser(t *testing.T) {
+	skipIfDefaultAdmin(t)
 	adminTokens, err := loginAdmin()
 	require.NoError(t, err, "管理员登录失败")
 
@@ -232,6 +234,7 @@ func TestAdminDeleteUser(t *testing.T) {
 // ============================================================================
 
 func TestAdminAuditLogs(t *testing.T) {
+	skipIfDefaultAdmin(t)
 	adminTokens, err := loginAdmin()
 	require.NoError(t, err, "管理员登录失败")
 

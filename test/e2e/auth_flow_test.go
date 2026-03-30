@@ -93,9 +93,6 @@ func TestLoginFlow(t *testing.T) {
 	err = verifyEmail(userID)
 	require.NoError(t, err, "验证邮箱失败")
 
-	// 等待数据库完全提交
-	time.Sleep(100 * time.Millisecond)
-
 	t.Run("成功登录", func(t *testing.T) {
 		tokens, err := loginUser(email, password)
 		require.NoError(t, err)
@@ -205,7 +202,7 @@ func TestRateLimit(t *testing.T) {
 			return
 		}
 	}
-	t.Logf("未触发限流（可能限流阈值较高）")
+	t.Logf("未触发限流（限流已禁用或阈值较高）")
 }
 
 // ============================================================================
@@ -240,8 +237,6 @@ func TestMultiDeviceLogin(t *testing.T) {
 	resp2, _, err := doRequest("GET", "/api/v1/userinfo", nil, tokens2.AccessToken)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp2.StatusCode)
-
-	t.Logf("多设备登录测试通过")
 }
 
 // ============================================================================
@@ -277,13 +272,13 @@ func TestLogoutAllDevices(t *testing.T) {
 	time.Sleep(100 * time.Millisecond) // 等待异步操作
 
 	resp1, _, _ := doRequest("GET", "/api/v1/userinfo", nil, tokens1.AccessToken)
-	// 注意：根据实现，可能返回401或403
-	assert.True(t, resp1.StatusCode == http.StatusUnauthorized || resp1.StatusCode == http.StatusForbidden,
-		"Token1应该失效，实际状态码: %d", resp1.StatusCode)
+	// Token应该失效，返回 401
+	assert.Equal(t, http.StatusUnauthorized, resp1.StatusCode,
+		"登出后 Token 应返回 401，实际 %d", resp1.StatusCode)
 
 	resp2, _, _ := doRequest("GET", "/api/v1/userinfo", nil, tokens2.AccessToken)
-	assert.True(t, resp2.StatusCode == http.StatusUnauthorized || resp2.StatusCode == http.StatusForbidden,
-		"Token2应该失效，实际状态码: %d", resp2.StatusCode)
+	assert.Equal(t, http.StatusUnauthorized, resp2.StatusCode,
+		"登出后 Token 应返回 401，实际 %d", resp2.StatusCode)
 }
 
 // ============================================================================
@@ -311,7 +306,8 @@ func TestRequestFormat(t *testing.T) {
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
-		// 可能返回400或415
-		assert.True(t, resp.StatusCode >= 400)
+		// 应该返回 400 或 415
+		assert.True(t, resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnsupportedMediaType,
+			"期望 400 或 415，实际 %d", resp.StatusCode)
 	})
 }
