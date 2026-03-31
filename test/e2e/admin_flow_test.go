@@ -17,22 +17,58 @@ import (
 // 管理员登录辅助函数
 // ============================================================================
 
-func isDefaultAdminCredentials() bool {
-	return adminEmail == "system@eninte.com" && adminPassword == "Admin123!"
-}
-
-func skipIfDefaultAdmin(t *testing.T) {
-	if isDefaultAdminCredentials() {
-		t.Skip("使用默认管理员凭证，请设置 E2E_ADMIN_EMAIL 和 E2E_ADMIN_PASSWORD 环境变量")
-	}
-}
-
 func loginAdmin() (*loginResponse, error) {
+	// 先尝试直接登录
 	tokens, err := loginUser(adminEmail, adminPassword)
+	if err == nil {
+		return tokens, nil
+	}
+
+	// 登录失败，管理员可能不存在，自动创建
+	fmt.Printf("[INFO] 管理员登录失败，尝试自动创建管理员账户...\n")
+
+	// 注册管理员账户
+	user, regErr := registerUser(adminEmail, adminPassword)
+	if regErr != nil {
+		return nil, fmt.Errorf("管理员登录失败且自动创建也失败: 登录错误=%v, 注册错误=%v", err, regErr)
+	}
+
+	userID, _ := user["user_id"].(string)
+	if userID == "" {
+		return nil, fmt.Errorf("注册响应中无 user_id")
+	}
+
+	// 验证邮箱
+	if verifyErr := verifyEmail(userID); verifyErr != nil {
+		return nil, fmt.Errorf("验证管理员邮箱失败: %w", verifyErr)
+	}
+
+	// 设置角色为 admin
+	if roleErr := setUserRole(userID, "admin"); roleErr != nil {
+		return nil, fmt.Errorf("设置管理员角色失败: %w", roleErr)
+	}
+
+	fmt.Printf("[OK] 管理员账户已自动创建: %s\n", adminEmail)
+
+	// 重新登录
+	tokens, err = loginUser(adminEmail, adminPassword)
 	if err != nil {
-		return nil, fmt.Errorf("管理员登录失败: %w", err)
+		return nil, fmt.Errorf("管理员创建后登录失败: %w", err)
 	}
 	return tokens, nil
+}
+
+// setUserRole 通过测试API设置用户角色
+func setUserRole(userID, role string) error {
+	req := map[string]string{"user_id": userID, "role": role}
+	resp, _, err := doRequest("POST", "/api/v1/test/set-role", req, "")
+	if err != nil {
+		return fmt.Errorf("设置角色请求失败: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("设置角色失败: %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // ============================================================================
@@ -40,7 +76,6 @@ func loginAdmin() (*loginResponse, error) {
 // ============================================================================
 
 func TestAdminListUsers(t *testing.T) {
-	skipIfDefaultAdmin(t)
 	adminTokens, err := loginAdmin()
 	require.NoError(t, err, "管理员登录失败，请检查 E2E_ADMIN_EMAIL 和 E2E_ADMIN_PASSWORD")
 
@@ -68,7 +103,6 @@ func TestAdminListUsers(t *testing.T) {
 // ============================================================================
 
 func TestAdminGetUser(t *testing.T) {
-	skipIfDefaultAdmin(t)
 	adminTokens, err := loginAdmin()
 	require.NoError(t, err, "管理员登录失败")
 
@@ -115,7 +149,6 @@ func TestAdminGetUser(t *testing.T) {
 // ============================================================================
 
 func TestAdminDisableEnableUser(t *testing.T) {
-	skipIfDefaultAdmin(t)
 	adminTokens, err := loginAdmin()
 	require.NoError(t, err, "管理员登录失败")
 
@@ -131,8 +164,7 @@ func TestAdminDisableEnableUser(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("禁用用户", func(t *testing.T) {
-		req := adminUserActionRequest{UserID: userID}
-		resp, _, err := doRequest("POST", "/api/v1/admin/users/"+userID+"/disable", req, adminTokens.AccessToken)
+		resp, _, err := doRequest("POST", "/api/v1/admin/users/"+userID+"/disable", nil, adminTokens.AccessToken)
 		require.NoError(t, err)
 		assert.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent)
 	})
@@ -147,8 +179,7 @@ func TestAdminDisableEnableUser(t *testing.T) {
 	})
 
 	t.Run("启用用户", func(t *testing.T) {
-		req := adminUserActionRequest{UserID: userID}
-		resp, _, err := doRequest("POST", "/api/v1/admin/users/"+userID+"/enable", req, adminTokens.AccessToken)
+		resp, _, err := doRequest("POST", "/api/v1/admin/users/"+userID+"/enable", nil, adminTokens.AccessToken)
 		require.NoError(t, err)
 		assert.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent)
 	})
@@ -202,7 +233,6 @@ func TestAdminUnauthorized(t *testing.T) {
 // ============================================================================
 
 func TestAdminDeleteUser(t *testing.T) {
-	skipIfDefaultAdmin(t)
 	adminTokens, err := loginAdmin()
 	require.NoError(t, err, "管理员登录失败")
 
@@ -234,7 +264,6 @@ func TestAdminDeleteUser(t *testing.T) {
 // ============================================================================
 
 func TestAdminAuditLogs(t *testing.T) {
-	skipIfDefaultAdmin(t)
 	adminTokens, err := loginAdmin()
 	require.NoError(t, err, "管理员登录失败")
 

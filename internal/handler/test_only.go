@@ -74,3 +74,45 @@ func (h *TestHandler) HandleVerifyEmail(w http.ResponseWriter, r *http.Request) 
 
 	writeSuccess(w, http.StatusOK, "邮箱验证成功", nil)
 }
+
+// HandleSetRole 测试专用设置用户角色API
+// POST /api/v1/test/set-role
+func (h *TestHandler) HandleSetRole(w http.ResponseWriter, r *http.Request) {
+	if !h.checkEnvironment(w) {
+		return
+	}
+	var req struct {
+		UserID string `json:"user_id"`
+		Role   string `json:"role"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "无效的请求格式")
+		return
+	}
+
+	if req.UserID == "" {
+		writeError(w, http.StatusBadRequest, "user_id不能为空")
+		return
+	}
+
+	if req.Role != "admin" && req.Role != "user" {
+		writeError(w, http.StatusBadRequest, "role必须是admin或user")
+		return
+	}
+
+	// 直接更新用户的角色
+	user, err := h.store.GetByID(r.Context(), req.UserID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "用户不存在")
+		return
+	}
+
+	user.Role = req.Role
+	if err := h.store.Update(r.Context(), user); err != nil {
+		writeError(w, http.StatusInternalServerError, "更新失败")
+		return
+	}
+
+	writeSuccess(w, http.StatusOK, "角色设置成功", nil)
+}
