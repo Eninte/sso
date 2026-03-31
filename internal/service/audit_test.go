@@ -27,7 +27,7 @@ func createTestAuditService() (*service.AuditService, *mock.Store) {
 }
 
 // waitForAuditLogs 轮询等待异步审计日志写入完成
-func waitForAuditLogs(t *testing.T, ctx context.Context, store *mock.Store, userID, eventType string, minCount int) {
+func waitForAuditLogs(ctx context.Context, t *testing.T, store *mock.Store, userID, eventType string, minCount int) {
 	t.Helper()
 	require.Eventually(t, func() bool {
 		logs, _, err := store.ListAuditLogs(ctx, userID, eventType, 0, 100)
@@ -61,7 +61,7 @@ func TestAuditService_Log(t *testing.T) {
 
 		auditSvc.Log(ctx, log)
 
-		waitForAuditLogs(t, ctx, store, "test-user-1", string(model.EventUserLogin), 1)
+		waitForAuditLogs(ctx, t, store, "test-user-1", string(model.EventUserLogin), 1)
 	})
 
 	t.Run("自动生成ID和时间戳", func(t *testing.T) {
@@ -95,7 +95,7 @@ func TestAuditService_LogUserRegister(t *testing.T) {
 
 		auditSvc.LogUserRegister(ctx, "user-1", "test@example.com", "192.168.1.1", true)
 
-		waitForAuditLogs(t, ctx, store, "user-1", string(model.EventUserRegister), 1)
+		waitForAuditLogs(ctx, t, store, "user-1", string(model.EventUserRegister), 1)
 	})
 
 	t.Run("记录用户注册失败", func(t *testing.T) {
@@ -103,7 +103,7 @@ func TestAuditService_LogUserRegister(t *testing.T) {
 
 		auditSvc.LogUserRegister(ctx, "", "invalid@example.com", "192.168.1.1", false)
 
-		waitForAuditLogs(t, ctx, store, "", string(model.EventUserRegister), 1)
+		waitForAuditLogs(ctx, t, store, "", string(model.EventUserRegister), 1)
 	})
 }
 
@@ -120,7 +120,7 @@ func TestAuditService_LogUserLogin(t *testing.T) {
 
 		auditSvc.LogUserLogin(ctx, "user-1", "test@example.com", "192.168.1.1", "Mozilla/5.0", true)
 
-		waitForAuditLogs(t, ctx, store, "user-1", string(model.EventUserLogin), 1)
+		waitForAuditLogs(ctx, t, store, "user-1", string(model.EventUserLogin), 1)
 	})
 
 	t.Run("记录用户登录失败", func(t *testing.T) {
@@ -128,7 +128,7 @@ func TestAuditService_LogUserLogin(t *testing.T) {
 
 		auditSvc.LogUserLogin(ctx, "user-1", "test@example.com", "192.168.1.1", "Mozilla/5.0", false)
 
-		waitForAuditLogs(t, ctx, store, "user-1", string(model.EventUserLogin), 1)
+		waitForAuditLogs(ctx, t, store, "user-1", string(model.EventUserLogin), 1)
 	})
 }
 
@@ -145,7 +145,7 @@ func TestAuditService_LogTokenIssued(t *testing.T) {
 
 		auditSvc.LogTokenIssued(ctx, "user-1", "client-1", "192.168.1.1")
 
-		waitForAuditLogs(t, ctx, store, "user-1", string(model.EventTokenIssued), 1)
+		waitForAuditLogs(ctx, t, store, "user-1", string(model.EventTokenIssued), 1)
 	})
 }
 
@@ -162,7 +162,7 @@ func TestAuditService_LogAuthCodeCreated(t *testing.T) {
 
 		auditSvc.LogAuthCodeCreated(ctx, "user-1", "client-1", "192.168.1.1")
 
-		waitForAuditLogs(t, ctx, store, "user-1", string(model.EventAuthCodeCreated), 1)
+		waitForAuditLogs(ctx, t, store, "user-1", string(model.EventAuthCodeCreated), 1)
 	})
 }
 
@@ -268,97 +268,97 @@ func TestAuditService_NewMethods(t *testing.T) {
 	t.Run("LogUserLogout", func(t *testing.T) {
 		store.Reset()
 		auditSvc.LogUserLogout(ctx, "user-1", "192.168.1.1")
-		waitForAuditLogs(t, ctx, store, "user-1", string(model.EventUserLogout), 1)
+		waitForAuditLogs(ctx, t, store, "user-1", string(model.EventUserLogout), 1)
 	})
 
 	t.Run("LogTokenRefresh", func(t *testing.T) {
 		store.Reset()
 		auditSvc.LogTokenRefresh(ctx, "user-1", "client-1", "192.168.1.1")
-		waitForAuditLogs(t, ctx, store, "user-1", string(model.EventTokenRefresh), 1)
+		waitForAuditLogs(ctx, t, store, "user-1", string(model.EventTokenRefresh), 1)
 	})
 
 	t.Run("LogPasswordChanged", func(t *testing.T) {
 		store.Reset()
 		auditSvc.LogPasswordChanged(ctx, "user-1", "192.168.1.1", true)
-		waitForAuditLogs(t, ctx, store, "user-1", string(model.EventPasswordChanged), 1)
+		waitForAuditLogs(ctx, t, store, "user-1", string(model.EventPasswordChanged), 1)
 	})
 
 	t.Run("LogPasswordReset", func(t *testing.T) {
 		store.Reset()
 		auditSvc.LogPasswordReset(ctx, "user-1", "192.168.1.1")
-		waitForAuditLogs(t, ctx, store, "user-1", string(model.EventPasswordReset), 1)
+		waitForAuditLogs(ctx, t, store, "user-1", string(model.EventPasswordReset), 1)
 	})
 
 	t.Run("LogAccountLocked", func(t *testing.T) {
 		store.Reset()
 		auditSvc.LogAccountLocked(ctx, "user-1", "192.168.1.1")
-		waitForAuditLogs(t, ctx, store, "user-1", string(model.EventAccountLocked), 1)
+		waitForAuditLogs(ctx, t, store, "user-1", string(model.EventAccountLocked), 1)
 	})
 
 	t.Run("LogMFAEnabled", func(t *testing.T) {
 		store.Reset()
 		auditSvc.LogMFAEnabled(ctx, "user-1", "192.168.1.1")
-		waitForAuditLogs(t, ctx, store, "user-1", string(model.EventMFAEnabled), 1)
+		waitForAuditLogs(ctx, t, store, "user-1", string(model.EventMFAEnabled), 1)
 	})
 
 	t.Run("LogMFADisabled", func(t *testing.T) {
 		store.Reset()
 		auditSvc.LogMFADisabled(ctx, "user-1", "192.168.1.1")
-		waitForAuditLogs(t, ctx, store, "user-1", string(model.EventMFADisabled), 1)
+		waitForAuditLogs(ctx, t, store, "user-1", string(model.EventMFADisabled), 1)
 	})
 
 	t.Run("LogKeyRotated", func(t *testing.T) {
 		store.Reset()
 		auditSvc.LogKeyRotated(ctx, "key-123")
-		waitForAuditLogs(t, ctx, store, "", string(model.EventKeyRotated), 1)
+		waitForAuditLogs(ctx, t, store, "", string(model.EventKeyRotated), 1)
 	})
 
 	t.Run("LogKeyRevoked", func(t *testing.T) {
 		store.Reset()
 		auditSvc.LogKeyRevoked(ctx, "key-123")
-		waitForAuditLogs(t, ctx, store, "", string(model.EventKeyRevoked), 1)
+		waitForAuditLogs(ctx, t, store, "", string(model.EventKeyRevoked), 1)
 	})
 
 	t.Run("LogLogoutAll", func(t *testing.T) {
 		store.Reset()
 		auditSvc.LogLogoutAll(ctx, "user-1", "192.168.1.1")
-		waitForAuditLogs(t, ctx, store, "user-1", string(model.EventLogoutAll), 1)
+		waitForAuditLogs(ctx, t, store, "user-1", string(model.EventLogoutAll), 1)
 	})
 
 	t.Run("LogTokenRevoke", func(t *testing.T) {
 		store.Reset()
 		auditSvc.LogTokenRevoke(ctx, "user-1", "client-1", "192.168.1.1")
-		waitForAuditLogs(t, ctx, store, "user-1", string(model.EventTokenRevoke), 1)
+		waitForAuditLogs(ctx, t, store, "user-1", string(model.EventTokenRevoke), 1)
 	})
 
 	t.Run("LogUserLoginFailed", func(t *testing.T) {
 		store.Reset()
 		auditSvc.LogUserLoginFailed(ctx, "user-1", "test@example.com", "192.168.1.1", "Mozilla/5.0", "invalid password")
-		waitForAuditLogs(t, ctx, store, "user-1", string(model.EventUserLoginFailed), 1)
+		waitForAuditLogs(ctx, t, store, "user-1", string(model.EventUserLoginFailed), 1)
 	})
 
 	t.Run("LogAccountUnlocked", func(t *testing.T) {
 		store.Reset()
 		auditSvc.LogAccountUnlocked(ctx, "user-1", "192.168.1.1")
-		waitForAuditLogs(t, ctx, store, "user-1", string(model.EventAccountUnlocked), 1)
+		waitForAuditLogs(ctx, t, store, "user-1", string(model.EventAccountUnlocked), 1)
 	})
 
 	t.Run("LogAuthCodeUsed", func(t *testing.T) {
 		store.Reset()
 		auditSvc.LogAuthCodeUsed(ctx, "user-1", "client-1", "192.168.1.1")
-		waitForAuditLogs(t, ctx, store, "user-1", string(model.EventAuthCodeUsed), 1)
+		waitForAuditLogs(ctx, t, store, "user-1", string(model.EventAuthCodeUsed), 1)
 	})
 
 	t.Run("LogAuthCodeInvalid", func(t *testing.T) {
 		store.Reset()
 		auditSvc.LogAuthCodeInvalid(ctx, "user-1", "client-1", "192.168.1.1", "invalid code")
-		waitForAuditLogs(t, ctx, store, "user-1", string(model.EventAuthCodeInvalid), 1)
+		waitForAuditLogs(ctx, t, store, "user-1", string(model.EventAuthCodeInvalid), 1)
 	})
 
 	t.Run("LogMFASetup", func(t *testing.T) {
 		store.Reset()
 		auditSvc.LogMFASetup(ctx, "user-1", "192.168.1.1")
-		waitForAuditLogs(t, ctx, store, "user-1", string(model.EventMFASetup), 1)
+		waitForAuditLogs(ctx, t, store, "user-1", string(model.EventMFASetup), 1)
 	})
 }
 

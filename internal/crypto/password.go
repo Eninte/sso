@@ -68,7 +68,7 @@ func SetTestMode(enabled bool) {
 // 测试模式下自动使用 cost=4（由测试文件 SetTestMode 触发）
 func NewPasswordService(cost int) *PasswordService {
 	if testMode {
-		return &PasswordService{cost: int(bcrypt.MinCost)}
+		return &PasswordService{cost: bcrypt.MinCost}
 	}
 	return &PasswordService{cost: NormalizeBcryptCost(cost)}
 }

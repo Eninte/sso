@@ -304,7 +304,6 @@ func TestRegisterHandler_Handle(t *testing.T) {
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
-
 }
 
 // ============================================================================
