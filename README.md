@@ -61,6 +61,8 @@ cp .env.example .env
 # 编辑 .env 文件，修改数据库密码等配置
 ```
 
+详细配置说明请参考：[配置管理指南](docs/CONFIGURATION.md)
+
 3. **生成RSA密钥**
 ```bash
 make generate-keys
@@ -310,6 +312,8 @@ sso/
 | MAX_LOGIN_ATTEMPTS | 最大登录尝试次数 | 5 | - |
 | METRICS_USERNAME | Metrics Basic Auth用户名 | - | 生产环境建议设置 |
 | METRICS_PASSWORD | Metrics Basic Auth密码 | - | 生产环境建议设置 |
+
+完整配置说明和环境差异对照请参考：[配置管理指南](docs/CONFIGURATION.md)
 
 ## 常见问题
 

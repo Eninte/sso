@@ -5,14 +5,29 @@
 ## [Unreleased]
 
 ### Added
+
 - 多语言支持（i18n）
 - 更多第三方登录提供商支持
+- **KeyRotationService**：新增密钥轮换管理服务 (`internal/service/keyrotation.go`)
+- **密钥轮换管理 API 端点**：支持密钥轮换操作
+- **JWTService 多密钥验证**：添加 `kid` (Key ID) 到 JWT Header，支持多密钥验证
+- **JWKS 端点**：支持多密钥发布
+- **BasicAuth 中间件**：用于端点认证保护
+- **stateInfo 结构体**：用于 OAuth state 管理
+- **scanKeyVersions 函数**：消除 Postgres 代码重复
+- **EventSystemStart 审计事件**：新增系统启动审计事件类型
+- **AuditService.LogSystemStart()**：新增系统启动日志记录方法
 - **Mock Store 错误注入测试**：新增 5 个顶层测试函数（7 个子测试）覆盖 `GetUserByEmailErr`、`CreateUserErr`、`GetTokenByRefreshTokenErr`、`GetUserByIDErr`、`RevokeTokenErr` 等关键存储故障路径
 - **审计日志写入验证测试**：新增 3 个顶层测试函数（4 个子测试）验证 `LoginWithAudit`、`LogoutWithAudit`、`RefreshTokenWithAudit` 实际写入审计日志并验证事件类型、IP 地址、Success 标志
 
 ### Security
 
-- **JWT密钥轮换并发安全**：`JWTService` 的 map 操作添加 `sync.RWMutex`，修复密钥轮换时与 token 验证的 data race
+- SEC-09 **JWT密钥轮换并发安全**：`JWTService` 的 map 操作添加 `sync.RWMutex`，修复密钥轮换时与 token 验证的 data race
+- SEC-10 **审计日志完善**：覆盖所有关键安全操作（密码修改、MFA操作、Token刷新等）
+- SEC-11 **Metrics 端点认证保护**：`/metrics` 端点新增 Basic Auth 认证保护
+- SEC-12 **bcrypt cost 下限提升**：从 10 提高到 12，符合生产环境安全要求
+- SEC-13 **OAuth State 参数验证**：社交登录新增 state 参数验证，防止 CSRF 攻击
+- SEC-14 **移除废弃安全头**：移除已弃用的 `X-XSS-Protection` 安全头
 - **SMTP TLS 不再静默降级**：移除 `sendEmailSTARTTLS` 中 TLS 错误时自动回退到 `InsecureSkipVerify` 的逻辑，证书验证失败直接报错
 - **OAuth State 原子验证**：`HandleCallback` 改用 `LoadAndDelete` 替代 `Load` + `Delete`，防止并发回调绕过 state 验证
 - **OAuth State 内存泄漏防护**：`SocialLoginService` 添加后台 goroutine 每分钟清理过期 state 条目
@@ -32,6 +47,10 @@
 - 修复 `AdminService` 结构体中未使用的 `client` 字段
 - 修复 `admin.go` 状态字符串硬编码问题，改用 `model.UserStatusDisabled` / `model.UserStatusActive` 常量
 - 修复 `admin.go` 版本号硬编码 `1.0.0`，改用 `Version` 变量（支持 `-ldflags` 注入）
+- **修复 oauth.go TODO 占位符**：实现真正的令牌生成
+- **修复 auditSvc 未使用问题**：现在记录系统启动事件
+- **修复 keyrotation.go 错误处理**：使用 `apperrors.Is()` 替代直接比较
+- **修复审计日志丢弃问题**：channel 满时新增降级处理，不再直接丢弃
 - **修复管理员路由前缀**：管理员端点从 `/admin/...` 移至 `/api/v1/admin/...`，与其他 API 端点保持一致，修复 E2E 测试中 11 个因 URL 不匹配导致的假阳性跳过
 
 ### Changed
@@ -43,10 +62,30 @@
 - `config.go` 新增 `ShutdownTimeout` 配置项（环境变量 `SHUTDOWN_TIMEOUT`，默认 30s）
 - CI 测试步骤添加覆盖率阈值检查（≥70%）
 - Makefile 新增 `test-coverage-check` 目标
+- **AuthService、UserService、MFAService 集成审计日志**
+- **扩展 Store 接口**：添加 `KeyStore` 方法
+- **OAuthService 集成 TokenService**：修复 TODO 占位符
+- **重构 register.go 错误处理**：使用统一的 `writeValidationError` 函数
+- **MetricsHandler 支持 Basic Auth 认证**
+- **SocialLoginService.HandleCallback**：新增 state 参数
+- **AuditService 降级处理**：channel 满时尝试同步存储
 - **测试质量审计**：删除 15 个空壳/重复测试函数，新增 11 个有价值的测试函数
 - **审计测试可靠性**：`audit_test.go` 中 23 处 `time.Sleep(100ms)` 替换为 `require.Eventually` 轮询（10ms 间隔，2s 超时）
 - **Redis 测试隔离**：`cache/redis_test.go` 添加 `//go:build integration` 标签，避免无 Redis 环境下测试失败
 - **Mock Store 错误注入覆盖率**：从 3/32 (9.4%) 提升至 8/32 (25.0%)
+
+### Configuration
+
+- 新增 `KEY_ROTATION_ENABLED` 配置项（默认 false）
+- 新增 `KEY_ROTATION_INTERVAL` 配置项（默认 90天）
+- 新增 `KEY_TRANSITION_PERIOD` 配置项（默认 24小时）
+- 新增 `METRICS_USERNAME` 配置项（Metrics Basic Auth用户名）
+- 新增 `METRICS_PASSWORD` 配置项（Metrics Basic Auth密码）
+
+### Database Migrations
+
+- 新增 `009_create_key_versions.up.sql` 创建密钥版本表
+- 新增 `009_create_key_versions.down.sql` 回滚密钥版本表
 
 ---
 
