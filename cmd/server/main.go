@@ -168,7 +168,6 @@ func main() {
 	wellKnownHandler := handler.NewWellKnownHandlerWithJWTService(cfg.BaseURL(), jwtSvc)
 	metricsHandler := handler.NewMetricsHandler(metricsSvc)
 	adminHandler := handler.NewAdminHandler(adminSvc)
-	testHandler := handler.NewTestHandler(store, cfg.Env)
 
 	// 11. 创建路由器
 	router := mux.NewRouter()
@@ -250,11 +249,6 @@ func main() {
 	admin.HandleFunc("/users/{id}/enable", adminHandler.HandleEnableUser).Methods("POST")
 	admin.HandleFunc("/users/{id}", adminHandler.HandleDeleteUser).Methods("DELETE")
 	admin.HandleFunc("/audit-logs", adminHandler.HandleAuditLogs).Methods("GET")
-
-	// 测试专用端点 (仅在开发环境或E2E模式下可用)
-	test := api.PathPrefix("/test").Subrouter()
-	test.HandleFunc("/verify-email", testHandler.HandleVerifyEmail).Methods("POST")
-	test.HandleFunc("/set-role", testHandler.HandleSetRole).Methods("POST")
 
 	// 14. 创建HTTP服务器
 	server := &http.Server{
