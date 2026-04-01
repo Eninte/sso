@@ -1,0 +1,19 @@
+?   	github.com/your-org/sso/cmd/server	[no test files]
+?   	github.com/your-org/sso/examples/api-server	[no test files]
+?   	github.com/your-org/sso/examples/go-client	[no test files]
+ok  	github.com/your-org/sso/internal/cache	51.279s
+ok  	github.com/your-org/sso/internal/common	1.055s
+ok  	github.com/your-org/sso/internal/config	1.066s
+ok  	github.com/your-org/sso/internal/crypto	19.903s
+ok  	github.com/your-org/sso/internal/errors	1.095s
+ok  	github.com/your-org/sso/internal/handler	11.119s
+ok  	github.com/your-org/sso/internal/logging	1.038s
+ok  	github.com/your-org/sso/internal/metrics	1.043s
+ok  	github.com/your-org/sso/internal/middleware	3.731s
+ok  	github.com/your-org/sso/internal/model	1.038s
+ok  	github.com/your-org/sso/internal/service	38.255s
+?   	github.com/your-org/sso/internal/store	[no test files]
+?   	github.com/your-org/sso/internal/store/mock	[no test files]
+ok  	github.com/your-org/sso/internal/store/postgres	1.032s
+ok  	github.com/your-org/sso/internal/validator	1.031s
+ok  	github.com/your-org/sso/sdks/golang	1.123s

@@ -1,0 +1,80 @@
+File: service.test
+Build ID: b86e2615b80f40d700ea8e3aa531919096ae37e5
+Type: alloc_space
+Time: 2026-03-31 22:43:16 CST
+Showing nodes accounting for 912.21MB, 97.69% of 933.75MB total
+Dropped 128 nodes (cum <= 4.67MB)
+      flat  flat%   sum%        cum   cum%
+  647.53MB 69.35% 69.35%   647.53MB 69.35%  encoding/base64.(*Encoding).EncodeToString
+   55.01MB  5.89% 75.24%    55.01MB  5.89%  crypto/internal/fips140/bigmod.NewNat (inline)
+   31.50MB  3.37% 78.61%    62.51MB  6.69%  encoding/json.Unmarshal
+   29.64MB  3.17% 81.79%    29.64MB  3.17%  golang.org/x/crypto/blowfish.NewSaltedCipher
+      22MB  2.36% 84.14%       22MB  2.36%  encoding/base64.(*Encoding).DecodeString
+   16.50MB  1.77% 85.91%    84.02MB  9.00%  github.com/golang-jwt/jwt/v5.(*SigningMethodRSA).Verify
+      16MB  1.71% 87.62%       16MB  1.71%  crypto/internal/fips140/bigmod.(*Nat).Bytes
+   15.50MB  1.66% 89.29%    15.50MB  1.66%  crypto/internal/fips140/rsa.pkcs1v15ConstructEM
+      13MB  1.39% 90.68%       13MB  1.39%  reflect.mapassign_faststr0
+       8MB  0.86% 91.53%        8MB  0.86%  github.com/golang-jwt/jwt/v5.NewParser (inline)
+    7.50MB   0.8% 92.34%     7.50MB   0.8%  math/big.(*Int).Bytes
+    7.50MB   0.8% 93.14%     7.50MB   0.8%  crypto/internal/fips140/sha256.New (inline)
+       7MB  0.75% 93.89%        7MB  0.75%  internal/bytealg.MakeNoZero
+       5MB  0.54% 94.43%        5MB  0.54%  github.com/golang-jwt/jwt/v5.(*Validator).Validate
+       5MB  0.54% 94.96%    45.01MB  4.82%  encoding/json.(*decodeState).object
+    4.50MB  0.48% 95.44%    34.01MB  3.64%  crypto/internal/fips140/bigmod.newModulus
+    3.50MB  0.37% 95.82%   196.54MB 21.05%  github.com/your-org/sso/internal/crypto.(*JWTService).ValidateAccessToken
+    3.50MB  0.37% 96.19%    89.01MB  9.53%  github.com/golang-jwt/jwt/v5.(*Parser).ParseUnverified
+    3.50MB  0.37% 96.57%    44.01MB  4.71%  crypto/internal/fips140/rsa.millerRabinSetup
+    3.50MB  0.37% 96.94%       23MB  2.46%  encoding/json.(*decodeState).literalStore
+       2MB  0.21% 97.16%    18.50MB  1.98%  github.com/golang-jwt/jwt/v5.(*NumericDate).UnmarshalJSON
+    1.50MB  0.16% 97.32%     6.50MB   0.7%  github.com/golang-jwt/jwt/v5.(*Token).SignedString
+    1.50MB  0.16% 97.48%       10MB  1.07%  github.com/your-org/sso/internal/crypto.(*JWTService).GenerateAccessTokenWithKeyID
+    1.50MB  0.16% 97.64%    46.01MB  4.93%  crypto/internal/fips140/rsa.isPrime
+    0.50MB 0.054% 97.69%    33.01MB  3.53%  crypto/rsa.fipsPublicKey
+         0     0% 97.69%     7.50MB   0.8%  crypto.Hash.New
+         0     0% 97.69%    59.51MB  6.37%  crypto/internal/fips140/bigmod.NewModulus
+         0     0% 97.69%    29.51MB  3.16%  crypto/internal/fips140/bigmod.rr
+         0     0% 97.69%    46.01MB  4.93%  crypto/internal/fips140/rsa.GenerateKey
+         0     0% 97.69%    25.51MB  2.73%  crypto/internal/fips140/rsa.VerifyPKCS1v15
+         0     0% 97.69%       10MB  1.07%  crypto/internal/fips140/rsa.encrypt
+         0     0% 97.69%    46.01MB  4.93%  crypto/internal/fips140/rsa.randomPrime
+         0     0% 97.69%    25.51MB  2.73%  crypto/internal/fips140/rsa.verifyPKCS1v15
+         0     0% 97.69%    46.01MB  4.93%  crypto/rsa.GenerateKey
+         0     0% 97.69%    58.51MB  6.27%  crypto/rsa.VerifyPKCS1v15
+         0     0% 97.69%     7.50MB   0.8%  crypto/sha256.New
+         0     0% 97.69%    45.01MB  4.82%  encoding/json.(*decodeState).unmarshal
+         0     0% 97.69%    45.01MB  4.82%  encoding/json.(*decodeState).value
+         0     0% 97.69%       22MB  2.36%  github.com/golang-jwt/jwt/v5.(*Parser).DecodeSegment
+         0     0% 97.69%   185.03MB 19.82%  github.com/golang-jwt/jwt/v5.(*Parser).ParseWithClaims
+         0     0% 97.69%   193.04MB 20.67%  github.com/golang-jwt/jwt/v5.ParseWithClaims
+         0     0% 97.69%       10MB  1.07%  github.com/your-org/sso/internal/crypto.(*JWTService).GenerateAccessToken
+         0     0% 97.69%   644.53MB 69.03%  github.com/your-org/sso/internal/crypto.(*JWTService).GenerateRefreshToken
+         0     0% 97.69%    18.08MB  1.94%  github.com/your-org/sso/internal/crypto.(*PasswordService).HashPassword
+         0     0% 97.69%    11.55MB  1.24%  github.com/your-org/sso/internal/crypto.(*PasswordService).VerifyPassword (inline)
+         0     0% 97.69%        8MB  0.86%  github.com/your-org/sso/internal/crypto.GenerateRSAKeyPair (inline)
+         0     0% 97.69%     6.04MB  0.65%  github.com/your-org/sso/internal/service.(*AuthService).Register
+         0     0% 97.69%        9MB  0.96%  github.com/your-org/sso/internal/service.(*KeyRotationService).RotateKey
+         0     0% 97.69%    10.04MB  1.08%  github.com/your-org/sso/internal/service_test.BenchmarkAuthService_Register
+         0     0% 97.69%     6.50MB   0.7%  github.com/your-org/sso/internal/service_test.BenchmarkJWTService_GenerateAccessToken
+         0     0% 97.69%    10.50MB  1.12%  github.com/your-org/sso/internal/service_test.BenchmarkJWTService_GenerateAndValidate
+         0     0% 97.69%   649.03MB 69.51%  github.com/your-org/sso/internal/service_test.BenchmarkJWTService_GenerateRefreshToken
+         0     0% 97.69%   192.54MB 20.62%  github.com/your-org/sso/internal/service_test.BenchmarkJWTService_ValidateAccessToken
+         0     0% 97.69%     9.04MB  0.97%  github.com/your-org/sso/internal/service_test.BenchmarkPasswordService_Hash
+         0     0% 97.69%     7.53MB  0.81%  github.com/your-org/sso/internal/service_test.BenchmarkPasswordService_HashVerify
+         0     0% 97.69%     7.53MB  0.81%  github.com/your-org/sso/internal/service_test.BenchmarkPasswordService_Verify
+         0     0% 97.69%        6MB  0.64%  github.com/your-org/sso/internal/service_test.createTestAuthService
+         0     0% 97.69%     9.01MB  0.96%  github.com/your-org/sso/internal/service_test.setupBenchAuthService
+         0     0% 97.69%        8MB  0.86%  github.com/your-org/sso/internal/service_test.setupBenchJWTService
+         0     0% 97.69%    11.55MB  1.24%  golang.org/x/crypto/bcrypt.CompareHashAndPassword
+         0     0% 97.69%    18.08MB  1.94%  golang.org/x/crypto/bcrypt.GenerateFromPassword
+         0     0% 97.69%    29.64MB  3.17%  golang.org/x/crypto/bcrypt.bcrypt
+         0     0% 97.69%    29.64MB  3.17%  golang.org/x/crypto/bcrypt.expensiveBlowfishSetup
+         0     0% 97.69%    18.08MB  1.94%  golang.org/x/crypto/bcrypt.newFromPassword
+         0     0% 97.69%       13MB  1.39%  reflect.Value.SetMapIndex
+         0     0% 97.69%       13MB  1.39%  reflect.mapassign_faststr
+         0     0% 97.69%        7MB  0.75%  strings.(*Builder).Grow
+         0     0% 97.69%        7MB  0.75%  strings.(*Builder).grow
+         0     0% 97.69%        7MB  0.75%  strings.Join
+         0     0% 97.69%   887.72MB 95.07%  testing.(*B).launch
+         0     0% 97.69%    10.01MB  1.07%  testing.(*B).run1.func1
+         0     0% 97.69%   897.73MB 96.14%  testing.(*B).runN
+         0     0% 97.69%    32.51MB  3.48%  testing.tRunner

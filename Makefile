@@ -209,3 +209,83 @@ bench-report: ## 生成基准测试报告
 	go test -bench=BenchmarkAuthService -benchmem ./internal/service/... 2>&1 | tee -a docs/reports/performance-benchmark.md
 	@echo '```' >> docs/reports/performance-benchmark.md
 	@echo "报告已生成: docs/reports/performance-benchmark.md"
+
+# ============================================================================
+# 代码质量分析（新增 2026-03-31）
+# ============================================================================
+
+# 分析报告目录
+REPORTS_DIR=./reports
+
+.PHONY: install-analysis-tools
+install-analysis-tools: ## 安装所有代码分析工具
+	@bash scripts/install-analysis-tools.sh
+
+.PHONY: analyze-all
+analyze-all: ## 运行完整代码质量分析（约30分钟）
+	@bash scripts/run-full-analysis.sh
+
+.PHONY: analyze-quick
+analyze-quick: lint test-coverage ## 快速分析（lint + 覆盖率）
+	@echo "✓ 快速分析完成"
+
+.PHONY: analyze-report
+analyze-report: ## 生成详细分析报告
+	@bash scripts/generate-detailed-report.sh
+
+.PHONY: analyze-security-scan
+analyze-security-scan: ## 运行安全扫描（gosec + govulncheck）
+	@echo "运行安全扫描..."
+	@mkdir -p $(REPORTS_DIR)/security
+	@gosec -fmt=text ./... 2>&1 | tee $(REPORTS_DIR)/security/gosec.txt || true
+	@govulncheck ./... 2>&1 | tee $(REPORTS_DIR)/security/vulncheck.txt || true
+	@echo "✓ 安全扫描完成: $(REPORTS_DIR)/security/"
+
+.PHONY: analyze-complexity
+analyze-complexity: ## 分析代码复杂度
+	@echo "运行复杂度分析..."
+	@mkdir -p $(REPORTS_DIR)/static
+	@which gocyclo > /dev/null || (echo "请先安装: make install-analysis-tools" && exit 1)
+	@gocyclo -over 15 -avg ./... | tee $(REPORTS_DIR)/static/complexity.txt
+	@echo "✓ 复杂度报告: $(REPORTS_DIR)/static/complexity.txt"
+
+.PHONY: analyze-duplication
+analyze-duplication: ## 检测代码重复
+	@echo "运行重复代码检测..."
+	@mkdir -p $(REPORTS_DIR)/static
+	@which dupl > /dev/null || (echo "请先安装: make install-analysis-tools" && exit 1)
+	@dupl -threshold 50 -html ./internal/... > $(REPORTS_DIR)/static/duplication.html 2>&1 || true
+	@echo "✓ 重复代码报告: $(REPORTS_DIR)/static/duplication.html"
+
+.PHONY: analyze-clean
+analyze-clean: ## 清理所有分析报告
+	@echo "清理分析报告..."
+	@rm -rf $(REPORTS_DIR)
+	@echo "✓ 报告已清理"
+
+.PHONY: analyze-help
+analyze-help: ## 显示分析命令详细帮助
+	@echo "========================================="
+	@echo "  代码质量分析命令"
+	@echo "========================================="
+	@echo ""
+	@echo "完整分析:"
+	@echo "  make analyze-all              - 运行所有分析（约30分钟）"
+	@echo "  make analyze-quick            - 快速分析（lint + 覆盖率）"
+	@echo "  make analyze-report           - 生成详细分析报告"
+	@echo ""
+	@echo "专项分析:"
+	@echo "  make analyze-security-scan    - 安全扫描"
+	@echo "  make analyze-complexity       - 复杂度分析"
+	@echo "  make analyze-duplication      - 重复代码检测"
+	@echo ""
+	@echo "报告管理:"
+	@echo "  make analyze-clean            - 清理报告"
+	@echo ""
+	@echo "工具安装:"
+	@echo "  make install-analysis-tools   - 安装分析工具"
+	@echo ""
+	@echo "详细文档:"
+	@echo "  .kiro/specs/code-quality-analysis-plan.md"
+	@echo "  .kiro/specs/analysis-quick-start.md"
+	@echo ""

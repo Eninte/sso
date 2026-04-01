@@ -1,0 +1,50 @@
+=== JWT 签名算法检查 ===
+internal/crypto/jwt.go:	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+internal/crypto/jwt.go:		if token.Method.Alg() != jwt.SigningMethodRS256.Alg() {
+
+=== 密码哈希检查 ===
+internal/crypto/password.go:	// bcrypt.GenerateFromPassword 会自动:
+internal/crypto/password.go:	hash, err := bcrypt.GenerateFromPassword([]byte(password), s.cost)
+
+=== SQL注入风险检查 ===
+internal/store/postgres/postgres.go:		INSERT INTO users (id, email, password_hash, email_verified, mfa_enabled, role, status, login_attempts, locked_until, created_at, updated_at)
+internal/store/postgres/postgres.go:		UPDATE users
+internal/store/postgres/postgres.go:		UPDATE users
+internal/store/postgres/postgres.go:		UPDATE users
+internal/store/postgres/postgres.go:		UPDATE users
+internal/store/postgres/postgres.go:		UPDATE users
+internal/store/postgres/postgres.go:	query := `DELETE FROM users WHERE id = $1`
+internal/store/postgres/postgres.go:		INSERT INTO oauth_clients (id, client_id, client_secret, name, redirect_uris, grant_types, scopes, public_client, created_at)
+internal/store/postgres/postgres.go:		INSERT INTO authorization_codes (code, client_id, user_id, redirect_uri, scopes, code_challenge, code_challenge_method, expires_at, created_at)
+internal/store/postgres/postgres.go:	query := `UPDATE authorization_codes SET used_at = $2 WHERE code = $1`
+internal/store/postgres/postgres.go:		INSERT INTO tokens (id, access_token, refresh_token, user_id, client_id, scopes, expires_at, created_at)
+internal/store/postgres/postgres.go:	query := `UPDATE tokens SET revoked_at = $2 WHERE access_token = $1`
+internal/store/postgres/postgres.go:	query := `UPDATE tokens SET revoked_at = $2 WHERE user_id = $1 AND revoked_at IS NULL`
+internal/store/postgres/postgres.go:		DELETE FROM %s 
+internal/store/postgres/postgres.go:	_, _ = s.db.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE user_id = $1`, tableName), userID)
+internal/store/postgres/postgres.go:	query := fmt.Sprintf(`INSERT INTO %s (user_id, token, expires_at, created_at) VALUES ($1, $2, $3, $4)`, tableName)
+internal/store/postgres/postgres.go:	_, err := s.db.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE user_id = $1`, tableName), userID)
+internal/store/postgres/postgres.go:		INSERT INTO audit_logs (id, event_type, user_id, client_id, ip_address, user_agent, details, success, timestamp)
+internal/store/postgres/postgres.go:	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM audit_logs %s", whereClause)
+internal/store/postgres/postgres.go:		UPDATE authorization_codes 
+internal/store/postgres/postgres.go:		INSERT INTO key_versions (id, public_key, private_key, status, created_at, expires_at)
+internal/store/postgres/postgres.go:	query := `UPDATE key_versions SET status = 'deprecated', expires_at = $2 WHERE id = $1`
+internal/store/postgres/postgres.go:	query := `UPDATE key_versions SET status = 'revoked' WHERE id = $1`
+internal/store/postgres/postgres.go:	query := `DELETE FROM key_versions WHERE id = $1`
+internal/store/postgres/postgres_test.go:	_, _ = db.ExecContext(ctx, "DELETE FROM audit_logs WHERE user_id LIKE 'test-%'")
+internal/store/postgres/postgres_test.go:	_, _ = db.ExecContext(ctx, "DELETE FROM verification_tokens WHERE token LIKE 'test-%'")
+internal/store/postgres/postgres_test.go:	_, _ = db.ExecContext(ctx, "DELETE FROM reset_tokens WHERE token LIKE 'test-%'")
+internal/store/postgres/postgres_test.go:	_, _ = db.ExecContext(ctx, "DELETE FROM tokens WHERE access_token LIKE 'test-%'")
+internal/store/postgres/postgres_test.go:	_, _ = db.ExecContext(ctx, "DELETE FROM authorization_codes WHERE code LIKE 'test-%'")
+internal/store/postgres/postgres_test.go:	_, _ = db.ExecContext(ctx, "DELETE FROM users WHERE email LIKE 'test-%@%'")
+internal/store/postgres/postgres_test.go:		_, _ = db.ExecContext(ctx, "DELETE FROM key_versions WHERE id LIKE 'test-%'")
+internal/store/postgres/postgres_bench_test.go:		db.ExecContext(ctx, "DELETE FROM users WHERE email LIKE 'bench-create-%@%'")
+internal/store/postgres/postgres_bench_test.go:	defer db.ExecContext(ctx, "DELETE FROM users WHERE id = $1", user.ID)
+internal/store/postgres/postgres_bench_test.go:	defer db.ExecContext(ctx, "DELETE FROM users WHERE id = $1", user.ID)
+internal/store/postgres/postgres_bench_test.go:	defer db.ExecContext(ctx, "DELETE FROM users WHERE id = $1", user.ID)
+internal/store/postgres/postgres_bench_test.go:	defer db.ExecContext(ctx, "DELETE FROM users WHERE id = $1", user.ID)
+internal/store/postgres/postgres_bench_test.go:	defer db.ExecContext(ctx, "DELETE FROM users WHERE id = $1", user.ID)
+internal/store/postgres/postgres_bench_test.go:	defer db.ExecContext(ctx, "DELETE FROM users WHERE id = $1", user.ID)
+internal/store/postgres/postgres_bench_test.go:			db.ExecContext(ctx, "DELETE FROM users WHERE id = $1", u.ID)
+internal/store/postgres/postgres_bench_test.go:			db.ExecContext(ctx, "DELETE FROM users WHERE id = $1", u.ID)
+
