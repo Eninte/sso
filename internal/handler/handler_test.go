@@ -647,3 +647,238 @@ func TestTokenHandler_HandleRevoke(t *testing.T) {
 // ============================================================================
 // AuthorizeHandler 测试 (已在 authorize_test.go 中覆盖，此处删除重复测试)
 // ============================================================================
+
+// ============================================================================
+// LoginHandler 边界条件测试
+// ============================================================================
+
+func TestLoginHandler_BoundaryConditions(t *testing.T) {
+	loginHandler, store := createTestLoginHandler(t)
+
+	// 创建测试用户
+	passwordSvc := crypto.NewPasswordService(4)
+	hashedPassword, err := passwordSvc.HashPassword("Password123!")
+	require.NoError(t, err)
+
+	testUser := &model.User{
+		ID:            "boundary-test-user",
+		Email:         "boundary@example.com",
+		PasswordHash:  hashedPassword,
+		EmailVerified: true,
+		Status:        model.UserStatusActive,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+	store.AddUser(testUser)
+
+	t.Run("空密码输入", func(t *testing.T) {
+		body := map[string]string{
+			"email":    "boundary@example.com",
+			"password": "",
+		}
+		bodyBytes, _ := json.Marshal(body)
+
+		req := httptest.NewRequest("POST", "/api/v1/login", bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		loginHandler.Handle(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("空邮箱输入", func(t *testing.T) {
+		body := map[string]string{
+			"email":    "",
+			"password": "Password123!",
+		}
+		bodyBytes, _ := json.Marshal(body)
+
+		req := httptest.NewRequest("POST", "/api/v1/login", bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		loginHandler.Handle(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("缺少必填字段-email", func(t *testing.T) {
+		body := map[string]string{
+			"password": "Password123!",
+		}
+		bodyBytes, _ := json.Marshal(body)
+
+		req := httptest.NewRequest("POST", "/api/v1/login", bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		loginHandler.Handle(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("缺少必填字段-password", func(t *testing.T) {
+		body := map[string]string{
+			"email": "boundary@example.com",
+		}
+		bodyBytes, _ := json.Marshal(body)
+
+		req := httptest.NewRequest("POST", "/api/v1/login", bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		loginHandler.Handle(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("超大请求体", func(t *testing.T) {
+		// 创建一个超大的请求体（>1MB）
+		largePassword := string(make([]byte, 2*1024*1024)) // 2MB
+		body := map[string]string{
+			"email":    "boundary@example.com",
+			"password": largePassword,
+		}
+		bodyBytes, _ := json.Marshal(body)
+
+		req := httptest.NewRequest("POST", "/api/v1/login", bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		loginHandler.Handle(w, req)
+
+		// 应该返回400或413
+		assert.True(t, w.Code == http.StatusBadRequest || w.Code == http.StatusRequestEntityTooLarge)
+	})
+}
+
+// ============================================================================
+// RegisterHandler 边界条件测试
+// ============================================================================
+
+func TestRegisterHandler_BoundaryConditions(t *testing.T) {
+	registerHandler, store := createTestRegisterHandler(t)
+
+	t.Run("重复邮箱注册", func(t *testing.T) {
+		store.Reset()
+
+		// 先创建一个用户
+		existingUser := &model.User{
+			ID:            "existing-user",
+			Email:         "existing@example.com",
+			PasswordHash:  "hash",
+			EmailVerified: false,
+			Status:        model.UserStatusActive,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
+		}
+		store.AddUser(existingUser)
+
+		// 尝试用相同邮箱注册
+		body := map[string]string{
+			"email":    "existing@example.com",
+			"password": "Password123!",
+		}
+		bodyBytes, _ := json.Marshal(body)
+
+		req := httptest.NewRequest("POST", "/api/v1/register", bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		registerHandler.Handle(w, req)
+
+		assert.Equal(t, http.StatusConflict, w.Code)
+	})
+
+	t.Run("无效邮箱格式", func(t *testing.T) {
+		store.Reset()
+
+		body := map[string]string{
+			"email":    "invalid-email",
+			"password": "Password123!",
+		}
+		bodyBytes, _ := json.Marshal(body)
+
+		req := httptest.NewRequest("POST", "/api/v1/register", bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		registerHandler.Handle(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("弱密码", func(t *testing.T) {
+		store.Reset()
+
+		body := map[string]string{
+			"email":    "weakpass@example.com",
+			"password": "123",
+		}
+		bodyBytes, _ := json.Marshal(body)
+
+		req := httptest.NewRequest("POST", "/api/v1/register", bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		registerHandler.Handle(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("缺少必填字段-email", func(t *testing.T) {
+		store.Reset()
+
+		body := map[string]string{
+			"password": "Password123!",
+		}
+		bodyBytes, _ := json.Marshal(body)
+
+		req := httptest.NewRequest("POST", "/api/v1/register", bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		registerHandler.Handle(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("缺少必填字段-password", func(t *testing.T) {
+		store.Reset()
+
+		body := map[string]string{
+			"email": "nopass@example.com",
+		}
+		bodyBytes, _ := json.Marshal(body)
+
+		req := httptest.NewRequest("POST", "/api/v1/register", bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		registerHandler.Handle(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("超大请求体", func(t *testing.T) {
+		store.Reset()
+
+		// 创建超大请求体
+		largeEmail := string(make([]byte, 2*1024*1024)) + "@example.com"
+		body := map[string]string{
+			"email":    largeEmail,
+			"password": "Password123!",
+		}
+		bodyBytes, _ := json.Marshal(body)
+
+		req := httptest.NewRequest("POST", "/api/v1/register", bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		registerHandler.Handle(w, req)
+
+		// 应该返回400或413
+		assert.True(t, w.Code == http.StatusBadRequest || w.Code == http.StatusRequestEntityTooLarge)
+	})
+}

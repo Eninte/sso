@@ -188,11 +188,28 @@ func Load() (*Config, error) {
 }
 
 // validate 验证配置的有效性
-func (c *Config) validate() error {
+// validateDatabaseConfig 验证数据库配置
+// 检查数据库密码是否设置，以及生产环境是否启用SSL
+func validateDatabaseConfig(c *Config) error {
 	// 验证数据库密码
 	if c.DBPassword == "" {
 		slog.Error("数据库密码未设置", "env_var", "DB_PASSWORD")
 		return ErrDBPasswordRequired
+	}
+
+	// 生产环境必须启用数据库SSL
+	if c.Env == "production" && c.DBSSLMode == "disable" {
+		slog.Error("生产环境数据库必须启用SSL")
+		return fmt.Errorf("生产环境必须设置 DB_SSL_MODE=require 或更高")
+	}
+
+	return nil
+}
+
+func (c *Config) validate() error {
+	// 验证数据库配置
+	if err := validateDatabaseConfig(c); err != nil {
+		return err
 	}
 
 	// 验证JWT密钥路径
@@ -240,10 +257,6 @@ func (c *Config) validate() error {
 		if c.BcryptCost < 12 {
 			slog.Error("生产环境bcrypt cost应至少为12", "current", c.BcryptCost)
 			return ErrBcryptCostTooLow
-		}
-		if c.DBSSLMode == "disable" {
-			slog.Error("生产环境数据库必须启用SSL")
-			return fmt.Errorf("生产环境必须设置 DB_SSL_MODE=require 或更高")
 		}
 		if c.JWTIssuer == "sso" {
 			slog.Warn("生产环境使用默认JWT Issuer，建议自定义")

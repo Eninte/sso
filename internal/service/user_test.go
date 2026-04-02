@@ -352,7 +352,8 @@ func TestUserService_ChangePassword(t *testing.T) {
 }
 
 // ============================================================================
-// 验证令牌存储错误测试
+// VerifyEmail 错误路径测试
+// 验证: 需求 8.5
 // ============================================================================
 
 func TestUserService_VerifyEmail_StoreError(t *testing.T) {
@@ -366,6 +367,254 @@ func TestUserService_VerifyEmail_StoreError(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.NotErrorIs(t, err, service.ErrVerificationCodeInvalid)
+}
+
+// TestUserService_VerifyEmail_ErrorPaths 测试VerifyEmail的各种错误场景
+// 验证: 需求 8.5
+func TestUserService_VerifyEmail_ErrorPaths(t *testing.T) {
+	ctx := context.Background()
+
+	// ==== 测试1: Token过期 ====
+	// 验证: 需求 8.5
+	t.Run("Token过期", func(t *testing.T) {
+		userSvc, mockStore := createTestUserService()
+		mockStore.Reset()
+
+		user := &model.User{
+			ID:            "user-expired",
+			Email:         "expired@example.com",
+			EmailVerified: false,
+		}
+		mockStore.AddUser(user)
+
+		// 存储一个过期的令牌（过期时间在过去）
+		expiredTime := time.Now().Add(-1 * time.Hour)
+		mockStore.StoreVerificationToken(ctx, "user-expired", "expired-token", expiredTime)
+
+		// 尝试验证
+		err := userSvc.VerifyEmail(ctx, "user-expired", "expired-token")
+
+		// 验证返回过期错误
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, service.ErrVerificationCodeExpired)
+
+		// 验证用户邮箱未被标记为已验证
+		updatedUser, _ := mockStore.GetByID(ctx, "user-expired")
+		assert.False(t, updatedUser.EmailVerified)
+	})
+
+	// ==== 测试2: 无效Token - Token不存在 ====
+	// 验证: 需求 8.5
+	t.Run("无效Token_不存在", func(t *testing.T) {
+		userSvc, mockStore := createTestUserService()
+		mockStore.Reset()
+
+		user := &model.User{
+			ID:            "user-no-token",
+			Email:         "notoken@example.com",
+			EmailVerified: false,
+		}
+		mockStore.AddUser(user)
+
+		// 不存储任何令牌，直接尝试验证
+		err := userSvc.VerifyEmail(ctx, "user-no-token", "nonexistent-token")
+
+		// 验证返回无效令牌错误
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, service.ErrVerificationCodeInvalid)
+
+		// 验证用户邮箱未被标记为已验证
+		updatedUser, _ := mockStore.GetByID(ctx, "user-no-token")
+		assert.False(t, updatedUser.EmailVerified)
+	})
+
+	// ==== 测试3: 无效Token - Token不匹配 ====
+	// 验证: 需求 8.5
+	t.Run("无效Token_不匹配", func(t *testing.T) {
+		userSvc, mockStore := createTestUserService()
+		mockStore.Reset()
+
+		user := &model.User{
+			ID:            "user-mismatch",
+			Email:         "mismatch@example.com",
+			EmailVerified: false,
+		}
+		mockStore.AddUser(user)
+
+		// 存储一个令牌
+		mockStore.StoreVerificationToken(ctx, "user-mismatch", "correct-token", time.Now().Add(1*time.Hour))
+
+		// 使用错误的令牌尝试验证
+		err := userSvc.VerifyEmail(ctx, "user-mismatch", "wrong-token")
+
+		// 验证返回无效令牌错误
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, service.ErrVerificationCodeInvalid)
+
+		// 验证用户邮箱未被标记为已验证
+		updatedUser, _ := mockStore.GetByID(ctx, "user-mismatch")
+		assert.False(t, updatedUser.EmailVerified)
+	})
+
+	// ==== 测试4: Store返回错误 - GetVerificationToken失败 ====
+	// 验证: 需求 8.5
+	t.Run("Store返回错误_GetVerificationToken", func(t *testing.T) {
+		userSvc, mockStore := createTestUserService()
+		mockStore.Reset()
+
+		// 注入数据库错误
+		mockStore.GetVerificationTokenErr = errors.New("database connection failed")
+
+		// 尝试验证
+		err := userSvc.VerifyEmail(ctx, "user-123", "some-token")
+
+		// 验证返回错误（不是ErrVerificationCodeInvalid）
+		assert.Error(t, err)
+		assert.NotErrorIs(t, err, service.ErrVerificationCodeInvalid)
+		assert.Contains(t, err.Error(), "database connection failed")
+	})
+
+	// ==== 测试5: Store返回错误 - GetByID失败 ====
+	// 验证: 需求 8.5
+	t.Run("Store返回错误_GetByID", func(t *testing.T) {
+		userSvc, mockStore := createTestUserService()
+		mockStore.Reset()
+
+		// 存储一个有效的令牌
+		mockStore.StoreVerificationToken(ctx, "user-getbyid-fail", "valid-token", time.Now().Add(1*time.Hour))
+
+		// 注入GetByID错误
+		mockStore.GetUserByIDErr = errors.New("database read error")
+
+		// 尝试验证
+		err := userSvc.VerifyEmail(ctx, "user-getbyid-fail", "valid-token")
+
+		// 验证返回数据库错误
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "database read error")
+	})
+
+	// ==== 测试6: Store返回错误 - Update失败 ====
+	// 验证: 需求 8.5
+	t.Run("Store返回错误_Update", func(t *testing.T) {
+		userSvc, mockStore := createTestUserService()
+		mockStore.Reset()
+
+		user := &model.User{
+			ID:            "user-update-fail",
+			Email:         "updatefail@example.com",
+			EmailVerified: false,
+		}
+		mockStore.AddUser(user)
+
+		// 存储一个有效的令牌
+		mockStore.StoreVerificationToken(ctx, "user-update-fail", "valid-token", time.Now().Add(1*time.Hour))
+
+		// 注入Update错误
+		mockStore.UpdateUserErr = errors.New("database write error")
+
+		// 尝试验证
+		err := userSvc.VerifyEmail(ctx, "user-update-fail", "valid-token")
+
+		// 验证返回数据库写入错误
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "database write error")
+
+		// 注意: 由于mock store返回的是同一个user对象引用，
+		// 即使Update失败，内存中的对象也会被修改。
+		// 这是mock实现的限制，真实数据库不会有这个问题。
+		// 主要验证点是Update错误被正确返回。
+	})
+
+	// ==== 测试7: 边界情况 - Token刚好过期 ====
+	// 验证: 需求 8.5
+	t.Run("Token刚好过期", func(t *testing.T) {
+		userSvc, mockStore := createTestUserService()
+		mockStore.Reset()
+
+		user := &model.User{
+			ID:            "user-just-expired",
+			Email:         "justexpired@example.com",
+			EmailVerified: false,
+		}
+		mockStore.AddUser(user)
+
+		// 存储一个刚好过期的令牌（过期时间是1秒前）
+		justExpiredTime := time.Now().Add(-1 * time.Second)
+		mockStore.StoreVerificationToken(ctx, "user-just-expired", "just-expired-token", justExpiredTime)
+
+		// 尝试验证
+		err := userSvc.VerifyEmail(ctx, "user-just-expired", "just-expired-token")
+
+		// 验证返回过期错误
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, service.ErrVerificationCodeExpired)
+	})
+
+	// ==== 测试8: 边界情况 - Token刚好未过期 ====
+	// 验证: 需求 8.5
+	t.Run("Token刚好未过期", func(t *testing.T) {
+		userSvc, mockStore := createTestUserService()
+		mockStore.Reset()
+
+		user := &model.User{
+			ID:            "user-just-valid",
+			Email:         "justvalid@example.com",
+			EmailVerified: false,
+		}
+		mockStore.AddUser(user)
+
+		// 存储一个刚好未过期的令牌（过期时间是1秒后）
+		justValidTime := time.Now().Add(1 * time.Second)
+		mockStore.StoreVerificationToken(ctx, "user-just-valid", "just-valid-token", justValidTime)
+
+		// 尝试验证
+		err := userSvc.VerifyEmail(ctx, "user-just-valid", "just-valid-token")
+
+		// 验证成功
+		assert.NoError(t, err)
+
+		// 验证用户邮箱已标记为已验证
+		updatedUser, _ := mockStore.GetByID(ctx, "user-just-valid")
+		assert.True(t, updatedUser.EmailVerified)
+	})
+
+	// ==== 测试9: 空Token ====
+	// 验证: 需求 8.5
+	t.Run("空Token", func(t *testing.T) {
+		userSvc, mockStore := createTestUserService()
+		mockStore.Reset()
+
+		user := &model.User{
+			ID:            "user-empty-token",
+			Email:         "emptytoken@example.com",
+			EmailVerified: false,
+		}
+		mockStore.AddUser(user)
+
+		// 存储一个有效的令牌
+		mockStore.StoreVerificationToken(ctx, "user-empty-token", "valid-token", time.Now().Add(1*time.Hour))
+
+		// 使用空Token尝试验证
+		err := userSvc.VerifyEmail(ctx, "user-empty-token", "")
+
+		// 验证返回无效令牌错误
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, service.ErrVerificationCodeInvalid)
+	})
+
+	// ==== 测试10: 空UserID ====
+	// 验证: 需求 8.5
+	t.Run("空UserID", func(t *testing.T) {
+		userSvc, mockStore := createTestUserService()
+		mockStore.Reset()
+
+		// 使用空UserID尝试验证
+		err := userSvc.VerifyEmail(ctx, "", "some-token")
+
+		// 验证返回错误
+		assert.Error(t, err)
+	})
 }
 
 // ============================================================================

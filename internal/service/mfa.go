@@ -199,8 +199,25 @@ func validateTOTP(secret, code string) bool {
 	}
 
 	now := time.Now()
+	baseTimeStep := now.Unix() / 30
+	
+	// 检查时间窗口: -1, 0, +1 (90秒窗口)
 	for i := -1; i <= 1; i++ {
-		timeStep := uint64(now.Unix()/30) + uint64(i)
+		var timeStep uint64
+		
+		if i < 0 {
+			// 安全处理负偏移，防止整数下溢
+			offset := uint64(-i)
+			if baseTimeStep < int64(offset) {
+				// 会发生下溢，跳过该时间窗口
+				continue
+			}
+			timeStep = uint64(baseTimeStep) - offset
+		} else {
+			// 正偏移总是安全的
+			timeStep = uint64(baseTimeStep) + uint64(i)
+		}
+		
 		expectedCode := generateHOTP(secretBytes, timeStep)
 		if expectedCode == code {
 			return true

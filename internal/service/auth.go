@@ -221,12 +221,12 @@ type AuditContext struct {
 	UserAgent string
 }
 
-func (s *AuthService) LoginWithAudit(ctx context.Context, req *model.LoginRequest, auditCtx *AuditContext) (*model.LoginResponse, error) {
-	if err := validator.ValidateLoginRequest(req.Email, req.Password); err != nil {
-		return nil, err
-	}
-
-	user, err := s.store.GetByEmail(ctx, req.Email)
+// validateUserCredentials 验证用户凭据
+// 包含用户查询、密码验证、账户状态检查
+// 返回验证通过的用户对象或统一的错误类型
+func (s *AuthService) validateUserCredentials(ctx context.Context, email, password string) (*model.User, error) {
+	// 查询用户
+	user, err := s.store.GetByEmail(ctx, email)
 	if err != nil {
 		if apperrors.Is(err, store.ErrNotFound) {
 			return nil, ErrInvalidCredentials
@@ -240,6 +240,7 @@ func (s *AuthService) LoginWithAudit(ctx context.Context, req *model.LoginReques
 		return nil, ErrEmailNotVerified
 	}
 
+	// 检查账户状态
 	if user.Status == model.UserStatusDisabled {
 		return nil, ErrAccountDisabled
 	}
@@ -257,37 +258,88 @@ func (s *AuthService) LoginWithAudit(ctx context.Context, req *model.LoginReques
 		}
 	}
 
-	if err := s.passwordSvc.VerifyPassword(user.PasswordHash, req.Password); err != nil {
-		// 使用原子操作递增登录尝试次数，避免竞态条件
-		attempts, locked, _, incErr := s.store.IncrementLoginAttempts(ctx, user.ID, s.maxAttempts, s.lockoutDuration)
-		if incErr != nil {
-			slog.Warn("更新登录尝试次数失败", "error", incErr, "user_id", user.ID)
-		} else if locked {
-			s.incrementMetric("auth_account_locked_total")
-			if s.auditSvc != nil && auditCtx != nil {
-				s.auditSvc.LogAccountLocked(ctx, user.ID, auditCtx.IPAddress)
-			}
-			slog.Warn("账户因多次登录失败被锁定", "user_id", user.ID, "attempts", attempts)
-		}
-		s.incrementMetric("auth_login_failed_total")
-		if s.auditSvc != nil && auditCtx != nil {
-			s.auditSvc.LogUserLogin(ctx, user.ID, user.Email, auditCtx.IPAddress, auditCtx.UserAgent, false)
-		}
+	// 验证密码
+	if err := s.passwordSvc.VerifyPassword(user.PasswordHash, password); err != nil {
 		return nil, ErrInvalidCredentials
 	}
 
-	// 登录成功，重置登录尝试次数
+	return user, nil
+}
+
+// handleLoginFailure 处理登录失败的情况
+// 包含失败次数递增、账户锁定检查、审计日志记录
+// 审计日志失败不会影响主流程
+func (s *AuthService) handleLoginFailure(ctx context.Context, email string, auditCtx *AuditContext) {
+	// 尝试获取用户以记录失败尝试
+	failedUser, getErr := s.store.GetByEmail(ctx, email)
+	if getErr != nil {
+		// 用户不存在或查询失败，无法记录失败尝试
+		return
+	}
+
+	// 使用原子操作递增登录尝试次数，避免竞态条件
+	attempts, locked, _, incErr := s.store.IncrementLoginAttempts(ctx, failedUser.ID, s.maxAttempts, s.lockoutDuration)
+	if incErr != nil {
+		slog.Warn("更新登录尝试次数失败", "error", incErr, "user_id", failedUser.ID)
+		return
+	}
+
+	// 账户被锁定
+	if locked {
+		s.incrementMetric("auth_account_locked_total")
+		// 审计日志：异步记录，不影响主流程
+		if s.auditSvc != nil && auditCtx != nil {
+			s.auditSvc.LogAccountLocked(ctx, failedUser.ID, auditCtx.IPAddress)
+		}
+		slog.Warn("账户因多次登录失败被锁定", "user_id", failedUser.ID, "attempts", attempts)
+	}
+
+	// 记录登录失败指标
+	s.incrementMetric("auth_login_failed_total")
+
+	// 记录登录失败审计日志：异步记录，不影响主流程
+	if s.auditSvc != nil && auditCtx != nil {
+		s.auditSvc.LogUserLogin(ctx, failedUser.ID, failedUser.Email, auditCtx.IPAddress, auditCtx.UserAgent, false)
+	}
+}
+
+// handleLoginSuccess 处理登录成功的情况
+// 包含重置登录尝试次数、审计日志记录、指标记录、token生成
+// 审计日志失败不会影响主流程
+func (s *AuthService) handleLoginSuccess(ctx context.Context, user *model.User, auditCtx *AuditContext) (*model.LoginResponse, error) {
+	// 重置登录尝试次数
 	if err := s.store.ResetLoginAttempts(ctx, user.ID); err != nil {
 		slog.Warn("重置登录尝试次数失败", "error", err, "user_id", user.ID)
 	}
 
+	// 记录登录成功指标
 	s.incrementMetric("auth_login_total")
 
+	// 记录登录成功审计日志：异步记录，不影响主流程
 	if s.auditSvc != nil && auditCtx != nil {
 		s.auditSvc.LogUserLogin(ctx, user.ID, user.Email, auditCtx.IPAddress, auditCtx.UserAgent, true)
 	}
 
+	// 生成token对
 	return s.generateTokenPair(ctx, user.ID, user.Email, user.Role, []string{"openid", "profile", "email"}, nil)
+}
+
+func (s *AuthService) LoginWithAudit(ctx context.Context, req *model.LoginRequest, auditCtx *AuditContext) (*model.LoginResponse, error) {
+	if err := validator.ValidateLoginRequest(req.Email, req.Password); err != nil {
+		return nil, err
+	}
+
+	user, err := s.validateUserCredentials(ctx, req.Email, req.Password)
+	if err != nil {
+		// 处理密码验证失败的情况
+		if apperrors.Is(err, ErrInvalidCredentials) {
+			s.handleLoginFailure(ctx, req.Email, auditCtx)
+		}
+		return nil, err
+	}
+
+	// 处理登录成功
+	return s.handleLoginSuccess(ctx, user, auditCtx)
 }
 
 func (s *AuthService) Login(ctx context.Context, req *model.LoginRequest) (*model.LoginResponse, error) {
