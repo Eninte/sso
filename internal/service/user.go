@@ -11,7 +11,10 @@ import (
 	"github.com/your-org/sso/internal/common"
 	"github.com/your-org/sso/internal/crypto"
 	apperrors "github.com/your-org/sso/internal/errors"
+	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/store"
+	"github.com/your-org/sso/internal/util/auditutil"
+	"github.com/your-org/sso/internal/util/serviceutil"
 	"github.com/your-org/sso/internal/validator"
 )
 
@@ -86,7 +89,7 @@ func NewUserServiceWithAudit(
 func (s *UserService) SendVerificationEmail(ctx context.Context, userID string) error {
 	user, err := s.store.GetByID(ctx, userID)
 	if err != nil {
-		return err
+		return serviceutil.WrapServiceError("查询用户", err)
 	}
 
 	if user.EmailVerified {
@@ -95,19 +98,19 @@ func (s *UserService) SendVerificationEmail(ctx context.Context, userID string) 
 
 	token, err := common.GenerateToken()
 	if err != nil {
-		return fmt.Errorf("生成验证令牌失败: %w", err)
+		return serviceutil.WrapServiceError("生成验证令牌", err)
 	}
 
 	expiresAt := time.Now().Add(VerificationTokenTTL)
 	if err := s.store.StoreVerificationToken(ctx, userID, token, expiresAt); err != nil {
-		return err
+		return serviceutil.WrapServiceError("存储验证令牌", err)
 	}
 
 	verifyLink := fmt.Sprintf("%s/verify-email?token=%s&user_id=%s", s.baseURL, token, userID)
 
 	if s.emailSvc != nil {
 		if err := s.emailSvc.SendVerificationEmail(ctx, user.Email, user.Email, verifyLink); err != nil {
-			return fmt.Errorf("发送验证邮件失败: %w", err)
+			return serviceutil.WrapServiceError("发送验证邮件", err)
 		}
 	}
 
@@ -117,10 +120,7 @@ func (s *UserService) SendVerificationEmail(ctx context.Context, userID string) 
 func (s *UserService) VerifyEmail(ctx context.Context, userID, token string) error {
 	storedToken, err := s.store.GetVerificationToken(ctx, userID)
 	if err != nil {
-		if apperrors.Is(err, store.ErrNotFound) {
-			return ErrVerificationCodeInvalid
-		}
-		return err
+		return serviceutil.HandleStoreError(err, ErrVerificationCodeInvalid)
 	}
 
 	if storedToken.Token != token {
@@ -133,14 +133,14 @@ func (s *UserService) VerifyEmail(ctx context.Context, userID, token string) err
 
 	user, err := s.store.GetByID(ctx, userID)
 	if err != nil {
-		return err
+		return serviceutil.WrapServiceError("查询用户", err)
 	}
 
 	user.EmailVerified = true
 	user.UpdatedAt = time.Now()
 
 	if err := s.store.Update(ctx, user); err != nil {
-		return err
+		return serviceutil.WrapServiceError("更新用户", err)
 	}
 
 	// 清理验证令牌（失败不影响主流程）
@@ -195,10 +195,7 @@ func (s *UserService) ResetPasswordWithAudit(ctx context.Context, userID, token,
 
 	storedToken, err := s.store.GetResetToken(ctx, userID)
 	if err != nil {
-		if apperrors.Is(err, store.ErrNotFound) {
-			return ErrResetTokenInvalid
-		}
-		return err
+		return serviceutil.HandleStoreError(err, ErrResetTokenInvalid)
 	}
 
 	if storedToken.Token != token {
@@ -211,12 +208,12 @@ func (s *UserService) ResetPasswordWithAudit(ctx context.Context, userID, token,
 
 	user, err := s.store.GetByID(ctx, userID)
 	if err != nil {
-		return err
+		return serviceutil.WrapServiceError("查询用户", err)
 	}
 
 	hashedPassword, err := s.passwordSvc.HashPassword(newPassword)
 	if err != nil {
-		return fmt.Errorf("哈希密码失败: %w", err)
+		return serviceutil.WrapServiceError("哈希密码", err)
 	}
 
 	user.PasswordHash = hashedPassword
@@ -225,7 +222,7 @@ func (s *UserService) ResetPasswordWithAudit(ctx context.Context, userID, token,
 	user.LockedUntil = nil
 
 	if err := s.store.Update(ctx, user); err != nil {
-		return err
+		return serviceutil.WrapServiceError("更新用户", err)
 	}
 
 	// 清理重置令牌（失败不影响主流程）
@@ -237,9 +234,10 @@ func (s *UserService) ResetPasswordWithAudit(ctx context.Context, userID, token,
 		slog.Warn("撤销用户Token失败", "error", err, "user_id", userID)
 	}
 
-	if s.auditSvc != nil {
-		s.auditSvc.LogPasswordReset(ctx, userID, ipAddress)
-	}
+	// 使用统一的审计日志工具记录密码重置事件
+	auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventPasswordReset), userID, map[string]interface{}{
+		"ip_address": ipAddress,
+	})
 
 	return nil
 }
@@ -255,13 +253,15 @@ func (s *UserService) ResetPassword(ctx context.Context, userID, token, newPassw
 func (s *UserService) ChangePasswordWithAudit(ctx context.Context, userID, oldPassword, newPassword string, ipAddress string) error {
 	user, err := s.store.GetByID(ctx, userID)
 	if err != nil {
-		return err
+		return serviceutil.WrapServiceError("查询用户", err)
 	}
 
 	if err := s.passwordSvc.VerifyPassword(user.PasswordHash, oldPassword); err != nil {
-		if s.auditSvc != nil {
-			s.auditSvc.LogPasswordChanged(ctx, userID, ipAddress, false)
-		}
+		// 使用统一的审计日志工具记录密码修改失败事件
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventPasswordChanged), userID, map[string]interface{}{
+			"ip_address": ipAddress,
+			"success":    false,
+		})
 		return apperrors.ErrInvalidCredentials
 	}
 
@@ -271,19 +271,21 @@ func (s *UserService) ChangePasswordWithAudit(ctx context.Context, userID, oldPa
 
 	hashedPassword, err := s.passwordSvc.HashPassword(newPassword)
 	if err != nil {
-		return fmt.Errorf("哈希密码失败: %w", err)
+		return serviceutil.WrapServiceError("哈希密码", err)
 	}
 
 	user.PasswordHash = hashedPassword
 	user.UpdatedAt = time.Now()
 
 	if err := s.store.Update(ctx, user); err != nil {
-		return err
+		return serviceutil.WrapServiceError("更新用户", err)
 	}
 
-	if s.auditSvc != nil {
-		s.auditSvc.LogPasswordChanged(ctx, userID, ipAddress, true)
-	}
+	// 使用统一的审计日志工具记录密码修改成功事件
+	auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventPasswordChanged), userID, map[string]interface{}{
+		"ip_address": ipAddress,
+		"success":    true,
+	})
 
 	return nil
 }

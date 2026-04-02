@@ -16,6 +16,8 @@ import (
 	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/store"
+	"github.com/your-org/sso/internal/util/auditutil"
+	"github.com/your-org/sso/internal/util/serviceutil"
 )
 
 // ============================================================================
@@ -60,7 +62,7 @@ func NewMFAServiceWithAudit(store store.Store, auditSvc *AuditService) *MFAServi
 func (s *MFAService) SetupMFAWithAudit(ctx context.Context, userID string, ipAddress string) (*model.MFASetupResponse, error) {
 	user, err := s.store.GetByID(ctx, userID)
 	if err != nil {
-		return nil, err
+		return nil, serviceutil.WrapServiceError("查询用户", err)
 	}
 
 	if user.MFAEnabled {
@@ -69,21 +71,22 @@ func (s *MFAService) SetupMFAWithAudit(ctx context.Context, userID string, ipAdd
 
 	secret, err := generateTOTPSecret()
 	if err != nil {
-		return nil, fmt.Errorf("生成MFA密钥失败: %w", err)
+		return nil, serviceutil.WrapServiceError("生成MFA密钥", err)
 	}
 
 	user.MFASecret = secret
 	user.UpdatedAt = time.Now()
 
 	if err := s.store.Update(ctx, user); err != nil {
-		return nil, err
+		return nil, serviceutil.WrapServiceError("更新用户", err)
 	}
 
 	qrCodeURL := generateTOTPURL(secret, user.Email)
 
-	if s.auditSvc != nil {
-		s.auditSvc.LogMFASetup(ctx, userID, ipAddress)
-	}
+	// 使用统一的审计日志工具记录MFA设置事件
+	auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventMFASetup), userID, map[string]interface{}{
+		"ip_address": ipAddress,
+	})
 
 	return &model.MFASetupResponse{
 		Secret:    secret,
@@ -98,7 +101,7 @@ func (s *MFAService) SetupMFA(ctx context.Context, userID string) (*model.MFASet
 func (s *MFAService) VerifyAndEnableMFAWithAudit(ctx context.Context, userID, code string, ipAddress string) error {
 	user, err := s.store.GetByID(ctx, userID)
 	if err != nil {
-		return err
+		return serviceutil.WrapServiceError("查询用户", err)
 	}
 
 	if user.MFAEnabled {
@@ -117,12 +120,13 @@ func (s *MFAService) VerifyAndEnableMFAWithAudit(ctx context.Context, userID, co
 	user.UpdatedAt = time.Now()
 
 	if err := s.store.Update(ctx, user); err != nil {
-		return err
+		return serviceutil.WrapServiceError("更新用户", err)
 	}
 
-	if s.auditSvc != nil {
-		s.auditSvc.LogMFAEnabled(ctx, userID, ipAddress)
-	}
+	// 使用统一的审计日志工具记录MFA启用事件
+	auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventMFAEnabled), userID, map[string]interface{}{
+		"ip_address": ipAddress,
+	})
 
 	return nil
 }
@@ -134,7 +138,7 @@ func (s *MFAService) VerifyAndEnableMFA(ctx context.Context, userID, code string
 func (s *MFAService) DisableMFAWithAudit(ctx context.Context, userID, code string, ipAddress string) error {
 	user, err := s.store.GetByID(ctx, userID)
 	if err != nil {
-		return err
+		return serviceutil.WrapServiceError("查询用户", err)
 	}
 
 	if !user.MFAEnabled {
@@ -150,12 +154,13 @@ func (s *MFAService) DisableMFAWithAudit(ctx context.Context, userID, code strin
 	user.UpdatedAt = time.Now()
 
 	if err := s.store.Update(ctx, user); err != nil {
-		return err
+		return serviceutil.WrapServiceError("更新用户", err)
 	}
 
-	if s.auditSvc != nil {
-		s.auditSvc.LogMFADisabled(ctx, userID, ipAddress)
-	}
+	// 使用统一的审计日志工具记录MFA禁用事件
+	auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventMFADisabled), userID, map[string]interface{}{
+		"ip_address": ipAddress,
+	})
 
 	return nil
 }

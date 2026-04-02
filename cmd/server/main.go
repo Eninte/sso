@@ -30,9 +30,27 @@ import (
 // Version 服务版本号，通过 -ldflags 注入
 var Version = "dev"
 
+// Services 包含所有服务实例
+type Services struct {
+	Store    *postgres.Store
+	Cache    cache.Cache
+	Password *crypto.PasswordService
+	JWT      *crypto.JWTService
+	Email    *service.EmailService
+	Metrics  *metrics.Service
+	Token    *service.TokenService
+	User     *service.UserService
+	Auth     *service.AuthService
+	OAuth    *service.OAuthService
+	Audit    *service.AuditService
+	MFA      *service.MFAService
+	Admin    *service.AdminService
+	Social   *service.SocialLoginService
+}
+
 func main() {
 	// 1. 加载配置
-	cfg, err := config.Load()
+	cfg, err := initConfig()
 	if err != nil {
 		slog.Error("配置加载失败", "error", err)
 		os.Exit(1)
@@ -46,133 +64,97 @@ func main() {
 		"port", cfg.ServerPort,
 	)
 
-	// 3. 连接数据库
-	db, err := connectDatabase(cfg)
+	// 3. 初始化服务
+	svc, db, err := initServices(cfg)
 	if err != nil {
-		slog.Error("数据库连接失败", "error", err)
+		slog.Error("服务初始化失败", "error", err)
 		os.Exit(1)
 	}
 	defer db.Close()
-	slog.Info("数据库连接成功")
+	defer svc.Cache.Close()
 
-	// 4. 初始化存储层
-	store := postgres.New(db)
+	// 9. 初始化处理器和路由
+	router, rateLimiter := initHandlers(cfg, svc)
 
-	// 5. 初始化缓存层
-	cacheSvc, err := initCache(cfg)
-	if err != nil {
-		slog.Warn("缓存初始化失败，使用内存缓存", "error", err)
-		cacheSvc = cache.NewMemoryCache()
-	}
-	defer cacheSvc.Close()
-	slog.Info("缓存层初始化完成")
+	// 10. 启动服务器
+	startServer(cfg, router, rateLimiter, svc)
+}
 
-	// 5. 初始化加密服务
-	passwordSvc := crypto.NewPasswordService(cfg.BcryptCost)
-	var jwtSvc *crypto.JWTService
-
-	// 根据是否启用密钥轮换选择不同的初始化方式
-	if cfg.KeyRotationEnabled && cfg.JWTTransitionPubKeyPaths != "" {
-		// 使用密钥轮换模式
-		transitionPubKeyPaths := cfg.GetJWTTransitionPubKeyPaths()
-		jwtSvc, err = crypto.LoadKeysForRotation(
-			cfg.JWTPrivateKeyPath,
-			cfg.JWTPublicKeyPath,
-			transitionPubKeyPaths,
-			cfg.JWTIssuer,
-			cfg.AccessTokenTTL,
-			cfg.RefreshTokenTTL,
-		)
-		if err != nil {
-			slog.Error("加载密钥轮换配置失败", "error", err)
-			os.Exit(1)
-		}
-		slog.Info("密钥轮换模式已启用",
-			"transition_keys_count", len(transitionPubKeyPaths),
-		)
-	} else {
-		// 标准模式（单密钥）
-		privateKey, err := crypto.LoadPrivateKeyFromFile(cfg.JWTPrivateKeyPath)
-		if err != nil {
-			slog.Error("加载私钥失败", "error", err)
-			os.Exit(1)
-		}
-		publicKey, err := crypto.LoadPublicKeyFromFile(cfg.JWTPublicKeyPath)
-		if err != nil {
-			slog.Error("加载公钥失败", "error", err)
-			os.Exit(1)
-		}
-		jwtSvc = crypto.NewJWTService(
-			privateKey,
-			publicKey,
-			cfg.JWTIssuer,
-			cfg.AccessTokenTTL,
-			cfg.RefreshTokenTTL,
-		)
+// startServer 启动HTTP服务器
+// 包含HTTP服务器配置和启动
+// 处理优雅关闭
+func startServer(cfg *config.Config, handler http.Handler, rateLimiter *middleware.RateLimiter, svc *Services) {
+	// ==== 创建HTTP服务器 ====
+	server := &http.Server{
+		Addr:         cfg.ServerHost + ":" + cfg.ServerPort,
+		Handler:      handler,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
-	slog.Info("加密服务初始化完成")
+	// ==== 记录服务启动 ====
+	svc.Audit.LogSystemStart(context.Background(), Version)
 
-	// 6. 初始化邮件服务
-	emailConfig := &service.EmailConfig{
-		SMTPHost: cfg.SMTPHost,
-		SMTPPort: cfg.SMTPPort,
-		Username: cfg.SMTPUser,
-		Password: cfg.SMTPPassword,
-		From:     cfg.SMTPFrom,
-	}
-	emailSvc := service.NewEmailService(emailConfig)
-
-	// 7. 初始化指标服务
-	metricsSvc := metrics.NewService()
-
-	// 7.1 初始化Token生成服务
-	tokenSvc := service.NewTokenService(jwtSvc, store)
-
-	// 8. 初始化业务服务（带缓存）
-	userSvc := service.NewUserService(store, passwordSvc, emailSvc, cfg.BaseURL())
-	authSvc := service.NewAuthServiceWithOptions(
-		store,
-		passwordSvc,
-		jwtSvc,
-		cfg.MaxLoginAttempts,
-		cfg.LockoutDuration,
-		service.WithCache(cacheSvc),
-		service.WithMetrics(metricsSvc),
-		service.WithUserService(userSvc),
+	slog.Info("SSO服务初始化完成",
+		"endpoints", []string{
+			"/health",
+			"/metrics",
+			"/.well-known/openid-configuration",
+			"/api/v1/*",
+			"/auth/*",
+			"/admin/*",
+		},
 	)
-	oauthSvc := service.NewOAuthServiceWithCache(store, cacheSvc, tokenSvc)
-	auditSvc := service.NewAuditService(store)
-	mfaSvc := service.NewMFAService(store)
-	adminSvc := service.NewAdminServiceWithVersion(store, cacheSvc, Version)
 
-	// 8. 初始化第三方登录服务
-	socialSvc := service.NewSocialLoginService(store, jwtSvc, cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GitHubClientID, cfg.GitHubClientSecret)
-	if cfg.GoogleClientID != "" && cfg.GoogleClientSecret != "" {
-		slog.Info("Google第三方登录已启用")
-	}
-	if cfg.GitHubClientID != "" && cfg.GitHubClientSecret != "" {
-		slog.Info("GitHub第三方登录已启用")
-	}
+	// ==== 启动服务器 ====
+	errChan := make(chan error, 1)
+	go func() {
+		slog.Info("SSO服务启动成功", "address", server.Addr)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("服务器启动失败", "error", err)
+			errChan <- err
+		}
+	}()
 
-	// 9. 初始化处理器
-	registerHandler := handler.NewRegisterHandler(authSvc)
-	loginHandler := handler.NewLoginHandler(authSvc)
-	tokenHandler := handler.NewTokenHandler(authSvc, oauthSvc)
-	userInfoHandler := handler.NewUserInfoHandler(store)
-	authorizeHandler := handler.NewAuthorizeHandler(oauthSvc)
-	userHandler := handler.NewUserHandler(userSvc)
-	mfaHandler := handler.NewMFAHandler(mfaSvc)
-	socialHandler := handler.NewSocialLoginHandler(socialSvc)
+	// ==== 等待中断信号或启动错误 ====
+	select {
+	case err := <-errChan:
+		slog.Error("服务器启动错误，正在关闭", "error", err)
+		rateLimiter.Stop()
+		return
+	case sig := <-func() chan os.Signal {
+		quit := make(chan os.Signal, 1)
+		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+		return quit
+	}():
+		slog.Info("收到关闭信号，正在优雅关闭服务器...", "signal", sig)
+		gracefulShutdown(rateLimiter, server, svc.Audit, svc.Social, cfg.ShutdownTimeout)
+	}
+}
+
+// initHandlers 初始化处理器和路由
+// 包含路由设置和中间件配置
+// 返回配置好的http.Handler和限流器
+func initHandlers(cfg *config.Config, svc *Services) (*mux.Router, *middleware.RateLimiter) {
+	// ==== 初始化处理器 ====
+	registerHandler := handler.NewRegisterHandler(svc.Auth)
+	loginHandler := handler.NewLoginHandler(svc.Auth)
+	tokenHandler := handler.NewTokenHandler(svc.Auth, svc.OAuth)
+	userInfoHandler := handler.NewUserInfoHandler(svc.Store)
+	authorizeHandler := handler.NewAuthorizeHandler(svc.OAuth)
+	userHandler := handler.NewUserHandler(svc.User)
+	mfaHandler := handler.NewMFAHandler(svc.MFA)
+	socialHandler := handler.NewSocialLoginHandler(svc.Social)
 	// 使用支持多密钥JWKS的handler
-	wellKnownHandler := handler.NewWellKnownHandlerWithJWTService(cfg.BaseURL(), jwtSvc)
-	metricsHandler := handler.NewMetricsHandler(metricsSvc)
-	adminHandler := handler.NewAdminHandler(adminSvc)
+	wellKnownHandler := handler.NewWellKnownHandlerWithJWTService(cfg.BaseURL(), svc.JWT)
+	metricsHandler := handler.NewMetricsHandler(svc.Metrics)
+	adminHandler := handler.NewAdminHandler(svc.Admin)
 
-	// 11. 创建路由器
+	// ==== 创建路由器 ====
 	router := mux.NewRouter()
 
-	// 12. 应用中间件
+	// ==== 应用中间件 ====
 	// 创建限流器
 	rateLimiter := middleware.NewRateLimiter(cfg.RateLimitRequests, cfg.RateLimitWindow)
 
@@ -180,7 +162,7 @@ func main() {
 	router.Use(middleware.RequestID)
 	router.Use(middleware.Logger)
 	// 添加metrics中间件，收集HTTP请求指标
-	router.Use(metricsSvc.HTTPMiddleware)
+	router.Use(svc.Metrics.HTTPMiddleware)
 	// 限流中间件
 	router.Use(rateLimiter.Middleware)
 	// 使用配置中的CORS设置
@@ -195,7 +177,7 @@ func main() {
 	// 添加语言中间件，支持多语言错误消息
 	router.Use(middleware.Language)
 
-	// 13. 注册路由
+	// ==== 注册路由 ====
 	// 健康检查端点 (不需要认证)
 	router.HandleFunc("/health", healthHandler).Methods("GET")
 
@@ -225,7 +207,7 @@ func main() {
 
 	// 受保护的端点 (需要认证)
 	protected := api.PathPrefix("").Subrouter()
-	protected.Use(middleware.AuthMiddlewareWithCache(jwtSvc, store, cacheSvc))
+	protected.Use(middleware.AuthMiddlewareWithCache(svc.JWT, svc.Store, svc.Cache))
 	protected.HandleFunc("/userinfo", userInfoHandler.Handle).Methods("GET")
 	protected.HandleFunc("/authorize", authorizeHandler.HandleAuthorize).Methods("GET")
 	protected.HandleFunc("/authorize/approve", authorizeHandler.HandleApprove).Methods("POST")
@@ -239,7 +221,7 @@ func main() {
 
 	// 管理员端点 (需要认证 + 管理员角色)
 	admin := api.PathPrefix("/admin").Subrouter()
-	admin.Use(middleware.AuthMiddlewareWithCache(jwtSvc, store, cacheSvc))
+	admin.Use(middleware.AuthMiddlewareWithCache(svc.JWT, svc.Store, svc.Cache))
 	admin.Use(middleware.RequireAdmin())
 	admin.HandleFunc("/health", adminHandler.HandleSystemHealth).Methods("GET")
 	admin.HandleFunc("/cleanup", adminHandler.HandleCleanup).Methods("POST")
@@ -250,53 +232,18 @@ func main() {
 	admin.HandleFunc("/users/{id}", adminHandler.HandleDeleteUser).Methods("DELETE")
 	admin.HandleFunc("/audit-logs", adminHandler.HandleAuditLogs).Methods("GET")
 
-	// 14. 创建HTTP服务器
-	server := &http.Server{
-		Addr:         cfg.ServerHost + ":" + cfg.ServerPort,
-		Handler:      router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+	return router, rateLimiter
+}
+
+// initConfig 初始化配置
+// 从环境变量加载配置并验证
+// 返回验证后的Config或错误
+func initConfig() (*config.Config, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
 	}
-
-	// 使用auditSvc记录服务启动
-	auditSvc.LogSystemStart(context.Background(), Version)
-
-	slog.Info("SSO服务初始化完成",
-		"endpoints", []string{
-			"/health",
-			"/metrics",
-			"/.well-known/openid-configuration",
-			"/api/v1/*",
-			"/auth/*",
-			"/admin/*",
-		},
-	)
-
-	// 15. 启动服务器
-	errChan := make(chan error, 1)
-	go func() {
-		slog.Info("SSO服务启动成功", "address", server.Addr)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("服务器启动失败", "error", err)
-			errChan <- err
-		}
-	}()
-
-	// 16. 等待中断信号或启动错误
-	select {
-	case err := <-errChan:
-		slog.Error("服务器启动错误，正在关闭", "error", err)
-		rateLimiter.Stop()
-		return
-	case sig := <-func() chan os.Signal {
-		quit := make(chan os.Signal, 1)
-		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-		return quit
-	}():
-		slog.Info("收到关闭信号，正在优雅关闭服务器...", "signal", sig)
-		gracefulShutdown(rateLimiter, server, auditSvc, socialSvc, cfg.ShutdownTimeout)
-	}
+	return cfg, nil
 }
 
 // initLogger 初始化日志配置
@@ -315,6 +262,135 @@ func initCache(cfg *config.Config) (cache.Cache, error) {
 		RedisPoolSize: cfg.RedisPoolSize,
 	}
 	return cache.NewCacheWithFallback(opt)
+}
+
+// initServices 初始化所有服务
+// 包含数据库连接、Redis连接、服务实例化
+// 返回Services结构体、数据库连接和错误
+func initServices(cfg *config.Config) (*Services, *sql.DB, error) {
+	// ==== 连接数据库 ====
+	db, err := connectDatabase(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	slog.Info("数据库连接成功")
+
+	// ==== 初始化存储层 ====
+	store := postgres.New(db)
+
+	// ==== 初始化缓存层 ====
+	cacheSvc, err := initCache(cfg)
+	if err != nil {
+		slog.Warn("缓存初始化失败，使用内存缓存", "error", err)
+		cacheSvc = cache.NewMemoryCache()
+	}
+	slog.Info("缓存层初始化完成")
+
+	// ==== 初始化加密服务 ====
+	passwordSvc := crypto.NewPasswordService(cfg.BcryptCost)
+	var jwtSvc *crypto.JWTService
+
+	// 根据是否启用密钥轮换选择不同的初始化方式
+	if cfg.KeyRotationEnabled && cfg.JWTTransitionPubKeyPaths != "" {
+		// 使用密钥轮换模式
+		transitionPubKeyPaths := cfg.GetJWTTransitionPubKeyPaths()
+		jwtSvc, err = crypto.LoadKeysForRotation(
+			cfg.JWTPrivateKeyPath,
+			cfg.JWTPublicKeyPath,
+			transitionPubKeyPaths,
+			cfg.JWTIssuer,
+			cfg.AccessTokenTTL,
+			cfg.RefreshTokenTTL,
+		)
+		if err != nil {
+			db.Close()
+			return nil, nil, err
+		}
+		slog.Info("密钥轮换模式已启用",
+			"transition_keys_count", len(transitionPubKeyPaths),
+		)
+	} else {
+		// 标准模式（单密钥）
+		privateKey, err := crypto.LoadPrivateKeyFromFile(cfg.JWTPrivateKeyPath)
+		if err != nil {
+			db.Close()
+			return nil, nil, err
+		}
+		publicKey, err := crypto.LoadPublicKeyFromFile(cfg.JWTPublicKeyPath)
+		if err != nil {
+			db.Close()
+			return nil, nil, err
+		}
+		jwtSvc = crypto.NewJWTService(
+			privateKey,
+			publicKey,
+			cfg.JWTIssuer,
+			cfg.AccessTokenTTL,
+			cfg.RefreshTokenTTL,
+		)
+	}
+
+	slog.Info("加密服务初始化完成")
+
+	// ==== 初始化邮件服务 ====
+	emailConfig := &service.EmailConfig{
+		SMTPHost: cfg.SMTPHost,
+		SMTPPort: cfg.SMTPPort,
+		Username: cfg.SMTPUser,
+		Password: cfg.SMTPPassword,
+		From:     cfg.SMTPFrom,
+	}
+	emailSvc := service.NewEmailService(emailConfig)
+
+	// ==== 初始化指标服务 ====
+	metricsSvc := metrics.NewService()
+
+	// ==== 初始化Token生成服务 ====
+	tokenSvc := service.NewTokenService(jwtSvc, store)
+
+	// ==== 初始化业务服务（带缓存） ====
+	userSvc := service.NewUserService(store, passwordSvc, emailSvc, cfg.BaseURL())
+	authSvc := service.NewAuthServiceWithOptions(
+		store,
+		passwordSvc,
+		jwtSvc,
+		cfg.MaxLoginAttempts,
+		cfg.LockoutDuration,
+		service.WithCache(cacheSvc),
+		service.WithMetrics(metricsSvc),
+		service.WithUserService(userSvc),
+	)
+	oauthSvc := service.NewOAuthServiceWithCache(store, cacheSvc, tokenSvc)
+	auditSvc := service.NewAuditService(store)
+	mfaSvc := service.NewMFAService(store)
+	adminSvc := service.NewAdminServiceWithVersion(store, cacheSvc, Version)
+
+	// ==== 初始化第三方登录服务 ====
+	socialSvc := service.NewSocialLoginService(store, jwtSvc, cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GitHubClientID, cfg.GitHubClientSecret)
+	if cfg.GoogleClientID != "" && cfg.GoogleClientSecret != "" {
+		slog.Info("Google第三方登录已启用")
+	}
+	if cfg.GitHubClientID != "" && cfg.GitHubClientSecret != "" {
+		slog.Info("GitHub第三方登录已启用")
+	}
+
+	// ==== 返回所有服务 ====
+	return &Services{
+		Store:    store,
+		Cache:    cacheSvc,
+		Password: passwordSvc,
+		JWT:      jwtSvc,
+		Email:    emailSvc,
+		Metrics:  metricsSvc,
+		Token:    tokenSvc,
+		User:     userSvc,
+		Auth:     authSvc,
+		OAuth:    oauthSvc,
+		Audit:    auditSvc,
+		MFA:      mfaSvc,
+		Admin:    adminSvc,
+		Social:   socialSvc,
+	}, db, nil
 }
 
 // connectDatabase 连接数据库

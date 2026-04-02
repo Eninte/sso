@@ -10,6 +10,7 @@ import (
 	"github.com/your-org/sso/internal/cache"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/store"
+	"github.com/your-org/sso/internal/util/serviceutil"
 )
 
 // ============================================================================
@@ -94,7 +95,7 @@ func (s *AdminService) GetUser(ctx context.Context, userID string) (*model.User,
 	// 缓存未命中，查询数据库
 	user, err := s.store.GetByID(ctx, userID)
 	if err != nil {
-		return nil, err
+		return nil, serviceutil.WrapServiceError("查询用户", err)
 	}
 
 	// 缓存结果（失败不影响主流程）
@@ -112,14 +113,14 @@ func (s *AdminService) GetUser(ctx context.Context, userID string) (*model.User,
 func (s *AdminService) DisableUser(ctx context.Context, userID string) error {
 	user, err := s.store.GetByID(ctx, userID)
 	if err != nil {
-		return err
+		return serviceutil.WrapServiceError("查询用户", err)
 	}
 
 	user.Status = model.UserStatusDisabled
 	user.UpdatedAt = time.Now()
 
 	if err := s.store.Update(ctx, user); err != nil {
-		return err
+		return serviceutil.WrapServiceError("更新用户", err)
 	}
 
 	// 撤销所有Token（失败不影响主流程）
@@ -134,7 +135,7 @@ func (s *AdminService) DisableUser(ctx context.Context, userID string) error {
 func (s *AdminService) EnableUser(ctx context.Context, userID string) error {
 	user, err := s.store.GetByID(ctx, userID)
 	if err != nil {
-		return err
+		return serviceutil.WrapServiceError("查询用户", err)
 	}
 
 	user.Status = model.UserStatusActive
@@ -142,7 +143,11 @@ func (s *AdminService) EnableUser(ctx context.Context, userID string) error {
 	user.LockedUntil = nil
 	user.UpdatedAt = time.Now()
 
-	return s.store.Update(ctx, user)
+	if err := s.store.Update(ctx, user); err != nil {
+		return serviceutil.WrapServiceError("更新用户", err)
+	}
+
+	return nil
 }
 
 // DeleteUser 删除用户

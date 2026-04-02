@@ -10,6 +10,8 @@ import (
 	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/store"
+	"github.com/your-org/sso/internal/util/auditutil"
+	"github.com/your-org/sso/internal/util/serviceutil"
 )
 
 type KeyRotationService struct {
@@ -36,35 +38,35 @@ func NewKeyRotationService(
 func (s *KeyRotationService) RotateKey(ctx context.Context) (*model.KeyVersion, error) {
 	activeKey, err := s.keyStore.GetActiveKey(ctx)
 	if err != nil && !apperrors.Is(err, store.ErrNotFound) {
-		return nil, fmt.Errorf("failed to get active key: %w", err)
+		return nil, serviceutil.WrapServiceError("获取活跃密钥", err)
 	}
 
 	privateKey, err := crypto.GenerateRSAKeyPair(2048)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate new key pair: %w", err)
+		return nil, serviceutil.WrapServiceError("生成密钥对", err)
 	}
 
 	newKeyVersion, err := crypto.CreateKeyVersion(privateKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create key version: %w", err)
+		return nil, serviceutil.WrapServiceError("创建密钥版本", err)
 	}
 
 	if err := s.keyStore.StoreKey(ctx, newKeyVersion); err != nil {
-		return nil, fmt.Errorf("failed to store new key: %w", err)
+		return nil, serviceutil.WrapServiceError("存储新密钥", err)
 	}
 
 	pubKey, err := crypto.ParsePublicKey(newKeyVersion.PublicKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse public key: %w", err)
+		return nil, serviceutil.WrapServiceError("解析公钥", err)
 	}
 
 	privKey, err := crypto.ParsePrivateKey(newKeyVersion.PrivateKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse private key: %w", err)
+		return nil, serviceutil.WrapServiceError("解析私钥", err)
 	}
 
 	if err := s.jwtSvc.SetActiveKey(newKeyVersion.ID, privKey, pubKey); err != nil {
-		return nil, fmt.Errorf("failed to set active key: %w", err)
+		return nil, serviceutil.WrapServiceError("设置活跃密钥", err)
 	}
 
 	if activeKey != nil {
@@ -79,9 +81,10 @@ func (s *KeyRotationService) RotateKey(ctx context.Context) (*model.KeyVersion, 
 		}
 	}
 
-	if s.auditSvc != nil {
-		s.auditSvc.LogKeyRotated(ctx, newKeyVersion.ID)
-	}
+	// 使用统一的审计日志工具记录密钥轮换事件
+	auditutil.SafeAuditLog(ctx, s.auditSvc, "key_rotated", "", map[string]interface{}{
+		"key_id": newKeyVersion.ID,
+	})
 
 	slog.Info("key rotation completed",
 		"new_key_id", newKeyVersion.ID,
@@ -94,7 +97,7 @@ func (s *KeyRotationService) RotateKey(ctx context.Context) (*model.KeyVersion, 
 func (s *KeyRotationService) CleanupExpiredKeys(ctx context.Context) (int, error) {
 	keys, err := s.keyStore.ListAllKeys(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("failed to list keys: %w", err)
+		return 0, serviceutil.WrapServiceError("列出密钥", err)
 	}
 
 	cleanedCount := 0
@@ -110,9 +113,10 @@ func (s *KeyRotationService) CleanupExpiredKeys(ctx context.Context) (int, error
 			cleanedCount++
 			slog.Info("revoked expired key", "key_id", key.ID)
 
-			if s.auditSvc != nil {
-				s.auditSvc.LogKeyRevoked(ctx, key.ID)
-			}
+			// 使用统一的审计日志工具记录密钥撤销事件
+			auditutil.SafeAuditLog(ctx, s.auditSvc, "key_revoked", "", map[string]interface{}{
+				"key_id": key.ID,
+			})
 		}
 	}
 
@@ -122,7 +126,7 @@ func (s *KeyRotationService) CleanupExpiredKeys(ctx context.Context) (int, error
 func (s *KeyRotationService) RevokeKey(ctx context.Context, keyID string) error {
 	key, err := s.keyStore.GetKeyByID(ctx, keyID)
 	if err != nil {
-		return fmt.Errorf("failed to get key: %w", err)
+		return serviceutil.WrapServiceError("获取密钥", err)
 	}
 
 	if key.Status == model.KeyStatusActive {
@@ -130,14 +134,15 @@ func (s *KeyRotationService) RevokeKey(ctx context.Context, keyID string) error 
 	}
 
 	if err := s.keyStore.RevokeKey(ctx, keyID); err != nil {
-		return fmt.Errorf("failed to revoke key: %w", err)
+		return serviceutil.WrapServiceError("撤销密钥", err)
 	}
 
 	s.jwtSvc.RemoveKey(keyID)
 
-	if s.auditSvc != nil {
-		s.auditSvc.LogKeyRevoked(ctx, keyID)
-	}
+	// 使用统一的审计日志工具记录密钥撤销事件
+	auditutil.SafeAuditLog(ctx, s.auditSvc, "key_revoked", "", map[string]interface{}{
+		"key_id": keyID,
+	})
 
 	slog.Info("key revoked", "key_id", keyID)
 
@@ -151,7 +156,7 @@ func (s *KeyRotationService) GetKeyStatus(ctx context.Context) ([]*model.KeyVers
 func (s *KeyRotationService) InitializeFirstKey(ctx context.Context) (*model.KeyVersion, error) {
 	activeKey, err := s.keyStore.GetActiveKey(ctx)
 	if err != nil && !apperrors.Is(err, store.ErrNotFound) {
-		return nil, fmt.Errorf("failed to check for active key: %w", err)
+		return nil, serviceutil.WrapServiceError("检查活跃密钥", err)
 	}
 
 	if activeKey != nil {

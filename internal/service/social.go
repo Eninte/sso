@@ -18,6 +18,7 @@ import (
 	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/store"
+	"github.com/your-org/sso/internal/util/serviceutil"
 )
 
 // ============================================================================
@@ -367,7 +368,7 @@ func (s *SocialLoginService) findOrCreateUser(ctx context.Context, provider stri
 	user, err := s.store.GetByEmail(ctx, email)
 	if err != nil {
 		if !apperrors.Is(err, store.ErrNotFound) {
-			return nil, err
+			return nil, serviceutil.WrapServiceError("查询用户", err)
 		}
 
 		now := time.Now()
@@ -381,7 +382,7 @@ func (s *SocialLoginService) findOrCreateUser(ctx context.Context, provider stri
 		}
 
 		if err := s.store.Create(ctx, user); err != nil {
-			return nil, err
+			return nil, serviceutil.WrapServiceError("创建用户", err)
 		}
 	}
 

@@ -16,6 +16,8 @@ import (
 	"github.com/your-org/sso/internal/metrics"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/store"
+	"github.com/your-org/sso/internal/util/auditutil"
+	"github.com/your-org/sso/internal/util/serviceutil"
 	"github.com/your-org/sso/internal/validator"
 )
 
@@ -159,7 +161,7 @@ func (s *AuthService) Register(ctx context.Context, req *model.RegisterRequest) 
 	// 2. 检查邮箱是否已注册
 	existingUser, err := s.store.GetByEmail(ctx, req.Email)
 	if err != nil && !apperrors.Is(err, store.ErrNotFound) {
-		return nil, err
+		return nil, serviceutil.WrapServiceError("检查邮箱", err)
 	}
 	if existingUser != nil {
 		return nil, apperrors.ErrEmailExists
@@ -168,7 +170,7 @@ func (s *AuthService) Register(ctx context.Context, req *model.RegisterRequest) 
 	// 3. 哈希密码
 	hashedPassword, err := s.passwordSvc.HashPassword(req.Password)
 	if err != nil {
-		return nil, err
+		return nil, serviceutil.WrapServiceError("哈希密码", err)
 	}
 
 	// 4. 创建用户
@@ -183,7 +185,7 @@ func (s *AuthService) Register(ctx context.Context, req *model.RegisterRequest) 
 	}
 
 	if err := s.store.Create(ctx, user); err != nil {
-		return nil, err
+		return nil, serviceutil.WrapServiceError("创建用户", err)
 	}
 
 	// 5. 发送验证邮件
@@ -228,10 +230,7 @@ func (s *AuthService) validateUserCredentials(ctx context.Context, email, passwo
 	// 查询用户
 	user, err := s.store.GetByEmail(ctx, email)
 	if err != nil {
-		if apperrors.Is(err, store.ErrNotFound) {
-			return nil, ErrInvalidCredentials
-		}
-		return nil, err
+		return nil, serviceutil.HandleStoreError(err, ErrInvalidCredentials)
 	}
 
 	// 检查邮箱是否已验证
@@ -287,9 +286,12 @@ func (s *AuthService) handleLoginFailure(ctx context.Context, email string, audi
 	// 账户被锁定
 	if locked {
 		s.incrementMetric("auth_account_locked_total")
-		// 审计日志：异步记录，不影响主流程
-		if s.auditSvc != nil && auditCtx != nil {
-			s.auditSvc.LogAccountLocked(ctx, failedUser.ID, auditCtx.IPAddress)
+		// 使用统一的审计日志工具记录账户锁定事件
+		if auditCtx != nil {
+			auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventAccountLocked), failedUser.ID, map[string]interface{}{
+				"ip_address": auditCtx.IPAddress,
+				"attempts":   attempts,
+			})
 		}
 		slog.Warn("账户因多次登录失败被锁定", "user_id", failedUser.ID, "attempts", attempts)
 	}
@@ -297,9 +299,14 @@ func (s *AuthService) handleLoginFailure(ctx context.Context, email string, audi
 	// 记录登录失败指标
 	s.incrementMetric("auth_login_failed_total")
 
-	// 记录登录失败审计日志：异步记录，不影响主流程
-	if s.auditSvc != nil && auditCtx != nil {
-		s.auditSvc.LogUserLogin(ctx, failedUser.ID, failedUser.Email, auditCtx.IPAddress, auditCtx.UserAgent, false)
+	// 使用统一的审计日志工具记录登录失败事件
+	if auditCtx != nil {
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventUserLogin), failedUser.ID, map[string]interface{}{
+			"email":      failedUser.Email,
+			"ip_address": auditCtx.IPAddress,
+			"user_agent": auditCtx.UserAgent,
+			"success":    false,
+		})
 	}
 }
 
@@ -315,9 +322,13 @@ func (s *AuthService) handleLoginSuccess(ctx context.Context, user *model.User, 
 	// 记录登录成功指标
 	s.incrementMetric("auth_login_total")
 
-	// 记录登录成功审计日志：异步记录，不影响主流程
-	if s.auditSvc != nil && auditCtx != nil {
-		s.auditSvc.LogUserLogin(ctx, user.ID, user.Email, auditCtx.IPAddress, auditCtx.UserAgent, true)
+	// 使用统一的审计日志工具记录登录成功事件
+	if auditCtx != nil {
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventUserLogin), user.ID, map[string]interface{}{
+			"email":      user.Email,
+			"ip_address": auditCtx.IPAddress,
+			"user_agent": auditCtx.UserAgent,
+		})
 	}
 
 	// 生成token对
@@ -390,6 +401,7 @@ func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken st
 	tokenRecord, err := s.store.GetTokenByRefreshToken(ctx, refreshToken)
 	if err != nil {
 		slog.Error("RefreshToken: 查询Token失败", "error", err, "refresh_token", refreshToken)
+		// 安全设计：不暴露token是否存在，所有错误都返回ErrInvalidToken
 		return nil, ErrInvalidToken
 	}
 	slog.Debug("RefreshToken: 查询到Token", "token_id", tokenRecord.ID, "user_id", tokenRecord.UserID)
@@ -402,7 +414,7 @@ func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken st
 	user, err := s.store.GetByID(ctx, tokenRecord.UserID)
 	if err != nil {
 		slog.Error("RefreshToken: 查询用户失败", "error", err, "user_id", tokenRecord.UserID)
-		return nil, err
+		return nil, serviceutil.WrapServiceError("查询用户", err)
 	}
 	slog.Debug("RefreshToken: 查询到用户", "user_id", user.ID, "email", user.Email)
 
@@ -413,14 +425,17 @@ func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken st
 			"token_id", tokenRecord.ID,
 		)
 		// 撤销失败时返回错误，避免生成冲突的access_token
-		return nil, fmt.Errorf("撤销旧Token失败: %w", revokeErr)
+		return nil, serviceutil.WrapServiceError("撤销旧Token", revokeErr)
 	}
 	slog.Debug("RefreshToken: 旧Token已撤销", "token_id", tokenRecord.ID)
 
 	s.incrementMetric("auth_token_refresh_total")
 
-	if s.auditSvc != nil && auditCtx != nil {
-		s.auditSvc.LogTokenRefresh(ctx, user.ID, tokenRecord.GetClientID(), auditCtx.IPAddress)
+	if auditCtx != nil {
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventTokenRefresh), user.ID, map[string]interface{}{
+			"client_id":  tokenRecord.GetClientID(),
+			"ip_address": auditCtx.IPAddress,
+		})
 	}
 
 	return s.generateTokenPair(ctx, user.ID, user.Email, user.Role, tokenRecord.Scopes, tokenRecord.ClientID)
@@ -437,15 +452,17 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (*m
 // LogoutWithAudit 用户登出（带审计日志）
 func (s *AuthService) LogoutWithAudit(ctx context.Context, accessToken string, auditCtx *AuditContext) error {
 	claims, err := s.jwtSvc.ValidateAccessToken(accessToken)
-	if err == nil && s.auditSvc != nil && auditCtx != nil {
-		s.auditSvc.LogUserLogout(ctx, claims.Subject, auditCtx.IPAddress)
+	if err == nil && auditCtx != nil {
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventUserLogout), claims.Subject, map[string]interface{}{
+			"ip_address": auditCtx.IPAddress,
+		})
 	}
 	if err := s.revokeTokenWithRetry(ctx, accessToken); err != nil {
 		slog.Error("登出时撤销Token失败",
 			"error", err,
 			"token_prefix", maskToken(accessToken),
 		)
-		return fmt.Errorf("登出失败: %w", err)
+		return serviceutil.WrapServiceError("登出", err)
 	}
 	s.incrementMetric("auth_token_revoke_total")
 	return nil
@@ -463,7 +480,7 @@ func (s *AuthService) LogoutAllWithAudit(ctx context.Context, userID string, aud
 			"error", err,
 			"user_id", userID,
 		)
-		return fmt.Errorf("登出所有设备失败: %w", err)
+		return serviceutil.WrapServiceError("登出所有设备", err)
 	}
 
 	// 清除该用户相关的缓存（失败不影响主流程）
@@ -474,8 +491,10 @@ func (s *AuthService) LogoutAllWithAudit(ctx context.Context, userID string, aud
 	}
 
 	s.incrementMetric("auth_logout_all_total")
-	if s.auditSvc != nil && auditCtx != nil {
-		s.auditSvc.LogLogoutAll(ctx, userID, auditCtx.IPAddress)
+	if auditCtx != nil {
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventLogoutAll), userID, map[string]interface{}{
+			"ip_address": auditCtx.IPAddress,
+		})
 	}
 	return nil
 }
@@ -519,6 +538,7 @@ func (s *AuthService) ValidateToken(ctx context.Context, accessToken string) (*c
 	// 缓存未命中，查询数据库
 	tokenRecord, err := s.store.GetTokenByAccessToken(ctx, accessToken)
 	if err != nil {
+		// 安全设计：不暴露token是否存在，所有错误都返回ErrInvalidToken
 		return nil, ErrInvalidToken
 	}
 	if tokenRecord.RevokedAt != nil {

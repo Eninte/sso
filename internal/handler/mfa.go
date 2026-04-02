@@ -9,6 +9,7 @@ import (
 	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/middleware"
 	"github.com/your-org/sso/internal/service"
+	"github.com/your-org/sso/internal/util/handlerutil"
 )
 
 // ============================================================================
@@ -74,7 +75,7 @@ func (h *MFAHandler) HandleVerifyMFA(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Code == "" {
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeMissingVerificationCode))
+		handlerutil.WriteValidationError(w, "code", getMessage(r, apperrors.ErrCodeMissingVerificationCode))
 		return
 	}
 
@@ -112,7 +113,7 @@ func (h *MFAHandler) HandleDisableMFA(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Code == "" {
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeMissingVerificationCode))
+		handlerutil.WriteValidationError(w, "code", getMessage(r, apperrors.ErrCodeMissingVerificationCode))
 		return
 	}
 

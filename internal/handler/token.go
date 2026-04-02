@@ -3,7 +3,6 @@
 package handler
 
 import (
-	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"github.com/your-org/sso/internal/middleware"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/service"
+	"github.com/your-org/sso/internal/util/handlerutil"
 )
 
 // ============================================================================
@@ -58,7 +58,7 @@ func (h *TokenHandler) handleRefreshToken(w http.ResponseWriter, r *http.Request
 	slog.Debug("handleRefreshToken: 开始处理", "refresh_token_length", len(refreshToken))
 	if refreshToken == "" {
 		slog.Warn("handleRefreshToken: refresh_token为空")
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeMissingRefreshToken))
+		handlerutil.WriteValidationError(w, "refresh_token", getMessage(r, apperrors.ErrCodeMissingRefreshToken))
 		return
 	}
 
@@ -66,11 +66,7 @@ func (h *TokenHandler) handleRefreshToken(w http.ResponseWriter, r *http.Request
 	resp, err := h.authSvc.RefreshToken(r.Context(), refreshToken)
 	if err != nil {
 		slog.Error("handleRefreshToken: 刷新失败", "error", err)
-		if errors.Is(err, service.ErrInvalidToken) {
-			writeError(w, http.StatusUnauthorized, getMessage(r, apperrors.ErrCodeInvalidRefreshToken))
-			return
-		}
-		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeRefreshTokenFailed))
+		handlerutil.WriteJSONError(w, err)
 		return
 	}
 
@@ -83,15 +79,15 @@ func (h *TokenHandler) handleRefreshToken(w http.ResponseWriter, r *http.Request
 func (h *TokenHandler) handleAuthorizationCode(w http.ResponseWriter, r *http.Request, req *model.TokenRequest) {
 	// 验证必需参数
 	if req.Code == "" {
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeMissingCode))
+		handlerutil.WriteValidationError(w, "code", getMessage(r, apperrors.ErrCodeMissingCode))
 		return
 	}
 	if req.ClientID == "" {
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeMissingClientID))
+		handlerutil.WriteValidationError(w, "client_id", getMessage(r, apperrors.ErrCodeMissingClientID))
 		return
 	}
 	if req.RedirectURI == "" {
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeMissingRedirectURI))
+		handlerutil.WriteValidationError(w, "redirect_uri", getMessage(r, apperrors.ErrCodeMissingRedirectURI))
 		return
 	}
 
@@ -105,32 +101,12 @@ func (h *TokenHandler) handleAuthorizationCode(w http.ResponseWriter, r *http.Re
 		req.CodeVerifier,
 	)
 	if err != nil {
-		if errors.Is(err, service.ErrInvalidCode) {
-			writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidCode))
-			return
-		}
-		if errors.Is(err, service.ErrCodeExpired) {
-			writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeCodeExpired))
-			return
-		}
-		if errors.Is(err, service.ErrCodeUsed) {
-			writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeCodeUsed))
-			return
-		}
-		if errors.Is(err, service.ErrInvalidClient) {
-			writeError(w, http.StatusUnauthorized, getMessage(r, apperrors.ErrCodeInvalidClient))
-			return
-		}
-		if errors.Is(err, service.ErrInvalidCodeVerifier) {
-			writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeInvalidCodeVerifier))
-			return
-		}
-		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeExchangeCodeFailed))
+		handlerutil.WriteJSONError(w, err)
 		return
 	}
 
 	// 返回Token响应
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	handlerutil.WriteJSONSuccess(w, map[string]interface{}{
 		"access_token":  token.AccessToken,
 		"refresh_token": token.RefreshToken,
 		"token_type":    "Bearer",
@@ -151,12 +127,12 @@ func (h *TokenHandler) HandleRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Token == "" {
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeMissingToken))
+		handlerutil.WriteValidationError(w, "token", getMessage(r, apperrors.ErrCodeMissingToken))
 		return
 	}
 
 	if err := h.authSvc.Logout(r.Context(), req.Token); err != nil {
-		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeRevokeTokenFailed))
+		handlerutil.WriteJSONError(w, err)
 		return
 	}
 
@@ -175,7 +151,7 @@ func (h *TokenHandler) HandleLogoutAll(w http.ResponseWriter, r *http.Request) {
 
 	// 撤销用户所有Token
 	if err := h.authSvc.LogoutAll(r.Context(), userID); err != nil {
-		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeRevokeTokenFailed))
+		handlerutil.WriteJSONError(w, err)
 		return
 	}
 

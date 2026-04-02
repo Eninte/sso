@@ -12,6 +12,7 @@ import (
 	"github.com/your-org/sso/internal/crypto"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/store"
+	"github.com/your-org/sso/internal/util/serviceutil"
 )
 
 // ============================================================================
@@ -71,7 +72,7 @@ func (s *TokenService) GenerateTokenPair(
 	slog.Debug("GenerateTokenPair: 准备存储token", "userID", userID, "tokenID", tokenRecord.ID)
 	if err := s.store.StoreToken(ctx, tokenRecord); err != nil {
 		slog.Error("GenerateTokenPair: 存储token失败", "error", err, "userID", userID)
-		return nil, err
+		return nil, serviceutil.WrapServiceError("存储token", err)
 	}
 	slog.Debug("GenerateTokenPair: token存储成功", "userID", userID)
 

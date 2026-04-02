@@ -206,13 +206,10 @@ func validateDatabaseConfig(c *Config) error {
 	return nil
 }
 
-func (c *Config) validate() error {
-	// 验证数据库配置
-	if err := validateDatabaseConfig(c); err != nil {
-		return err
-	}
-
-	// 验证JWT密钥路径
+// validateJWTConfig 验证JWT配置
+// 检查JWT密钥路径和Token TTL值
+func validateJWTConfig(c *Config) error {
+	// 验证JWT密钥路径，如果为空则设置默认值
 	if c.JWTPrivateKeyPath == "" {
 		c.JWTPrivateKeyPath = "./keys/private.pem"
 		slog.Warn("JWT私钥路径未设置，使用默认值", "path", c.JWTPrivateKeyPath)
@@ -220,6 +217,119 @@ func (c *Config) validate() error {
 	if c.JWTPublicKeyPath == "" {
 		c.JWTPublicKeyPath = "./keys/public.pem"
 		slog.Warn("JWT公钥路径未设置，使用默认值", "path", c.JWTPublicKeyPath)
+	}
+
+	// 验证Token TTL值为正数
+	if c.AccessTokenTTL <= 0 {
+		slog.Error("Access Token TTL 必须为正数", "ttl", c.AccessTokenTTL)
+		return fmt.Errorf("Access Token TTL 必须为正数")
+	}
+	if c.RefreshTokenTTL <= 0 {
+		slog.Error("Refresh Token TTL 必须为正数", "ttl", c.RefreshTokenTTL)
+		return fmt.Errorf("Refresh Token TTL 必须为正数")
+	}
+
+	// 验证Token TTL合理性
+	if c.AccessTokenTTL < 1*time.Minute {
+		slog.Warn("Access Token TTL 过短，建议至少1分钟", "ttl", c.AccessTokenTTL)
+	}
+	if c.RefreshTokenTTL < c.AccessTokenTTL {
+		slog.Warn("Refresh Token TTL 应大于 Access Token TTL",
+			"access_ttl", c.AccessTokenTTL,
+			"refresh_ttl", c.RefreshTokenTTL)
+	}
+
+	return nil
+}
+
+// validateSecurityConfig 验证安全配置
+// 检查bcrypt cost和其他安全参数
+func validateSecurityConfig(c *Config) error {
+	// 验证bcrypt cost范围
+	if c.BcryptCost < 4 || c.BcryptCost > 31 {
+		slog.Warn("bcrypt cost 超出推荐范围 (4-31)", "cost", c.BcryptCost)
+	}
+
+	// 生产环境必须使用足够强的bcrypt cost
+	if c.Env == "production" && c.BcryptCost < 12 {
+		slog.Error("生产环境bcrypt cost应至少为12", "current", c.BcryptCost)
+		return ErrBcryptCostTooLow
+	}
+
+	// 验证限流配置
+	if c.RateLimitRequests <= 0 {
+		slog.Warn("限流请求数应为正数", "requests", c.RateLimitRequests)
+	}
+
+	// 验证登录保护配置
+	if c.MaxLoginAttempts <= 0 {
+		slog.Warn("最大登录尝试次数应为正数", "attempts", c.MaxLoginAttempts)
+	}
+	if c.LockoutDuration <= 0 {
+		slog.Warn("账户锁定时长应为正数", "duration", c.LockoutDuration)
+	}
+
+	return nil
+}
+
+// validateProductionConfig 验证生产环境配置
+// 检查生产环境特定的安全要求
+func validateProductionConfig(c *Config) error {
+	// 仅在生产环境执行验证
+	if c.Env != "production" {
+		return nil
+	}
+
+	// 检查CORS配置不包含localhost
+	if strings.Contains(strings.ToLower(c.CORSAllowedOrigins), "localhost") {
+		slog.Error("生产环境CORS配置不能包含localhost", "cors_origins", c.CORSAllowedOrigins)
+		return fmt.Errorf("生产环境CORS_ALLOWED_ORIGINS不能包含localhost")
+	}
+
+	// 检查默认CORS配置
+	if c.CORSAllowedOrigins == "http://localhost:3000" {
+		slog.Error("生产环境不能使用默认CORS配置")
+		return fmt.Errorf("生产环境必须设置 CORS_ALLOWED_ORIGINS")
+	}
+
+	// 检查JWT Issuer配置
+	if c.JWTIssuer == "sso" {
+		slog.Warn("生产环境使用默认JWT Issuer，建议自定义")
+	}
+
+	// 检查SMTP配置
+	if c.SMTPHost == "localhost" {
+		slog.Warn("生产环境使用localhost作为SMTP服务器")
+	}
+
+	// 检查Metrics认证配置
+	if c.MetricsUsername != "" && c.MetricsPassword == "" {
+		slog.Error("生产环境配置了METRICS_USERNAME但未设置METRICS_PASSWORD")
+		return fmt.Errorf("生产环境配置了METRICS_USERNAME时必须设置METRICS_PASSWORD")
+	}
+
+	return nil
+}
+
+func (c *Config) validate() error {
+	// 验证数据库配置
+	if err := validateDatabaseConfig(c); err != nil {
+		return err
+	}
+
+	// 验证JWT配置
+	if err := validateJWTConfig(c); err != nil {
+		return err
+	}
+
+	// 验证安全配置
+	if err := validateSecurityConfig(c); err != nil {
+		return err
+	}
+
+	// 验证生产环境配置
+	if err := validateProductionConfig(c); err != nil {
+		return err
 	}
 
 	// 验证环境设置
@@ -230,46 +340,6 @@ func (c *Config) validate() error {
 	// 验证端口范围
 	if port, err := strconv.Atoi(c.ServerPort); err != nil || port < 1 || port > 65535 {
 		slog.Warn("服务器端口无效", "port", c.ServerPort)
-	}
-
-	// 验证bcrypt cost
-	if c.BcryptCost < 4 || c.BcryptCost > 31 {
-		slog.Warn("bcrypt cost 超出推荐范围 (4-31)", "cost", c.BcryptCost)
-	}
-
-	// 验证Token TTL
-	if c.AccessTokenTTL < 1*time.Minute {
-		slog.Warn("Access Token TTL 过短，建议至少1分钟", "ttl", c.AccessTokenTTL)
-	}
-	if c.RefreshTokenTTL < c.AccessTokenTTL {
-		slog.Warn("Refresh Token TTL 应大于 Access Token TTL",
-			"access_ttl", c.AccessTokenTTL,
-			"refresh_ttl", c.RefreshTokenTTL)
-	}
-
-	// 生产环境额外验证
-	if c.Env == "production" {
-		// 检查默认值
-		if c.CORSAllowedOrigins == "http://localhost:3000" {
-			slog.Error("生产环境不能使用默认CORS配置")
-			return fmt.Errorf("生产环境必须设置 CORS_ALLOWED_ORIGINS")
-		}
-		if c.BcryptCost < 12 {
-			slog.Error("生产环境bcrypt cost应至少为12", "current", c.BcryptCost)
-			return ErrBcryptCostTooLow
-		}
-		if c.JWTIssuer == "sso" {
-			slog.Warn("生产环境使用默认JWT Issuer，建议自定义")
-		}
-		// 检查SMTP配置
-		if c.SMTPHost == "localhost" {
-			slog.Warn("生产环境使用localhost作为SMTP服务器")
-		}
-		// 检查Metrics认证配置
-		if c.MetricsUsername != "" && c.MetricsPassword == "" {
-			slog.Error("生产环境配置了METRICS_USERNAME但未设置METRICS_PASSWORD")
-			return fmt.Errorf("生产环境配置了METRICS_USERNAME时必须设置METRICS_PASSWORD")
-		}
 	}
 
 	return nil

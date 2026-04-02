@@ -203,6 +203,152 @@ func TestValidate_ProductionDefaults(t *testing.T) {
 	}
 }
 
+func TestValidateProductionConfig_CORSLocalhostCheck(t *testing.T) {
+	cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	os.Setenv("SERVER_ENV", "production")
+	os.Setenv("BCRYPT_COST", "12")
+	os.Setenv("DB_SSL_MODE", "require")
+
+	tests := []struct {
+		name        string
+		corsOrigins string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:        "CORS包含localhost-小写",
+			corsOrigins: "http://localhost:3000",
+			wantErr:     true,
+			errContains: "localhost",
+		},
+		{
+			name:        "CORS包含localhost-大写",
+			corsOrigins: "http://LOCALHOST:3000",
+			wantErr:     true,
+			errContains: "localhost",
+		},
+		{
+			name:        "CORS包含localhost-混合大小写",
+			corsOrigins: "http://LocalHost:3000",
+			wantErr:     true,
+			errContains: "localhost",
+		},
+		{
+			name:        "CORS包含localhost在多个源中",
+			corsOrigins: "https://example.com,http://localhost:3000,https://app.example.com",
+			wantErr:     true,
+			errContains: "localhost",
+		},
+		{
+			name:        "CORS不包含localhost",
+			corsOrigins: "https://example.com",
+			wantErr:     false,
+		},
+		{
+			name:        "CORS多个有效源",
+			corsOrigins: "https://example.com,https://app.example.com,https://api.example.com",
+			wantErr:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			os.Setenv("CORS_ALLOWED_ORIGINS", tt.corsOrigins)
+
+			cfg, err := config.Load()
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, cfg)
+			}
+		})
+	}
+}
+
+func TestValidateProductionConfig_MetricsAuth(t *testing.T) {
+	cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	os.Setenv("SERVER_ENV", "production")
+	os.Setenv("BCRYPT_COST", "12")
+	os.Setenv("DB_SSL_MODE", "require")
+	os.Setenv("CORS_ALLOWED_ORIGINS", "https://example.com")
+
+	tests := []struct {
+		name            string
+		metricsUsername string
+		metricsPassword string
+		wantErr         bool
+		errContains     string
+	}{
+		{
+			name:            "Metrics用户名设置但密码未设置",
+			metricsUsername: "admin",
+			metricsPassword: "",
+			wantErr:         true,
+			errContains:     "METRICS_PASSWORD",
+		},
+		{
+			name:            "Metrics用户名和密码都设置",
+			metricsUsername: "admin",
+			metricsPassword: "secret",
+			wantErr:         false,
+		},
+		{
+			name:            "Metrics都未设置",
+			metricsUsername: "",
+			metricsPassword: "",
+			wantErr:         false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.metricsUsername != "" {
+				os.Setenv("METRICS_USERNAME", tt.metricsUsername)
+			} else {
+				os.Unsetenv("METRICS_USERNAME")
+			}
+			if tt.metricsPassword != "" {
+				os.Setenv("METRICS_PASSWORD", tt.metricsPassword)
+			} else {
+				os.Unsetenv("METRICS_PASSWORD")
+			}
+
+			cfg, err := config.Load()
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, cfg)
+			}
+		})
+	}
+}
+
+func TestValidateProductionConfig_DevelopmentEnvironment(t *testing.T) {
+	cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	// 在开发环境下，即使CORS包含localhost也应该通过
+	os.Setenv("SERVER_ENV", "development")
+	os.Setenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
+
+	cfg, err := config.Load()
+	assert.NoError(t, err)
+	assert.NotNil(t, cfg)
+	assert.Equal(t, "http://localhost:3000", cfg.CORSAllowedOrigins)
+}
+
 func TestValidate_ProductionDBSSL(t *testing.T) {
 	cleanup := setupTestEnv(t)
 	defer cleanup()
@@ -285,6 +431,102 @@ func TestValidate_TokenTTL(t *testing.T) {
 			assert.NotNil(t, cfg)
 		})
 	}
+}
+
+// ============================================================================
+// JWT配置验证测试
+// ============================================================================
+
+func TestValidateJWTConfig_PositiveTTL(t *testing.T) {
+	cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	os.Setenv("SERVER_ENV", "development")
+	os.Setenv("JWT_ACCESS_TOKEN_TTL", "15m")
+	os.Setenv("JWT_REFRESH_TOKEN_TTL", "168h")
+
+	cfg, err := config.Load()
+	assert.NoError(t, err)
+	assert.NotNil(t, cfg)
+	assert.Equal(t, 15*time.Minute, cfg.AccessTokenTTL)
+	assert.Equal(t, 168*time.Hour, cfg.RefreshTokenTTL)
+}
+
+func TestValidateJWTConfig_NegativeTTL(t *testing.T) {
+	cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	os.Setenv("SERVER_ENV", "development")
+	os.Setenv("JWT_ACCESS_TOKEN_TTL", "-15m")
+	os.Setenv("JWT_REFRESH_TOKEN_TTL", "168h")
+
+	cfg, err := config.Load()
+	assert.Error(t, err)
+	assert.Nil(t, cfg)
+	assert.Contains(t, err.Error(), "Access Token TTL 必须为正数")
+}
+
+func TestValidateJWTConfig_ZeroAccessTTL(t *testing.T) {
+	cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	os.Setenv("SERVER_ENV", "development")
+	os.Setenv("JWT_ACCESS_TOKEN_TTL", "0s")
+	os.Setenv("JWT_REFRESH_TOKEN_TTL", "168h")
+
+	cfg, err := config.Load()
+	assert.Error(t, err)
+	assert.Nil(t, cfg)
+	assert.Contains(t, err.Error(), "Access Token TTL 必须为正数")
+}
+
+func TestValidateJWTConfig_ZeroRefreshTTL(t *testing.T) {
+	cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	os.Setenv("SERVER_ENV", "development")
+	os.Setenv("JWT_ACCESS_TOKEN_TTL", "15m")
+	os.Setenv("JWT_REFRESH_TOKEN_TTL", "0s")
+
+	cfg, err := config.Load()
+	assert.Error(t, err)
+	assert.Nil(t, cfg)
+	assert.Contains(t, err.Error(), "Refresh Token TTL 必须为正数")
+}
+
+func TestValidateJWTConfig_DefaultPaths(t *testing.T) {
+	cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	// 清除JWT密钥路径环境变量，测试默认值设置
+	os.Unsetenv("JWT_PRIVATE_KEY_PATH")
+	os.Unsetenv("JWT_PUBLIC_KEY_PATH")
+	os.Setenv("SERVER_ENV", "development")
+	// 设置有效的TTL值
+	os.Setenv("JWT_ACCESS_TOKEN_TTL", "15m")
+	os.Setenv("JWT_REFRESH_TOKEN_TTL", "168h")
+
+	cfg, err := config.Load()
+	assert.NoError(t, err)
+	assert.NotNil(t, cfg)
+	assert.Equal(t, "./keys/private.pem", cfg.JWTPrivateKeyPath)
+	assert.Equal(t, "./keys/public.pem", cfg.JWTPublicKeyPath)
+}
+
+func TestValidateJWTConfig_RefreshTTLLessThanAccess(t *testing.T) {
+	cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	os.Setenv("SERVER_ENV", "development")
+	os.Setenv("JWT_ACCESS_TOKEN_TTL", "168h")
+	os.Setenv("JWT_REFRESH_TOKEN_TTL", "15m")
+
+	// 这应该只产生警告，不应该报错
+	cfg, err := config.Load()
+	assert.NoError(t, err)
+	assert.NotNil(t, cfg)
+	assert.Equal(t, 168*time.Hour, cfg.AccessTokenTTL)
+	assert.Equal(t, 15*time.Minute, cfg.RefreshTokenTTL)
 }
 
 // ============================================================================

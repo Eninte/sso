@@ -12,6 +12,8 @@ import (
 	"net"
 	"net/smtp"
 	"time"
+
+	"github.com/your-org/sso/internal/util/serviceutil"
 )
 
 // ============================================================================
@@ -108,7 +110,7 @@ func (s *EmailService) SendEmail(ctx context.Context, to, subject, htmlBody stri
 
 	if err != nil {
 		s.logger.ErrorContext(ctx, "发送邮件失败", "to", to, "error", err)
-		return fmt.Errorf("发送邮件失败: %w", err)
+		return serviceutil.WrapServiceError("发送邮件", err)
 	}
 
 	s.logger.InfoContext(ctx, "邮件发送成功", "to", to, "subject", subject)

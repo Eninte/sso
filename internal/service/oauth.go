@@ -16,6 +16,8 @@ import (
 	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/store"
+	"github.com/your-org/sso/internal/util/auditutil"
+	"github.com/your-org/sso/internal/util/serviceutil"
 )
 
 // ============================================================================
@@ -89,7 +91,7 @@ func (s *OAuthService) getClient(ctx context.Context, clientID string) (*model.C
 	// 缓存未命中，查询数据库
 	client, err := s.store.GetByClientID(ctx, clientID)
 	if err != nil {
-		return nil, err
+		return nil, serviceutil.HandleStoreError(err, ErrInvalidClient)
 	}
 
 	// 缓存结果（失败不影响主流程）
@@ -145,7 +147,7 @@ func (s *OAuthService) CreateAuthorizationCode(
 
 	code, err := common.GenerateRandomString(32)
 	if err != nil {
-		return "", fmt.Errorf("生成授权码失败: %w", err)
+		return "", serviceutil.WrapServiceError("生成授权码", err)
 	}
 
 	authCode := &model.AuthorizationCode{
@@ -161,13 +163,13 @@ func (s *OAuthService) CreateAuthorizationCode(
 	}
 
 	if err := s.store.StoreAuthorizationCode(ctx, authCode); err != nil {
-		return "", fmt.Errorf("存储授权码失败: %w", err)
+		return "", serviceutil.WrapServiceError("存储授权码", err)
 	}
 
-	// 记录授权码创建审计日志
-	if s.auditSvc != nil {
-		s.auditSvc.LogAuthCodeCreated(ctx, userID, clientID, "")
-	}
+	// 使用统一的审计日志工具记录授权码创建事件
+	auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventAuthCodeCreated), userID, map[string]interface{}{
+		"client_id": clientID,
+	})
 
 	return code, nil
 }
@@ -216,7 +218,7 @@ func (s *OAuthService) validateAuthorizationCode(
 	authCode, err := s.store.GetAuthorizationCode(ctx, code)
 	if err != nil {
 		s.logAuthCodeInvalid(ctx, "", clientID, "", "invalid_code")
-		return nil, ErrInvalidCode
+		return nil, serviceutil.HandleStoreError(err, ErrInvalidCode)
 	}
 
 	if authCode.ClientID != clientID {
@@ -289,13 +291,13 @@ func (s *OAuthService) markAuthorizationCodeUsed(
 	now := time.Now()
 	authCode.UsedAt = &now
 	if err := s.store.UpdateAuthorizationCode(ctx, authCode); err != nil {
-		return fmt.Errorf("更新授权码状态失败: %w", err)
+		return serviceutil.WrapServiceError("更新授权码状态", err)
 	}
 
-	// 记录授权码使用审计日志
-	if s.auditSvc != nil {
-		s.auditSvc.LogAuthCodeUsed(ctx, authCode.UserID, clientID, "")
-	}
+	// 使用统一的审计日志工具记录授权码使用事件
+	auditutil.SafeAuditLog(ctx, s.auditSvc, "auth_code_used", authCode.UserID, map[string]interface{}{
+		"client_id": clientID,
+	})
 
 	return nil
 }
@@ -307,7 +309,7 @@ func (s *OAuthService) generateTokenResponse(
 ) (*model.LoginResponse, error) {
 	user, err := s.store.GetByID(ctx, authCode.UserID)
 	if err != nil {
-		return nil, fmt.Errorf("获取用户信息失败: %w", err)
+		return nil, serviceutil.WrapServiceError("获取用户信息", err)
 	}
 
 	if s.tokenSvc == nil {
@@ -327,17 +329,20 @@ func (s *OAuthService) generateTokenResponse(
 
 // logAuthCodeInvalid 记录无效授权码审计日志
 func (s *OAuthService) logAuthCodeInvalid(ctx context.Context, userID, clientID, ipAddress, reason string) {
-	if s.auditSvc != nil {
-		s.auditSvc.LogAuthCodeInvalid(ctx, userID, clientID, ipAddress, reason)
-	}
+	// 使用统一的审计日志工具记录无效授权码事件
+	auditutil.SafeAuditLog(ctx, s.auditSvc, "auth_code_invalid", userID, map[string]interface{}{
+		"client_id":  clientID,
+		"ip_address": ipAddress,
+		"reason":     reason,
+	})
 }
 
 // RevokeToken 撤销Token
 func (s *OAuthService) RevokeToken(ctx context.Context, token string) error {
 	err := s.store.RevokeToken(ctx, token)
-	if err == nil && s.auditSvc != nil {
-		// 记录Token撤销审计日志
-		s.auditSvc.LogTokenRevoke(ctx, "", "", "")
+	if err == nil {
+		// 使用统一的审计日志工具记录Token撤销事件
+		auditutil.SafeAuditLog(ctx, s.auditSvc, "token_revoked", "", map[string]interface{}{})
 	}
 	return err
 }
