@@ -50,18 +50,21 @@ func TestNewEmailService(t *testing.T) {
 	}
 
 	t.Run("默认sender", func(t *testing.T) {
-		svc := service.NewEmailService(config)
+		svc, err := service.NewEmailService(config)
+		require.NoError(t, err)
 		assert.NotNil(t, svc)
 	})
 
 	t.Run("注入mock sender", func(t *testing.T) {
 		mock := &mockMailSender{}
-		svc := service.NewEmailService(config, mock)
+		svc, err := service.NewEmailService(config, mock)
+		require.NoError(t, err)
 		assert.NotNil(t, svc)
 	})
 
 	t.Run("nil sender使用默认", func(t *testing.T) {
-		svc := service.NewEmailService(config, nil)
+		svc, err := service.NewEmailService(config, nil)
+		require.NoError(t, err)
 		assert.NotNil(t, svc)
 	})
 }
@@ -80,9 +83,10 @@ func TestEmailService_SendEmail_Mock(t *testing.T) {
 			SMTPPort: 587,
 			From:     "noreply@example.com",
 		}
-		svc := service.NewEmailService(config, mock)
+		svc, err := service.NewEmailService(config, mock)
+		require.NoError(t, err)
 
-		err := svc.SendEmail(ctx, "to@example.com", "Test Subject", "<html>body</html>")
+		err = svc.SendEmail(ctx, "to@example.com", "Test Subject", "<html>body</html>")
 
 		require.NoError(t, err)
 		assert.Len(t, mock.sentMessages, 1)
@@ -100,9 +104,10 @@ func TestEmailService_SendEmail_Mock(t *testing.T) {
 			Password: "password",
 			From:     "user@gmail.com",
 		}
-		svc := service.NewEmailService(config, mock)
+		svc, err := service.NewEmailService(config, mock)
+		require.NoError(t, err)
 
-		err := svc.SendEmail(ctx, "to@example.com", "SSL Test", "<html>body</html>")
+		err = svc.SendEmail(ctx, "to@example.com", "SSL Test", "<html>body</html>")
 
 		require.NoError(t, err)
 		assert.Len(t, mock.sentMessages, 1)
@@ -116,9 +121,10 @@ func TestEmailService_SendEmail_Mock(t *testing.T) {
 			SMTPPort: 587,
 			From:     "noreply@example.com",
 		}
-		svc := service.NewEmailService(config, mock)
+		svc, err := service.NewEmailService(config, mock)
+		require.NoError(t, err)
 
-		err := svc.SendEmail(ctx, "to@example.com", "Test", "<html>body</html>")
+		err = svc.SendEmail(ctx, "to@example.com", "Test", "<html>body</html>")
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "发送邮件失败")
@@ -139,9 +145,10 @@ func TestEmailService_SendVerificationEmail_Mock(t *testing.T) {
 			SMTPPort: 587,
 			From:     "noreply@example.com",
 		}
-		svc := service.NewEmailService(config, mock)
+		svc, err := service.NewEmailService(config, mock)
+		require.NoError(t, err)
 
-		err := svc.SendVerificationEmail(ctx, "user@example.com", "TestUser", "https://example.com/verify?token=abc")
+		err = svc.SendVerificationEmail(ctx, "user@example.com", "TestUser", "https://example.com/verify?token=abc")
 
 		require.NoError(t, err)
 		assert.Len(t, mock.sentMessages, 1)
@@ -158,9 +165,10 @@ func TestEmailService_SendVerificationEmail_Mock(t *testing.T) {
 			SMTPPort: 587,
 			From:     "noreply@example.com",
 		}
-		svc := service.NewEmailService(config, mock)
+		svc, err := service.NewEmailService(config, mock)
+		require.NoError(t, err)
 
-		err := svc.SendVerificationEmail(ctx, "user@example.com", "测试用户", "https://example.com/verify?token=xyz")
+		err = svc.SendVerificationEmail(ctx, "user@example.com", "测试用户", "https://example.com/verify?token=xyz")
 
 		require.NoError(t, err)
 		assert.Len(t, mock.sentMessages, 1)
@@ -174,9 +182,10 @@ func TestEmailService_SendVerificationEmail_Mock(t *testing.T) {
 			SMTPPort: 587,
 			From:     "noreply@example.com",
 		}
-		svc := service.NewEmailService(config, mock)
+		svc, err := service.NewEmailService(config, mock)
+		require.NoError(t, err)
 
-		err := svc.SendVerificationEmail(ctx, "user@example.com", "TestUser", "https://example.com/verify")
+		err = svc.SendVerificationEmail(ctx, "user@example.com", "TestUser", "https://example.com/verify")
 
 		assert.Error(t, err)
 	})
@@ -196,9 +205,10 @@ func TestEmailService_SendPasswordResetEmail_Mock(t *testing.T) {
 			SMTPPort: 587,
 			From:     "noreply@example.com",
 		}
-		svc := service.NewEmailService(config, mock)
+		svc, err := service.NewEmailService(config, mock)
+		require.NoError(t, err)
 
-		err := svc.SendPasswordResetEmail(ctx, "user@example.com", "TestUser", "https://example.com/reset?token=abc")
+		err = svc.SendPasswordResetEmail(ctx, "user@example.com", "TestUser", "https://example.com/reset?token=abc")
 
 		require.NoError(t, err)
 		assert.Len(t, mock.sentMessages, 1)
@@ -215,9 +225,10 @@ func TestEmailService_SendPasswordResetEmail_Mock(t *testing.T) {
 			SMTPPort: 587,
 			From:     "noreply@example.com",
 		}
-		svc := service.NewEmailService(config, mock)
+		svc, err := service.NewEmailService(config, mock)
+		require.NoError(t, err)
 
-		err := svc.SendPasswordResetEmail(ctx, "user@example.com", "测试用户", "https://example.com/reset?token=xyz")
+		err = svc.SendPasswordResetEmail(ctx, "user@example.com", "测试用户", "https://example.com/reset?token=xyz")
 
 		require.NoError(t, err)
 		assert.Len(t, mock.sentMessages, 1)
@@ -231,9 +242,10 @@ func TestEmailService_SendPasswordResetEmail_Mock(t *testing.T) {
 			SMTPPort: 587,
 			From:     "noreply@example.com",
 		}
-		svc := service.NewEmailService(config, mock)
+		svc, err := service.NewEmailService(config, mock)
+		require.NoError(t, err)
 
-		err := svc.SendPasswordResetEmail(ctx, "user@example.com", "TestUser", "https://example.com/reset")
+		err = svc.SendPasswordResetEmail(ctx, "user@example.com", "TestUser", "https://example.com/reset")
 
 		assert.Error(t, err)
 	})
@@ -252,9 +264,10 @@ func TestEmailService_DefaultSender_Integration(t *testing.T) {
 			SMTPPort: 1,
 			From:     "test@example.com",
 		}
-		svc := service.NewEmailService(config)
+		svc, err := service.NewEmailService(config)
+		require.NoError(t, err)
 
-		err := svc.SendEmail(ctx, "to@example.com", "Test", "<html>body</html>")
+		err = svc.SendEmail(ctx, "to@example.com", "Test", "<html>body</html>")
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "发送邮件失败")
@@ -266,9 +279,10 @@ func TestEmailService_DefaultSender_Integration(t *testing.T) {
 			SMTPPort: 2,
 			From:     "test@example.com",
 		}
-		svc := service.NewEmailService(config)
+		svc, err := service.NewEmailService(config)
+		require.NoError(t, err)
 
-		err := svc.SendEmail(ctx, "to@example.com", "Test", "<html>body</html>")
+		err = svc.SendEmail(ctx, "to@example.com", "Test", "<html>body</html>")
 
 		assert.Error(t, err)
 	})
@@ -279,9 +293,10 @@ func TestEmailService_DefaultSender_Integration(t *testing.T) {
 			SMTPPort: 1,
 			From:     "test@example.com",
 		}
-		svc := service.NewEmailService(config)
+		svc, err := service.NewEmailService(config)
+		require.NoError(t, err)
 
-		err := svc.SendVerificationEmail(ctx, "user@example.com", "TestUser", "https://example.com/verify")
+		err = svc.SendVerificationEmail(ctx, "user@example.com", "TestUser", "https://example.com/verify")
 
 		assert.Error(t, err)
 	})
@@ -292,9 +307,10 @@ func TestEmailService_DefaultSender_Integration(t *testing.T) {
 			SMTPPort: 1,
 			From:     "test@example.com",
 		}
-		svc := service.NewEmailService(config)
+		svc, err := service.NewEmailService(config)
+		require.NoError(t, err)
 
-		err := svc.SendPasswordResetEmail(ctx, "user@example.com", "TestUser", "https://example.com/reset")
+		err = svc.SendPasswordResetEmail(ctx, "user@example.com", "TestUser", "https://example.com/reset")
 
 		assert.Error(t, err)
 	})

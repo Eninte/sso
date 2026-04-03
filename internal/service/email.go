@@ -3,16 +3,15 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
-	"html/template"
 	"log/slog"
 	"net"
 	"net/smtp"
 	"time"
 
+	"github.com/your-org/sso/internal/service/email"
 	"github.com/your-org/sso/internal/util/serviceutil"
 )
 
@@ -55,24 +54,35 @@ func (d *defaultMailSender) Send(addr, from string, to []string, msg []byte, con
 
 // EmailService 邮件服务
 type EmailService struct {
-	config *EmailConfig
-	sender MailSender
-	logger *slog.Logger
+	config      *EmailConfig
+	sender      MailSender
+	logger      *slog.Logger
+	templateMgr *email.TemplateManager
 }
 
 // NewEmailService 创建邮件服务
-func NewEmailService(config *EmailConfig, sender ...MailSender) *EmailService {
+func NewEmailService(config *EmailConfig, sender ...MailSender) (*EmailService, error) {
 	var s MailSender = &defaultMailSender{}
 	if len(sender) > 0 && sender[0] != nil {
 		s = sender[0]
 	}
-	return &EmailService{
-		config: config,
-		sender: s,
-		logger: slog.Default().With("component", "email"),
+
+	// 初始化模板管理器
+	templateMgr, err := email.NewTemplateManager()
+	if err != nil {
+		return nil, fmt.Errorf("初始化模板管理器失败: %w", err)
 	}
+
+	return &EmailService{
+		config:      config,
+		sender:      s,
+		logger:      slog.Default().With("component", "email"),
+		templateMgr: templateMgr,
+	}, nil
 }
 
+// ============================================================================
+// 邮件发送
 // ============================================================================
 // 邮件发送
 // ============================================================================
@@ -201,55 +211,15 @@ func sendEmailSTARTTLS(addr, from string, to []string, msg []byte, config *Email
 
 // SendVerificationEmail 发送验证邮件
 func (s *EmailService) SendVerificationEmail(ctx context.Context, to, username, verifyLink string) error {
-	tmpl := `
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>验证您的邮箱</title>
-</head>
-<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-        <h1 style="color: white; margin: 0;">SSO服务</h1>
-    </div>
-    <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
-        <h2 style="color: #333;">您好，{{.Username}}！</h2>
-        <p style="color: #666; line-height: 1.6;">
-            感谢您注册我们的服务。请点击下面的按钮验证您的邮箱地址：
-        </p>
-        <div style="text-align: center; margin: 30px 0;">
-            <a href="{{.VerifyLink}}" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">
-                验证邮箱
-            </a>
-        </div>
-        <p style="color: #999; font-size: 12px;">
-            如果按钮无法使用，请复制以下链接到浏览器：<br>
-            <a href="{{.VerifyLink}}" style="color: #667eea;">{{.VerifyLink}}</a>
-        </p>
-        <p style="color: #999; font-size: 12px;">
-            此链接将在15分钟后失效。<br>
-            如果您没有注册此账户，请忽略此邮件。
-        </p>
-    </div>
-</body>
-</html>
-`
-
-	t, err := template.New("verify").Parse(tmpl)
-	if err != nil {
-		return err
-	}
-
-	var buf bytes.Buffer
-	err = t.Execute(&buf, map[string]string{
+	body, err := s.templateMgr.Render("verification.html", map[string]string{
 		"Username":   username,
 		"VerifyLink": verifyLink,
 	})
 	if err != nil {
-		return err
+		return serviceutil.WrapServiceError("渲染验证邮件模板", err)
 	}
 
-	return s.SendEmail(ctx, to, "验证您的邮箱 - SSO服务", buf.String())
+	return s.SendEmail(ctx, to, "验证您的邮箱 - SSO服务", body)
 }
 
 // ============================================================================
@@ -258,53 +228,13 @@ func (s *EmailService) SendVerificationEmail(ctx context.Context, to, username, 
 
 // SendPasswordResetEmail 发送密码重置邮件
 func (s *EmailService) SendPasswordResetEmail(ctx context.Context, to, username, resetLink string) error {
-	tmpl := `
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>重置您的密码</title>
-</head>
-<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-    <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-        <h1 style="color: white; margin: 0;">SSO服务</h1>
-    </div>
-    <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
-        <h2 style="color: #333;">您好，{{.Username}}！</h2>
-        <p style="color: #666; line-height: 1.6;">
-            我们收到了您的密码重置请求。请点击下面的按钮重置您的密码：
-        </p>
-        <div style="text-align: center; margin: 30px 0;">
-            <a href="{{.ResetLink}}" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">
-                重置密码
-            </a>
-        </div>
-        <p style="color: #999; font-size: 12px;">
-            如果按钮无法使用，请复制以下链接到浏览器：<br>
-            <a href="{{.ResetLink}}" style="color: #f5576c;">{{.ResetLink}}</a>
-        </p>
-        <p style="color: #999; font-size: 12px;">
-            此链接将在1小时后失效。<br>
-            如果您没有请求重置密码，请忽略此邮件。
-        </p>
-    </div>
-</body>
-</html>
-`
-
-	t, err := template.New("reset").Parse(tmpl)
-	if err != nil {
-		return err
-	}
-
-	var buf bytes.Buffer
-	err = t.Execute(&buf, map[string]string{
+	body, err := s.templateMgr.Render("reset.html", map[string]string{
 		"Username":  username,
 		"ResetLink": resetLink,
 	})
 	if err != nil {
-		return err
+		return serviceutil.WrapServiceError("渲染密码重置邮件模板", err)
 	}
 
-	return s.SendEmail(ctx, to, "重置您的密码 - SSO服务", buf.String())
+	return s.SendEmail(ctx, to, "重置您的密码 - SSO服务", body)
 }

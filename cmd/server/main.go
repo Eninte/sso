@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -438,7 +439,11 @@ func initServices(cfg *config.Config) (*Services, *sql.DB, error) {
 		Password: cfg.SMTPPassword,
 		From:     cfg.SMTPFrom,
 	}
-	emailSvc := service.NewEmailService(emailConfig)
+	emailSvc, err := service.NewEmailService(emailConfig)
+	if err != nil {
+		slog.Error("初始化邮件服务失败", "error", err)
+		return nil, nil, fmt.Errorf("初始化邮件服务失败: %w", err)
+	}
 
 	// ==== 初始化指标服务 ====
 	metricsSvc := metrics.NewService()

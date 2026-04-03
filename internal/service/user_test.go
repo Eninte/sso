@@ -34,11 +34,14 @@ func createTestUserServiceWithEmail() (*service.UserService, *mock.Store, *mockM
 	mockStore := mock.New()
 	passwordSvc := crypto.NewPasswordService(4)
 	mockSender := &mockMailSender{}
-	emailSvc := service.NewEmailService(&service.EmailConfig{
+	emailSvc, err := service.NewEmailService(&service.EmailConfig{
 		SMTPHost: "localhost",
 		SMTPPort: 587,
 		From:     "noreply@example.com",
 	}, mockSender)
+	if err != nil {
+		panic(err)
+	}
 	userSvc := service.NewUserService(mockStore, passwordSvc, emailSvc, "http://localhost:9090")
 	return userSvc, mockStore, mockSender
 }

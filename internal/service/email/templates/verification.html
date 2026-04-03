@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>验证您的邮箱</title>
+</head>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+        <h1 style="color: white; margin: 0;">SSO服务</h1>
+    </div>
+    <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
+        <h2 style="color: #333;">您好，{{.Username}}！</h2>
+        <p style="color: #666; line-height: 1.6;">
+            感谢您注册我们的服务。请点击下面的按钮验证您的邮箱地址：
+        </p>
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="{{.VerifyLink}}" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">
+                验证邮箱
+            </a>
+        </div>
+        <p style="color: #999; font-size: 12px;">
+            如果按钮无法使用，请复制以下链接到浏览器：<br>
+            <a href="{{.VerifyLink}}" style="color: #667eea;">{{.VerifyLink}}</a>
+        </p>
+        <p style="color: #999; font-size: 12px;">
+            此链接将在15分钟后失效。<br>
+            如果您没有注册此账户，请忽略此邮件。
+        </p>
+    </div>
+</body>
+</html>
