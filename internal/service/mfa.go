@@ -31,14 +31,14 @@ import (
 // ============================================================================
 
 var (
-	ErrMFAAlreadyEnabled    = apperrors.ErrMFAAlreadyEnabled
-	ErrMFANotEnabled        = apperrors.ErrMFANotEnabled
-	ErrInvalidTOTPCode      = apperrors.ErrInvalidTOTPCode
-	ErrTOTPCodeExpired      = apperrors.ErrTOTPCodeExpired
-	ErrInvalidMFASecret     = apperrors.ErrInvalidMFASecret
-	ErrRecoveryCodeInvalid  = apperrors.ErrRecoveryCodeInvalid
-	ErrRecoveryCodeUsed     = apperrors.ErrRecoveryCodeUsed
-	ErrRecoveryCodeGenerate = apperrors.ErrRecoveryCodeGenerate
+	ErrMFAAlreadyEnabled       = apperrors.ErrMFAAlreadyEnabled
+	ErrMFANotEnabled           = apperrors.ErrMFANotEnabled
+	ErrInvalidTOTPCode         = apperrors.ErrInvalidTOTPCode
+	ErrTOTPCodeExpired         = apperrors.ErrTOTPCodeExpired
+	ErrInvalidMFASecret        = apperrors.ErrInvalidMFASecret
+	ErrRecoveryCodeInvalid     = apperrors.ErrRecoveryCodeInvalid
+	ErrRecoveryCodeUsed        = apperrors.ErrRecoveryCodeUsed
+	ErrRecoveryCodeGenerate    = apperrors.ErrRecoveryCodeGenerate
 	ErrTooManyRecoveryAttempts = apperrors.ErrTooManyRecoveryAttempts
 )
 
