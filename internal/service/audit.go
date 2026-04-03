@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/your-org/sso/internal/common"
@@ -30,6 +31,7 @@ type AuditService struct {
 	logger   *slog.Logger
 	logChan  chan *model.AuditLog
 	stopChan chan struct{}
+	wg       sync.WaitGroup
 }
 
 // NewAuditService 创建审计日志服务
@@ -50,12 +52,14 @@ func NewAuditService(store store.Store) *AuditService {
 // startWorkers 启动worker池
 func (s *AuditService) startWorkers() {
 	for i := 0; i < auditWorkerCount; i++ {
+		s.wg.Add(1)
 		go s.worker(i)
 	}
 }
 
 // worker 审计日志处理worker
 func (s *AuditService) worker(id int) {
+	defer s.wg.Done()
 	slogger := s.logger.With("worker_id", id)
 	slogger.Debug("审计日志worker启动")
 
@@ -75,6 +79,8 @@ func (s *AuditService) worker(id int) {
 // Close 关闭审计日志服务
 func (s *AuditService) Close() {
 	close(s.stopChan)
+	s.wg.Wait()
+	close(s.logChan)
 }
 
 // Log 记录审计日志

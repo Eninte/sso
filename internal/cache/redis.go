@@ -366,17 +366,42 @@ func (c *RedisCache) Delete(ctx context.Context, key string) error {
 }
 
 // DeletePattern 按模式删除缓存
+// 使用SCAN命令代替KEYS，避免在大数据集上阻塞Redis
 func (c *RedisCache) DeletePattern(ctx context.Context, pattern string) error {
-	keys, err := c.client.Keys(ctx, pattern).Result()
-	if err != nil {
-		return err
+	var cursor uint64
+	var deletedCount int
+
+	for {
+		// 使用SCAN命令，每次扫描100个键
+		keys, nextCursor, err := c.client.Scan(ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			return fmt.Errorf("scan keys failed: %w", err)
+		}
+
+		// 批量删除扫描到的键
+		if len(keys) > 0 {
+			if err := c.client.Del(ctx, keys...).Err(); err != nil {
+				return fmt.Errorf("delete keys failed: %w", err)
+			}
+			deletedCount += len(keys)
+		}
+
+		// 检查是否扫描完成
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+
+		// 避免过度占用Redis资源
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 
-	if len(keys) == 0 {
-		return nil
-	}
-
-	return c.client.Del(ctx, keys...).Err()
+	_ = deletedCount // 可以用于日志记录
+	return nil
 }
 
 // Close 关闭Redis连接
