@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/store"
 )
@@ -810,5 +812,71 @@ func (m *Store) DeleteKey(ctx context.Context, keyID string) error {
 	defer m.mu.Unlock()
 
 	delete(m.keys, keyID)
+	return nil
+}
+
+// ============================================================================
+// MFA恢复码 Mock实现
+// ============================================================================
+
+// mfaRecoveryCodes MFA恢复码存储 (user_id -> []code_hash)
+var mfaRecoveryCodes = make(map[string][]string)
+
+// StoreMFARecoveryCodes 存储MFA恢复码
+// Mock实现：存储明文代码（不哈希），用于测试
+func (m *Store) StoreMFARecoveryCodes(ctx context.Context, userID string, codeHashes []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// 复制切片（mock存储明文，实际生产环境应存储哈希）
+	codes := make([]string, len(codeHashes))
+	copy(codes, codeHashes)
+	mfaRecoveryCodes[userID] = codes
+	return nil
+}
+
+// GetUnusedMFARecoveryCodes 获取未使用的恢复码
+func (m *Store) GetUnusedMFARecoveryCodes(ctx context.Context, userID string) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	codes, ok := mfaRecoveryCodes[userID]
+	if !ok {
+		return nil, nil
+	}
+	// 返回副本
+	result := make([]string, len(codes))
+	copy(result, codes)
+	return result, nil
+}
+
+// VerifyAndUseMFARecoveryCode 验证并使用恢复码
+// Mock实现：使用bcrypt比较明文和存储的哈希值
+func (m *Store) VerifyAndUseMFARecoveryCode(ctx context.Context, userID, code string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	codes, ok := mfaRecoveryCodes[userID]
+	if !ok || len(codes) == 0 {
+		return false, nil
+	}
+
+	// 使用 bcrypt 比较明文和存储的哈希值
+	for i, hash := range codes {
+		if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(code)); err == nil {
+			// 标记为已使用（从列表中移除）
+			mfaRecoveryCodes[userID] = append(codes[:i], codes[i+1:]...)
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// DeleteUsedMFARecoveryCodes 删除已使用的恢复码
+func (m *Store) DeleteUsedMFARecoveryCodes(ctx context.Context, userID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	delete(mfaRecoveryCodes, userID)
 	return nil
 }

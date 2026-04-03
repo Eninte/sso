@@ -63,11 +63,14 @@ const (
 	ErrCodeInvalidPKCEChallenge ErrorCode = "INVALID_PKCE_CHALLENGE" // PKCE挑战码无效
 
 	// MFA相关错误
-	ErrCodeMFAAlreadyEnabled ErrorCode = "MFA_ALREADY_ENABLED" // MFA已启用
-	ErrCodeMFANotEnabled     ErrorCode = "MFA_NOT_ENABLED"     // MFA未启用
-	ErrCodeInvalidTOTPCode   ErrorCode = "INVALID_TOTP_CODE"   // TOTP验证码无效
-	ErrCodeTOTPCodeExpired   ErrorCode = "TOTP_CODE_EXPIRED"   // TOTP验证码过期
-	ErrCodeInvalidMFASecret  ErrorCode = "INVALID_MFA_SECRET"  // #nosec G101 -- 这是错误码常量，不是凭证
+	ErrCodeMFAAlreadyEnabled      ErrorCode = "MFA_ALREADY_ENABLED"      // MFA已启用
+	ErrCodeMFANotEnabled          ErrorCode = "MFA_NOT_ENABLED"          // MFA未启用
+	ErrCodeInvalidTOTPCode        ErrorCode = "INVALID_TOTP_CODE"        // TOTP验证码无效
+	ErrCodeTOTPCodeExpired        ErrorCode = "TOTP_CODE_EXPIRED"        // TOTP验证码过期
+	ErrCodeInvalidMFASecret       ErrorCode = "INVALID_MFA_SECRET"       // #nosec G101 -- 这是错误码常量，不是凭证
+	ErrCodeRecoveryCodeInvalid    ErrorCode = "RECOVERY_CODE_INVALID"    // 恢复码无效
+	ErrCodeRecoveryCodeUsed       ErrorCode = "RECOVERY_CODE_USED"       // 恢复码已使用
+	ErrCodeRecoveryCodeGeneration ErrorCode = "RECOVERY_CODE_GENERATION" // 恢复码生成失败
 
 	// 第三方登录相关错误
 	ErrCodeProviderNotSupported    ErrorCode = "PROVIDER_NOT_SUPPORTED"     // 提供商不支持
@@ -87,6 +90,9 @@ const (
 
 	// 缓存相关错误
 	ErrCodeCacheMiss ErrorCode = "CACHE_MISS" // 缓存未命中
+
+	// 限流相关错误
+	ErrCodeTooManyRecoveryAttempts ErrorCode = "TOO_MANY_RECOVERY_ATTEMPTS" // 恢复码尝试次数过多
 
 	// 请求相关错误
 	ErrCodeRequestBodyTooLarge  ErrorCode = "REQUEST_BODY_TOO_LARGE"  // 请求体过大
@@ -208,11 +214,14 @@ var (
 	ErrInvalidPKCEChallenge = New(ErrCodeInvalidPKCEChallenge, "无效的PKCE挑战码", 400)
 
 	// MFA错误
-	ErrMFAAlreadyEnabled = New(ErrCodeMFAAlreadyEnabled, "MFA已启用", 409)
-	ErrMFANotEnabled     = New(ErrCodeMFANotEnabled, "MFA未启用", 400)
-	ErrInvalidTOTPCode   = New(ErrCodeInvalidTOTPCode, "验证码错误", 400)
-	ErrTOTPCodeExpired   = New(ErrCodeTOTPCodeExpired, "验证码已过期", 400)
-	ErrInvalidMFASecret  = New(ErrCodeInvalidMFASecret, "MFA密钥无效", 400)
+	ErrMFAAlreadyEnabled    = New(ErrCodeMFAAlreadyEnabled, "MFA已启用", 409)
+	ErrMFANotEnabled        = New(ErrCodeMFANotEnabled, "MFA未启用", 400)
+	ErrInvalidTOTPCode      = New(ErrCodeInvalidTOTPCode, "验证码错误", 400)
+	ErrTOTPCodeExpired      = New(ErrCodeTOTPCodeExpired, "验证码已过期", 400)
+	ErrInvalidMFASecret     = New(ErrCodeInvalidMFASecret, "MFA密钥无效", 400)
+	ErrRecoveryCodeInvalid  = New(ErrCodeRecoveryCodeInvalid, "恢复码无效", 400)
+	ErrRecoveryCodeUsed     = New(ErrCodeRecoveryCodeUsed, "恢复码已使用", 400)
+	ErrRecoveryCodeGenerate = New(ErrCodeRecoveryCodeGeneration, "恢复码生成失败", 500)
 
 	// 第三方登录错误
 	ErrProviderNotSupported    = New(ErrCodeProviderNotSupported, "不支持的登录提供商", 400)
@@ -232,6 +241,9 @@ var (
 
 	// 缓存错误
 	ErrCacheMiss = New(ErrCodeCacheMiss, "缓存未命中", 404)
+
+	// 限流错误
+	ErrTooManyRecoveryAttempts = New(ErrCodeTooManyRecoveryAttempts, "恢复码尝试次数过多，请稍后再试", 429)
 
 	// 请求错误
 	ErrRequestBodyTooLarge  = New(ErrCodeRequestBodyTooLarge, "请求体过大", 413)

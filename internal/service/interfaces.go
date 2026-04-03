@@ -105,6 +105,15 @@ type MFAServiceInterface interface {
 
 	// GetMFAStatus 获取MFA状态
 	GetMFAStatus(ctx context.Context, userID string) (*model.MFAStatusResponse, error)
+
+	// GenerateRecoveryCodes 生成MFA恢复码
+	GenerateRecoveryCodes(ctx context.Context, userID string, count int) ([]string, error)
+
+	// VerifyRecoveryCode 验证MFA恢复码
+	VerifyRecoveryCode(ctx context.Context, userID, code string) (bool, error)
+
+	// GetRecoveryCodeStatus 获取恢复码状态
+	GetRecoveryCodeStatus(ctx context.Context, userID string) (int, error)
 }
 
 // ============================================================================

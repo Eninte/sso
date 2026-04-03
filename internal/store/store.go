@@ -30,6 +30,7 @@ type Store interface {
 	TokenStore
 	AuditLogStore
 	KeyStore
+	MFARecoveryCodeStore
 	Close() error
 	Ping(ctx context.Context) error
 }
@@ -101,6 +102,17 @@ type KeyStore interface {
 	DeprecateKey(ctx context.Context, keyID string, expiresAt time.Time) error
 	RevokeKey(ctx context.Context, keyID string) error
 	DeleteKey(ctx context.Context, keyID string) error
+}
+
+// ============================================================================
+// MFARecoveryCodeStore MFA恢复码存储接口
+// ============================================================================
+
+type MFARecoveryCodeStore interface {
+	StoreMFARecoveryCodes(ctx context.Context, userID string, codeHashes []string) error
+	GetUnusedMFARecoveryCodes(ctx context.Context, userID string) ([]string, error)
+	VerifyAndUseMFARecoveryCode(ctx context.Context, userID, codeHash string) (bool, error)
+	DeleteUsedMFARecoveryCodes(ctx context.Context, userID string) error
 }
 
 // ============================================================================

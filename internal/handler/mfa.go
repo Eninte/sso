@@ -3,6 +3,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -29,14 +30,12 @@ func NewMFAHandler(mfaSvc service.MFAServiceInterface) *MFAHandler {
 // HandleSetupMFA 处理MFA设置请求
 // POST /api/v1/mfa/setup
 func (h *MFAHandler) HandleSetupMFA(w http.ResponseWriter, r *http.Request) {
-	// 1. 获取当前用户ID
 	userID := middleware.GetUserIDFromContext(r.Context())
 	if userID == "" {
 		writeError(w, http.StatusUnauthorized, getMessage(r, apperrors.ErrCodeUnauthorized))
 		return
 	}
 
-	// 2. 设置MFA
 	result, err := h.mfaSvc.SetupMFA(r.Context(), userID)
 	if err != nil {
 		if errors.Is(err, service.ErrMFAAlreadyEnabled) {
@@ -47,7 +46,6 @@ func (h *MFAHandler) HandleSetupMFA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. 返回设置结果
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"secret":       result.Secret,
 		"qr_code_url":  result.QRCodeURL,
@@ -58,14 +56,12 @@ func (h *MFAHandler) HandleSetupMFA(w http.ResponseWriter, r *http.Request) {
 // HandleVerifyMFA 处理MFA验证请求
 // POST /api/v1/mfa/verify
 func (h *MFAHandler) HandleVerifyMFA(w http.ResponseWriter, r *http.Request) {
-	// 1. 获取当前用户ID
 	userID := middleware.GetUserIDFromContext(r.Context())
 	if userID == "" {
 		writeError(w, http.StatusUnauthorized, getMessage(r, apperrors.ErrCodeUnauthorized))
 		return
 	}
 
-	// 2. 解析请求
 	var req struct {
 		Code string `json:"code"`
 	}
@@ -79,7 +75,6 @@ func (h *MFAHandler) HandleVerifyMFA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. 验证并启用MFA
 	err := h.mfaSvc.VerifyAndEnableMFA(r.Context(), userID, req.Code)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidTOTPCode) {
@@ -96,14 +91,12 @@ func (h *MFAHandler) HandleVerifyMFA(w http.ResponseWriter, r *http.Request) {
 // HandleDisableMFA 处理禁用MFA请求
 // POST /api/v1/mfa/disable
 func (h *MFAHandler) HandleDisableMFA(w http.ResponseWriter, r *http.Request) {
-	// 1. 获取当前用户ID
 	userID := middleware.GetUserIDFromContext(r.Context())
 	if userID == "" {
 		writeError(w, http.StatusUnauthorized, getMessage(r, apperrors.ErrCodeUnauthorized))
 		return
 	}
 
-	// 2. 解析请求
 	var req struct {
 		Code string `json:"code"`
 	}
@@ -117,7 +110,6 @@ func (h *MFAHandler) HandleDisableMFA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. 禁用MFA
 	err := h.mfaSvc.DisableMFA(r.Context(), userID, req.Code)
 	if err != nil {
 		if errors.Is(err, service.ErrMFANotEnabled) {
@@ -138,20 +130,112 @@ func (h *MFAHandler) HandleDisableMFA(w http.ResponseWriter, r *http.Request) {
 // HandleMFAStatus 处理MFA状态查询
 // GET /api/v1/mfa/status
 func (h *MFAHandler) HandleMFAStatus(w http.ResponseWriter, r *http.Request) {
-	// 1. 获取当前用户ID
 	userID := middleware.GetUserIDFromContext(r.Context())
 	if userID == "" {
 		writeError(w, http.StatusUnauthorized, getMessage(r, apperrors.ErrCodeUnauthorized))
 		return
 	}
 
-	// 2. 获取MFA状态
 	status, err := h.mfaSvc.GetMFAStatus(r.Context(), userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeGetMFAStatusFailed))
 		return
 	}
 
-	// 3. 返回MFA状态
 	writeJSON(w, http.StatusOK, status)
+}
+
+// ============================================================================
+// MFA恢复码处理器
+// ============================================================================
+
+// HandleGenerateRecoveryCodes 处理生成恢复码请求
+// POST /api/v1/mfa/recovery-codes/generate
+func (h *MFAHandler) HandleGenerateRecoveryCodes(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		handlerutil.WriteJSONError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	var req struct {
+		Count int `json:"count"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		handlerutil.WriteValidationError(w, "body", "invalid request body")
+		return
+	}
+
+	count := req.Count
+	if count <= 0 {
+		count = 8
+	}
+
+	codes, err := h.mfaSvc.GenerateRecoveryCodes(r.Context(), userID, count)
+	if err != nil {
+		handlerutil.WriteJSONError(w, err)
+		return
+	}
+
+	handlerutil.WriteJSONSuccess(w, map[string]interface{}{
+		"codes": codes,
+	})
+}
+
+// HandleVerifyRecoveryCode 处理验证恢复码请求
+// POST /api/v1/mfa/recovery-codes/verify
+func (h *MFAHandler) HandleVerifyRecoveryCode(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		handlerutil.WriteJSONError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		handlerutil.WriteValidationError(w, "body", "invalid request body")
+		return
+	}
+
+	if req.Code == "" {
+		handlerutil.WriteValidationError(w, "code", "recovery code is required")
+		return
+	}
+
+	valid, err := h.mfaSvc.VerifyRecoveryCode(r.Context(), userID, req.Code)
+	if err != nil {
+		handlerutil.WriteJSONError(w, err)
+		return
+	}
+
+	if !valid {
+		handlerutil.WriteJSONError(w, apperrors.ErrRecoveryCodeInvalid)
+		return
+	}
+
+	handlerutil.WriteJSONSuccess(w, map[string]bool{
+		"valid": true,
+	})
+}
+
+// HandleGetRecoveryCodeStatus 处理获取恢复码状态请求
+// GET /api/v1/mfa/recovery-codes/status
+func (h *MFAHandler) HandleGetRecoveryCodeStatus(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		handlerutil.WriteJSONError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	count, err := h.mfaSvc.GetRecoveryCodeStatus(r.Context(), userID)
+	if err != nil {
+		handlerutil.WriteJSONError(w, err)
+		return
+	}
+
+	handlerutil.WriteJSONSuccess(w, map[string]int{
+		"remaining": count,
+	})
 }
