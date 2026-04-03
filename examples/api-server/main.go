@@ -68,7 +68,7 @@ func NewJWTValidator(jwksURL, issuer string) (*JWTValidator, error) {
 // fetchPublicKey 从JWKS端点获取公钥
 func fetchPublicKey(jwksURL string) (*rsa.PublicKey, error) {
 	// 请求JWKS
-	resp, err := http.Get(jwksURL)
+	resp, err := http.Get(jwksURL) // #nosec G107 -- JWKS URL来自配置的SSO服务器，不是用户输入
 	if err != nil {
 		return nil, err
 	}

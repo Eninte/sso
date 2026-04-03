@@ -25,7 +25,7 @@ const (
 	ErrCodeTooManyRequests ErrorCode = "TOO_MANY_REQUESTS" // 请求过多
 
 	// 认证相关错误
-	ErrCodeInvalidCredentials ErrorCode = "INVALID_CREDENTIALS" // 凭证无效
+	ErrCodeInvalidCredentials ErrorCode = "INVALID_CREDENTIALS" // #nosec G101 -- 这是错误码常量，不是凭证
 	ErrCodeAccountLocked      ErrorCode = "ACCOUNT_LOCKED"      // 账户锁定
 	ErrCodeAccountDisabled    ErrorCode = "ACCOUNT_DISABLED"    // 账户禁用
 	ErrCodeInvalidToken       ErrorCode = "INVALID_TOKEN"       // Token无效
@@ -49,8 +49,8 @@ const (
 	ErrCodeEmailNotVerified        ErrorCode = "EMAIL_NOT_VERIFIED"        // 邮箱未验证
 	ErrCodeVerificationCodeInvalid ErrorCode = "VERIFICATION_CODE_INVALID" // 验证码无效
 	ErrCodeVerificationCodeExpired ErrorCode = "VERIFICATION_CODE_EXPIRED" // 验证码过期
-	ErrCodeResetTokenInvalid       ErrorCode = "RESET_TOKEN_INVALID"       // 重置令牌无效
-	ErrCodeResetTokenExpired       ErrorCode = "RESET_TOKEN_EXPIRED"       // 重置令牌过期
+	ErrCodeResetTokenInvalid       ErrorCode = "RESET_TOKEN_INVALID"       // #nosec G101 -- 这是错误码常量，不是凭证
+	ErrCodeResetTokenExpired       ErrorCode = "RESET_TOKEN_EXPIRED"       // #nosec G101 -- 这是错误码常量，不是凭证
 
 	// OAuth相关错误
 	ErrCodeInvalidClient        ErrorCode = "INVALID_CLIENT"         // 客户端无效
@@ -67,7 +67,7 @@ const (
 	ErrCodeMFANotEnabled     ErrorCode = "MFA_NOT_ENABLED"     // MFA未启用
 	ErrCodeInvalidTOTPCode   ErrorCode = "INVALID_TOTP_CODE"   // TOTP验证码无效
 	ErrCodeTOTPCodeExpired   ErrorCode = "TOTP_CODE_EXPIRED"   // TOTP验证码过期
-	ErrCodeInvalidMFASecret  ErrorCode = "INVALID_MFA_SECRET"  // MFA密钥无效
+	ErrCodeInvalidMFASecret  ErrorCode = "INVALID_MFA_SECRET"  // #nosec G101 -- 这是错误码常量，不是凭证
 
 	// 第三方登录相关错误
 	ErrCodeProviderNotSupported    ErrorCode = "PROVIDER_NOT_SUPPORTED"     // 提供商不支持
@@ -93,7 +93,7 @@ const (
 	ErrCodeRequestBodyExtraData ErrorCode = "REQUEST_BODY_EXTRA_DATA" // 请求体包含多余数据
 
 	// 配置相关错误
-	ErrCodeDBPasswordRequired ErrorCode = "DB_PASSWORD_REQUIRED" // 数据库密码未设置
+	ErrCodeDBPasswordRequired ErrorCode = "DB_PASSWORD_REQUIRED" // #nosec G101 -- 这是错误码常量，不是凭证
 	ErrCodeJWTKeyRequired     ErrorCode = "JWT_KEY_REQUIRED"     // JWT密钥未设置
 	ErrCodeBcryptCostTooLow   ErrorCode = "BCRYPT_COST_TOO_LOW"  // bcrypt成本过低
 )
@@ -276,8 +276,8 @@ const (
 	ErrCodeResetPasswordFailed         ErrorCode = "RESET_PASSWORD_FAILED"
 	ErrCodeChangePasswordFailed        ErrorCode = "CHANGE_PASSWORD_FAILED"
 	ErrCodeRefreshTokenFailed          ErrorCode = "REFRESH_TOKEN_FAILED"
-	ErrCodeRevokeTokenFailed           ErrorCode = "REVOKE_TOKEN_FAILED"
-	ErrCodeExchangeCodeFailed          ErrorCode = "EXCHANGE_CODE_FAILED"
+	ErrCodeRevokeTokenFailed           ErrorCode = "REVOKE_TOKEN_FAILED"  // #nosec G101 -- 这是错误码常量，不是凭证
+	ErrCodeExchangeCodeFailed          ErrorCode = "EXCHANGE_CODE_FAILED" // #nosec G101 -- 这是错误码常量，不是凭证
 
 	// MFA消息
 	ErrCodeSetupMFAFailed     ErrorCode = "SETUP_MFA_FAILED"

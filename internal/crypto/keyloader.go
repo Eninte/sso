@@ -38,7 +38,7 @@ func loadKeyFromFile(path string, parseFunc func([]byte) (interface{}, error)) (
 		return nil, err
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- 路径已通过validateKeyPath()验证，来自配置而非用户输入
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("%w: %s", ErrKeyNotFound, path)

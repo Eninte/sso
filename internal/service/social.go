@@ -84,7 +84,7 @@ func NewSocialLoginService(
 	providers := make(map[string]*OAuthProvider)
 
 	if googleClientID != "" {
-		providers["google"] = &OAuthProvider{
+		providers["google"] = &OAuthProvider{ // #nosec G101 -- 这是OAuth提供商配置，不是凭证。ClientID和ClientSecret来自环境变量，不是硬编码的凭证
 			Name:         "google",
 			ClientID:     googleClientID,
 			ClientSecret: googleClientSecret,
@@ -96,7 +96,7 @@ func NewSocialLoginService(
 	}
 
 	if githubClientID != "" {
-		providers["github"] = &OAuthProvider{
+		providers["github"] = &OAuthProvider{ // #nosec G101 -- 这是OAuth提供商配置，不是凭证。ClientID和ClientSecret来自环境变量，不是硬编码的凭证
 			Name:         "github",
 			ClientID:     githubClientID,
 			ClientSecret: githubClientSecret,

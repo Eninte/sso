@@ -21,7 +21,7 @@ const (
 	ErrCodeUnauthorized         ErrorCode = "UNAUTHORIZED"
 	ErrCodeForbidden            ErrorCode = "FORBIDDEN"
 	ErrCodeTooManyRequests      ErrorCode = "TOO_MANY_REQUESTS"
-	ErrCodeInvalidCredentials   ErrorCode = "INVALID_CREDENTIALS"
+	ErrCodeInvalidCredentials   ErrorCode = "INVALID_CREDENTIALS"  // #nosec G101 -- 这是错误码常量，不是凭证
 	ErrCodeAccountLocked        ErrorCode = "ACCOUNT_LOCKED"
 	ErrCodeAccountDisabled      ErrorCode = "ACCOUNT_DISABLED"
 	ErrCodeInvalidToken         ErrorCode = "INVALID_TOKEN"

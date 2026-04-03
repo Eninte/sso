@@ -303,7 +303,7 @@ func initServices(cfg *config.Config) (*Services, *sql.DB, error) {
 			cfg.RefreshTokenTTL,
 		)
 		if err != nil {
-			db.Close()
+			_ = db.Close() // #nosec G104 -- 关闭数据库连接时的错误可以忽略，主要错误已返回
 			return nil, nil, err
 		}
 		slog.Info("密钥轮换模式已启用",
@@ -313,12 +313,12 @@ func initServices(cfg *config.Config) (*Services, *sql.DB, error) {
 		// 标准模式（单密钥）
 		privateKey, err := crypto.LoadPrivateKeyFromFile(cfg.JWTPrivateKeyPath)
 		if err != nil {
-			db.Close()
+			_ = db.Close() // #nosec G104 -- 关闭数据库连接时的错误可以忽略，主要错误已返回
 			return nil, nil, err
 		}
 		publicKey, err := crypto.LoadPublicKeyFromFile(cfg.JWTPublicKeyPath)
 		if err != nil {
-			db.Close()
+			_ = db.Close() // #nosec G104 -- 关闭数据库连接时的错误可以忽略，主要错误已返回
 			return nil, nil, err
 		}
 		jwtSvc = crypto.NewJWTService(

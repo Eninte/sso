@@ -46,7 +46,7 @@ func Logger(next http.Handler) http.Handler {
 		// 记录请求日志
 		// slog 会自动转义用户输入，防止日志注入
 		duration := time.Since(start)
-		slog.Info("HTTP请求", //nolint:gosec // slog会自动转义用户输入
+		slog.Info("HTTP请求", // #nosec G706 -- slog会自动转义用户输入，防止日志注入
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", wrapped.statusCode,

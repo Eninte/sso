@@ -76,9 +76,12 @@ func newTestUser(email string) *model.User {
 // ============================================================================
 
 func TestStore_CreateUser(t *testing.T) {
+	t.Parallel()
 	store, db := setupTestStore(t)
-	defer db.Close()
-	defer cleanupTestData(t, db)
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
 	ctx := context.Background()
 
 	t.Run("成功创建用户", func(t *testing.T) {
@@ -101,9 +104,12 @@ func TestStore_CreateUser(t *testing.T) {
 }
 
 func TestStore_GetUserByEmail(t *testing.T) {
+	t.Parallel()
 	store, db := setupTestStore(t)
-	defer db.Close()
-	defer cleanupTestData(t, db)
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
 	ctx := context.Background()
 
 	user := newTestUser("getbyemail@example.com")
@@ -122,9 +128,12 @@ func TestStore_GetUserByEmail(t *testing.T) {
 }
 
 func TestStore_GetUserByID(t *testing.T) {
+	t.Parallel()
 	store, db := setupTestStore(t)
-	defer db.Close()
-	defer cleanupTestData(t, db)
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
 	ctx := context.Background()
 
 	user := newTestUser("getbyid@example.com")
@@ -143,9 +152,12 @@ func TestStore_GetUserByID(t *testing.T) {
 }
 
 func TestStore_UpdateUser(t *testing.T) {
+	t.Parallel()
 	store, db := setupTestStore(t)
-	defer db.Close()
-	defer cleanupTestData(t, db)
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
 	ctx := context.Background()
 
 	user := newTestUser("update@example.com")
@@ -175,9 +187,12 @@ func TestStore_UpdateUser(t *testing.T) {
 }
 
 func TestStore_IncrementLoginAttempts(t *testing.T) {
+	t.Parallel()
 	store, db := setupTestStore(t)
-	defer db.Close()
-	defer cleanupTestData(t, db)
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
 	ctx := context.Background()
 
 	t.Run("递增登录尝试次数", func(t *testing.T) {
@@ -217,9 +232,12 @@ func TestStore_IncrementLoginAttempts(t *testing.T) {
 }
 
 func TestStore_ResetLoginAttempts(t *testing.T) {
+	t.Parallel()
 	store, db := setupTestStore(t)
-	defer db.Close()
-	defer cleanupTestData(t, db)
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
 	ctx := context.Background()
 
 	t.Run("重置登录尝试次数", func(t *testing.T) {
@@ -248,9 +266,12 @@ func TestStore_ResetLoginAttempts(t *testing.T) {
 }
 
 func TestStore_UnlockExpiredAccount(t *testing.T) {
+	t.Parallel()
 	store, db := setupTestStore(t)
-	defer db.Close()
-	defer cleanupTestData(t, db)
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
 	ctx := context.Background()
 
 	t.Run("解锁过期账户", func(t *testing.T) {
@@ -301,9 +322,12 @@ func TestStore_UnlockExpiredAccount(t *testing.T) {
 }
 
 func TestStore_DeleteUser(t *testing.T) {
+	t.Parallel()
 	store, db := setupTestStore(t)
-	defer db.Close()
-	defer cleanupTestData(t, db)
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
 	ctx := context.Background()
 
 	user := newTestUser("delete@example.com")
@@ -317,9 +341,12 @@ func TestStore_DeleteUser(t *testing.T) {
 }
 
 func TestStore_ListUsers(t *testing.T) {
+	t.Parallel()
 	store, db := setupTestStore(t)
-	defer db.Close()
-	defer cleanupTestData(t, db)
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
 	ctx := context.Background()
 
 	for i := 0; i < 5; i++ {
@@ -345,9 +372,12 @@ func TestStore_ListUsers(t *testing.T) {
 // ============================================================================
 
 func TestStore_TokenOperations(t *testing.T) {
+	t.Parallel()
 	store, db := setupTestStore(t)
-	defer db.Close()
-	defer cleanupTestData(t, db)
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
 	ctx := context.Background()
 
 	user := newTestUser("token@example.com")
@@ -430,9 +460,12 @@ func TestStore_TokenOperations(t *testing.T) {
 // ============================================================================
 
 func TestStore_VerificationTokens(t *testing.T) {
+	t.Parallel()
 	store, db := setupTestStore(t)
-	defer db.Close()
-	defer cleanupTestData(t, db)
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
 	ctx := context.Background()
 
 	user := newTestUser("verify@example.com")
@@ -466,9 +499,12 @@ func TestStore_VerificationTokens(t *testing.T) {
 // ============================================================================
 
 func TestStore_AuthorizationCode(t *testing.T) {
+	t.Parallel()
 	store, db := setupTestStore(t)
-	defer db.Close()
-	defer cleanupTestData(t, db)
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
 	ctx := context.Background()
 
 	user := newTestUser("authcode@example.com")
@@ -532,8 +568,12 @@ func TestStore_AuthorizationCode(t *testing.T) {
 // ============================================================================
 
 func TestStore_AuditLog(t *testing.T) {
+	t.Parallel()
 	store, db := setupTestStore(t)
-	defer db.Close()
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
 	ctx := context.Background()
 
 	t.Run("记录审计日志", func(t *testing.T) {
@@ -571,13 +611,20 @@ func TestStore_AuditLog(t *testing.T) {
 // ============================================================================
 
 func TestStore_Ping(t *testing.T) {
+	t.Parallel()
 	store, db := setupTestStore(t)
-	defer db.Close()
+	t.Cleanup(func() {
+		db.Close()
+	})
 	assert.NoError(t, store.Ping(context.Background()))
 }
 
 func TestStore_Close(t *testing.T) {
+	t.Parallel()
 	db := getTestDB(t)
+	t.Cleanup(func() {
+		db.Close()
+	})
 	assert.NoError(t, postgres.New(db).Close())
 }
 
@@ -586,8 +633,12 @@ func TestStore_Close(t *testing.T) {
 // ============================================================================
 
 func TestStore_GetByClientID(t *testing.T) {
+	t.Parallel()
 	store, db := setupTestStore(t)
-	defer db.Close()
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
 	ctx := context.Background()
 
 	// 创建测试客户端
@@ -618,8 +669,12 @@ func TestStore_GetByClientID(t *testing.T) {
 }
 
 func TestStore_ValidateRedirectURI(t *testing.T) {
+	t.Parallel()
 	store, db := setupTestStore(t)
-	defer db.Close()
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
 	ctx := context.Background()
 
 	clientID := "test-validate-uri-" + uuid.New().String()[:8]
@@ -655,7 +710,9 @@ func TestStore_ValidateRedirectURI(t *testing.T) {
 // ============================================================================
 
 func TestStore_NewFromURL(t *testing.T) {
+	t.Parallel()
 	t.Run("有效URL", func(t *testing.T) {
+		t.Parallel()
 		dbURL := os.Getenv("DATABASE_URL")
 		if dbURL == "" {
 			t.Skip("跳过：未设置DATABASE_URL")
@@ -663,16 +720,20 @@ func TestStore_NewFromURL(t *testing.T) {
 		store, err := postgres.NewFromURL(dbURL)
 		require.NoError(t, err)
 		assert.NotNil(t, store)
-		store.Close()
+		t.Cleanup(func() {
+			store.Close()
+		})
 	})
 
 	t.Run("无效URL格式", func(t *testing.T) {
+		t.Parallel()
 		_, err := postgres.NewFromURL("://invalid-url")
 		assert.Error(t, err)
 	})
 }
 
 func TestStore_NewFromConfig(t *testing.T) {
+	t.Parallel()
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		t.Skip("跳过：未设置DATABASE_URL")
@@ -681,7 +742,9 @@ func TestStore_NewFromConfig(t *testing.T) {
 	store, err := postgres.NewFromConfig(dbURL, 10, 5, 5*time.Minute, 30*time.Second)
 	require.NoError(t, err)
 	assert.NotNil(t, store)
-	store.Close()
+	t.Cleanup(func() {
+		store.Close()
+	})
 }
 
 // ============================================================================
@@ -689,9 +752,12 @@ func TestStore_NewFromConfig(t *testing.T) {
 // ============================================================================
 
 func TestStore_MarkAuthorizationCodeUsed(t *testing.T) {
+	t.Parallel()
 	store, db := setupTestStore(t)
-	defer db.Close()
-	defer cleanupTestData(t, db)
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
 	ctx := context.Background()
 
 	user := newTestUser("markused@example.com")
@@ -737,9 +803,12 @@ func TestStore_MarkAuthorizationCodeUsed(t *testing.T) {
 // ============================================================================
 
 func TestStore_ListUsers_Pagination(t *testing.T) {
+	t.Parallel()
 	store, db := setupTestStore(t)
-	defer db.Close()
-	defer cleanupTestData(t, db)
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
 	ctx := context.Background()
 
 	// 创建测试用户
@@ -775,9 +844,12 @@ func TestStore_ListUsers_Pagination(t *testing.T) {
 // ============================================================================
 
 func TestStore_ListAuditLogs_Filter(t *testing.T) {
+	t.Parallel()
 	store, db := setupTestStore(t)
-	defer db.Close()
-	defer cleanupTestData(t, db)
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
 	ctx := context.Background()
 
 	// 创建测试用户
@@ -832,9 +904,12 @@ func TestStore_ListAuditLogs_Filter(t *testing.T) {
 // ============================================================================
 
 func TestStore_CleanupExpired(t *testing.T) {
+	t.Parallel()
 	store, db := setupTestStore(t)
-	defer db.Close()
-	defer cleanupTestData(t, db)
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
 	ctx := context.Background()
 
 	// 创建测试用户
@@ -898,8 +973,11 @@ func TestStore_CleanupExpired(t *testing.T) {
 // ============================================================================
 
 func TestStore_GetUserByField_InvalidField(t *testing.T) {
+	t.Parallel()
 	store, db := setupTestStore(t)
-	defer db.Close()
+	t.Cleanup(func() {
+		db.Close()
+	})
 	ctx := context.Background()
 
 	t.Run("无效字段名", func(t *testing.T) {
@@ -918,9 +996,12 @@ func TestStore_GetUserByField_InvalidField(t *testing.T) {
 // ============================================================================
 
 func TestStore_KeyOperations(t *testing.T) {
+	t.Parallel()
 	store, db := setupTestStore(t)
-	defer db.Close()
-	defer cleanupTestData(t, db)
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
 	ctx := context.Background()
 
 	t.Run("存储密钥", func(t *testing.T) {

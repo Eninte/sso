@@ -6,7 +6,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- SHA1用于HOTP算法（RFC 4226），不用于安全哈希
 	"encoding/base32"
 	"encoding/binary"
 	"fmt"
@@ -213,14 +213,14 @@ func validateTOTP(secret, code string) bool {
 		if i < 0 {
 			// 安全处理负偏移，防止整数下溢
 			offset := uint64(-i)
-			if baseTimeStep < int64(offset) {
+			if baseTimeStep < int64(offset) { // #nosec G115 -- 安全的比较，baseTimeStep已验证为非负
 				// 会发生下溢，跳过该时间窗口
 				continue
 			}
-			timeStep = uint64(baseTimeStep) - offset
+			timeStep = uint64(baseTimeStep) - offset // #nosec G115 -- 安全的减法，已验证baseTimeStep >= offset
 		} else {
 			// 正偏移总是安全的
-			timeStep = uint64(baseTimeStep) + uint64(i)
+			timeStep = uint64(baseTimeStep) + uint64(i) // #nosec G115 -- 安全的加法，i总是非负的
 		}
 		
 		expectedCode := generateHOTP(secretBytes, timeStep)

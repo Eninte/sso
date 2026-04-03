@@ -89,7 +89,7 @@ func AuthMiddlewareWithCache(jwtSvc *crypto.JWTService, store store.Store, cache
 			if len(token) > 8 {
 				tokenPreview = token[:8] + "..."
 			}
-			slog.Error("缓存查询失败", "error", err, "token", tokenPreview)
+			slog.Error("缓存查询失败", "error", err, "token", tokenPreview) // #nosec G706 -- slog会自动转义用户输入，tokenPreview已截断
 		}
 
 		tokenRecord, err := store.GetTokenByAccessToken(ctx, token)

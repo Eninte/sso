@@ -14,6 +14,7 @@ import (
 // ============================================================================
 
 func TestValidateEmail(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		email   string
@@ -88,6 +89,7 @@ func TestValidateEmail(t *testing.T) {
 // ============================================================================
 
 func TestValidatePassword(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		password string
@@ -174,6 +176,7 @@ func TestValidatePassword(t *testing.T) {
 // ============================================================================
 
 func TestValidatePasswordSimple(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		password string
@@ -227,6 +230,7 @@ func TestValidatePasswordSimple(t *testing.T) {
 // ============================================================================
 
 func TestValidateRegisterRequest(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		email    string
@@ -278,6 +282,7 @@ func TestValidateRegisterRequest(t *testing.T) {
 // ============================================================================
 
 func TestValidateLoginRequest(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		email    string

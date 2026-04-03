@@ -18,6 +18,7 @@ import (
 
 // TestWriteJSONError_WithAppError 测试WriteJSONError处理AppError
 func TestWriteJSONError_WithAppError(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 	err := apperrors.ErrInvalidCredentials
 
@@ -36,6 +37,7 @@ func TestWriteJSONError_WithAppError(t *testing.T) {
 
 // TestWriteJSONError_WithEmailExists 测试WriteJSONError处理邮箱已存在错误
 func TestWriteJSONError_WithEmailExists(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 	err := apperrors.ErrEmailExists
 
@@ -53,6 +55,7 @@ func TestWriteJSONError_WithEmailExists(t *testing.T) {
 
 // TestWriteJSONError_WithAccountLocked 测试WriteJSONError处理账户锁定错误
 func TestWriteJSONError_WithAccountLocked(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 	err := apperrors.ErrAccountLocked
 
@@ -69,8 +72,11 @@ func TestWriteJSONError_WithAccountLocked(t *testing.T) {
 
 // TestWriteJSONError_WithDetails 测试WriteJSONError包含详情
 func TestWriteJSONError_WithDetails(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
-	err := apperrors.ErrInvalidCredentials.WithDetails("用户不存在")
+	// 创建新的错误实例而不是修改共享的预定义错误
+	err := apperrors.New(apperrors.ErrCodeInvalidCredentials, "邮箱或密码错误", http.StatusUnauthorized)
+	err = err.WithDetails("用户不存在")
 
 	WriteJSONError(w, err)
 
@@ -83,6 +89,7 @@ func TestWriteJSONError_WithDetails(t *testing.T) {
 
 // TestWriteJSONError_WithGenericError 测试WriteJSONError处理通用错误
 func TestWriteJSONError_WithGenericError(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 	err := apperrors.New(apperrors.ErrCodeInternal, "数据库连接失败", http.StatusInternalServerError)
 
@@ -100,6 +107,7 @@ func TestWriteJSONError_WithGenericError(t *testing.T) {
 
 // TestWriteJSONError_WithNonAppError 测试WriteJSONError处理非AppError
 func TestWriteJSONError_WithNonAppError(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 	err := apperrors.New(apperrors.ErrCodeInternal, "未知错误", http.StatusInternalServerError)
 
@@ -117,6 +125,7 @@ func TestWriteJSONError_WithNonAppError(t *testing.T) {
 
 // TestWriteJSONError_StatusCodeMapping 测试WriteJSONError的状态码映射
 func TestWriteJSONError_StatusCodeMapping(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		err        error
@@ -157,6 +166,7 @@ func TestWriteJSONError_StatusCodeMapping(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			w := httptest.NewRecorder()
 			WriteJSONError(w, tt.err)
 
@@ -177,6 +187,7 @@ func TestWriteJSONError_StatusCodeMapping(t *testing.T) {
 
 // TestWriteJSONSuccess_WithData 测试WriteJSONSuccess返回数据
 func TestWriteJSONSuccess_WithData(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 	data := map[string]interface{}{
 		"id":    1,
@@ -198,6 +209,7 @@ func TestWriteJSONSuccess_WithData(t *testing.T) {
 
 // TestWriteJSONSuccess_WithNilData 测试WriteJSONSuccess返回nil数据
 func TestWriteJSONSuccess_WithNilData(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 
 	WriteJSONSuccess(w, nil)
@@ -214,6 +226,7 @@ func TestWriteJSONSuccess_WithNilData(t *testing.T) {
 
 // TestWriteJSONSuccess_WithStruct 测试WriteJSONSuccess返回结构体
 func TestWriteJSONSuccess_WithStruct(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 
 	type User struct {
@@ -236,6 +249,7 @@ func TestWriteJSONSuccess_WithStruct(t *testing.T) {
 
 // TestWriteJSONSuccess_WithArray 测试WriteJSONSuccess返回数组
 func TestWriteJSONSuccess_WithArray(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 	data := []map[string]interface{}{
 		{"id": 1, "email": "user1@example.com"},
@@ -259,6 +273,7 @@ func TestWriteJSONSuccess_WithArray(t *testing.T) {
 
 // TestWriteValidationError_EmailField 测试WriteValidationError处理邮箱字段错误
 func TestWriteValidationError_EmailField(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 
 	WriteValidationError(w, "email", "邮箱格式无效")
@@ -277,6 +292,7 @@ func TestWriteValidationError_EmailField(t *testing.T) {
 
 // TestWriteValidationError_PasswordField 测试WriteValidationError处理密码字段错误
 func TestWriteValidationError_PasswordField(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 
 	WriteValidationError(w, "password", "密码长度不能少于8个字符")
@@ -293,6 +309,7 @@ func TestWriteValidationError_PasswordField(t *testing.T) {
 
 // TestWriteValidationError_MultipleFields 测试WriteValidationError处理多个字段
 func TestWriteValidationError_MultipleFields(t *testing.T) {
+	t.Parallel()
 	fields := []struct {
 		field   string
 		message string
@@ -323,6 +340,7 @@ func TestWriteValidationError_MultipleFields(t *testing.T) {
 
 // TestWriteJSONError_ContentType 测试WriteJSONError设置正确的Content-Type
 func TestWriteJSONError_ContentType(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 	err := apperrors.ErrInvalidCredentials
 
@@ -333,6 +351,7 @@ func TestWriteJSONError_ContentType(t *testing.T) {
 
 // TestWriteJSONSuccess_ContentType 测试WriteJSONSuccess设置正确的Content-Type
 func TestWriteJSONSuccess_ContentType(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 
 	WriteJSONSuccess(w, map[string]string{"key": "value"})
@@ -342,6 +361,7 @@ func TestWriteJSONSuccess_ContentType(t *testing.T) {
 
 // TestWriteValidationError_ContentType 测试WriteValidationError设置正确的Content-Type
 func TestWriteValidationError_ContentType(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 
 	WriteValidationError(w, "email", "邮箱格式无效")
@@ -351,6 +371,7 @@ func TestWriteValidationError_ContentType(t *testing.T) {
 
 // TestWriteJSONError_ValidJSON 测试WriteJSONError返回有效的JSON
 func TestWriteJSONError_ValidJSON(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 	err := apperrors.ErrInvalidCredentials
 
@@ -364,6 +385,7 @@ func TestWriteJSONError_ValidJSON(t *testing.T) {
 
 // TestWriteJSONSuccess_ValidJSON 测试WriteJSONSuccess返回有效的JSON
 func TestWriteJSONSuccess_ValidJSON(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 
 	WriteJSONSuccess(w, map[string]string{"key": "value"})
@@ -376,6 +398,7 @@ func TestWriteJSONSuccess_ValidJSON(t *testing.T) {
 
 // TestWriteValidationError_ValidJSON 测试WriteValidationError返回有效的JSON
 func TestWriteValidationError_ValidJSON(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 
 	WriteValidationError(w, "email", "邮箱格式无效")

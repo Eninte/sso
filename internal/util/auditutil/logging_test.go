@@ -35,6 +35,8 @@ func (m *MockAuditService) Log(ctx context.Context, log *model.AuditLog) {
 
 // SetError 设置Log方法返回的错误
 func (m *MockAuditService) SetError(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.LogError = err
 }
 
@@ -46,11 +48,22 @@ func (m *MockAuditService) Reset() {
 	m.LogError = nil
 }
 
+// GetLogCalls 获取日志调用列表（线程安全）
+func (m *MockAuditService) GetLogCalls() []*model.AuditLog {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// 返回副本以避免外部修改
+	calls := make([]*model.AuditLog, len(m.LogCalls))
+	copy(calls, m.LogCalls)
+	return calls
+}
+
 // ============================================================================
 // LogWithFallback 测试
 // ============================================================================
 
 func TestLogWithFallback_NilAuditService(t *testing.T) {
+	t.Parallel()
 	// 当auditSvc为nil时，应该直接返回，不panic
 	called := false
 	logFunc := func() error {
@@ -66,6 +79,7 @@ func TestLogWithFallback_NilAuditService(t *testing.T) {
 }
 
 func TestLogWithFallback_SuccessfulLog(t *testing.T) {
+	t.Parallel()
 	mockSvc := &MockAuditService{}
 	called := false
 
@@ -84,10 +98,11 @@ func TestLogWithFallback_SuccessfulLog(t *testing.T) {
 	// logFunc应该被调用
 	assert.True(t, called)
 	// 审计日志应该被记录
-	assert.Len(t, mockSvc.LogCalls, 1)
+	assert.Len(t, mockSvc.GetLogCalls(), 1)
 }
 
 func TestLogWithFallback_LogFunctionError(t *testing.T) {
+	// 不能并行运行，因为修改全局stderr
 	mockSvc := &MockAuditService{}
 
 	// 捕获stderr输出
@@ -120,6 +135,7 @@ func TestLogWithFallback_LogFunctionError(t *testing.T) {
 }
 
 func TestLogWithFallback_MultipleErrors(t *testing.T) {
+	// 不能并行运行，因为修改全局stderr
 	mockSvc := &MockAuditService{}
 
 	// 捕获stderr输出
@@ -159,6 +175,7 @@ func TestLogWithFallback_MultipleErrors(t *testing.T) {
 // ============================================================================
 
 func TestSafeAuditLog_NilAuditService(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	// 当auditSvc为nil时，应该直接返回，不panic
@@ -170,6 +187,7 @@ func TestSafeAuditLog_NilAuditService(t *testing.T) {
 }
 
 func TestSafeAuditLog_SuccessfulLog(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mockSvc := &MockAuditService{}
 
@@ -181,16 +199,18 @@ func TestSafeAuditLog_SuccessfulLog(t *testing.T) {
 	SafeAuditLog(ctx, mockSvc, "user_login", "user-123", metadata)
 
 	// 审计日志应该被记录
-	assert.Len(t, mockSvc.LogCalls, 1)
+	logCalls := mockSvc.GetLogCalls()
+	assert.Len(t, logCalls, 1)
 
 	// 验证日志内容
-	logEntry := mockSvc.LogCalls[0]
+	logEntry := logCalls[0]
 	assert.Equal(t, "user_login", logEntry.EventType)
 	assert.Equal(t, "user-123", logEntry.UserID)
 	assert.NotEmpty(t, logEntry.Details)
 }
 
 func TestSafeAuditLog_EmptyUserID(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mockSvc := &MockAuditService{}
 
@@ -200,14 +220,16 @@ func TestSafeAuditLog_EmptyUserID(t *testing.T) {
 	})
 
 	// 审计日志应该被记录
-	assert.Len(t, mockSvc.LogCalls, 1)
+	logCalls := mockSvc.GetLogCalls()
+	assert.Len(t, logCalls, 1)
 
-	logEntry := mockSvc.LogCalls[0]
+	logEntry := logCalls[0]
 	assert.Equal(t, "system_start", logEntry.EventType)
 	assert.Equal(t, "", logEntry.UserID)
 }
 
 func TestSafeAuditLog_NilMetadata(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mockSvc := &MockAuditService{}
 
@@ -215,14 +237,16 @@ func TestSafeAuditLog_NilMetadata(t *testing.T) {
 	SafeAuditLog(ctx, mockSvc, "user_logout", "user-123", nil)
 
 	// 审计日志应该被记录
-	assert.Len(t, mockSvc.LogCalls, 1)
+	logCalls := mockSvc.GetLogCalls()
+	assert.Len(t, logCalls, 1)
 
-	logEntry := mockSvc.LogCalls[0]
+	logEntry := logCalls[0]
 	assert.Equal(t, "user_logout", logEntry.EventType)
 	assert.Equal(t, "user-123", logEntry.UserID)
 }
 
 func TestSafeAuditLog_AuditServiceError(t *testing.T) {
+	// 不能并行运行，因为修改全局stderr
 	mockSvc := &MockAuditService{}
 
 	// 捕获stderr输出
@@ -265,6 +289,7 @@ func TestSafeAuditLog_AuditServiceError(t *testing.T) {
 }
 
 func TestSafeAuditLog_ComplexMetadata(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mockSvc := &MockAuditService{}
 
@@ -284,15 +309,17 @@ func TestSafeAuditLog_ComplexMetadata(t *testing.T) {
 	SafeAuditLog(ctx, mockSvc, "user_login", "user-123", metadata)
 
 	// 审计日志应该被记录
-	assert.Len(t, mockSvc.LogCalls, 1)
+	logCalls := mockSvc.GetLogCalls()
+	assert.Len(t, logCalls, 1)
 
-	logEntry := mockSvc.LogCalls[0]
+	logEntry := logCalls[0]
 	assert.Equal(t, "user_login", logEntry.EventType)
 	assert.Equal(t, "user-123", logEntry.UserID)
 	assert.NotEmpty(t, logEntry.Details)
 }
 
 func TestSafeAuditLog_MultipleEvents(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mockSvc := &MockAuditService{}
 
@@ -330,11 +357,12 @@ func TestSafeAuditLog_MultipleEvents(t *testing.T) {
 	}
 
 	// 所有事件都应该被记录
-	assert.Len(t, mockSvc.LogCalls, 3)
+	logCalls := mockSvc.GetLogCalls()
+	assert.Len(t, logCalls, 3)
 
 	// 验证每个事件
 	for i, e := range events {
-		logEntry := mockSvc.LogCalls[i]
+		logEntry := logCalls[i]
 		assert.Equal(t, e.event, logEntry.EventType)
 		assert.Equal(t, e.userID, logEntry.UserID)
 	}
@@ -345,6 +373,7 @@ func TestSafeAuditLog_MultipleEvents(t *testing.T) {
 // ============================================================================
 
 func TestAuditUtil_IntegrationWithMockService(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mockSvc := &MockAuditService{}
 
@@ -368,15 +397,17 @@ func TestAuditUtil_IntegrationWithMockService(t *testing.T) {
 	})
 
 	// 验证所有事件都被记录
-	assert.Len(t, mockSvc.LogCalls, 3)
+	logCalls := mockSvc.GetLogCalls()
+	assert.Len(t, logCalls, 3)
 
 	// 验证事件顺序
-	assert.Equal(t, "user_login", mockSvc.LogCalls[0].EventType)
-	assert.Equal(t, "user_action", mockSvc.LogCalls[1].EventType)
-	assert.Equal(t, "user_logout", mockSvc.LogCalls[2].EventType)
+	assert.Equal(t, "user_login", logCalls[0].EventType)
+	assert.Equal(t, "user_action", logCalls[1].EventType)
+	assert.Equal(t, "user_logout", logCalls[2].EventType)
 }
 
 func TestAuditUtil_ConcurrentLogging(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mockSvc := &MockAuditService{}
 
@@ -397,7 +428,8 @@ func TestAuditUtil_ConcurrentLogging(t *testing.T) {
 	}
 
 	// 所有事件都应该被记录
-	assert.Len(t, mockSvc.LogCalls, 10)
+	logCalls := mockSvc.GetLogCalls()
+	assert.Len(t, logCalls, 10)
 }
 
 // ============================================================================
@@ -405,18 +437,21 @@ func TestAuditUtil_ConcurrentLogging(t *testing.T) {
 // ============================================================================
 
 func TestSafeAuditLog_EmptyEvent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mockSvc := &MockAuditService{}
 
 	// 事件类型可以为空（虽然不推荐）
 	SafeAuditLog(ctx, mockSvc, "", "user-123", nil)
 
-	assert.Len(t, mockSvc.LogCalls, 1)
-	logEntry := mockSvc.LogCalls[0]
+	logCalls := mockSvc.GetLogCalls()
+	assert.Len(t, logCalls, 1)
+	logEntry := logCalls[0]
 	assert.Equal(t, "", logEntry.EventType)
 }
 
 func TestSafeAuditLog_LargeMetadata(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mockSvc := &MockAuditService{}
 
@@ -428,13 +463,15 @@ func TestSafeAuditLog_LargeMetadata(t *testing.T) {
 
 	SafeAuditLog(ctx, mockSvc, "large_event", "user-123", largeMetadata)
 
-	assert.Len(t, mockSvc.LogCalls, 1)
-	logEntry := mockSvc.LogCalls[0]
+	logCalls := mockSvc.GetLogCalls()
+	assert.Len(t, logCalls, 1)
+	logEntry := logCalls[0]
 	assert.Equal(t, "large_event", logEntry.EventType)
 	assert.NotEmpty(t, logEntry.Details)
 }
 
 func TestLogWithFallback_PanicInLogFunc(t *testing.T) {
+	t.Parallel()
 	mockSvc := &MockAuditService{}
 
 	// 注意：如果logFunc panic，LogWithFallback不会捕获它

@@ -694,6 +694,7 @@ func (s *Store) cleanupExpiredBatch(ctx context.Context, tableName string, befor
 		return fmt.Errorf("表 %s 缺少主键列名配置", tableName)
 	}
 
+	// #nosec G201 -- 表名来自内部配置常量，不是用户输入
 	query := fmt.Sprintf(`
 		DELETE FROM %s 
 		WHERE %s IN (
@@ -744,7 +745,7 @@ func (s *Store) storeToken(ctx context.Context, tableName, userID, token string,
 	_, _ = s.db.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE user_id = $1`, tableName), userID)
 
 	// 插入新令牌
-	query := fmt.Sprintf(`INSERT INTO %s (user_id, token, expires_at, created_at) VALUES ($1, $2, $3, $4)`, tableName)
+	query := fmt.Sprintf(`INSERT INTO %s (user_id, token, expires_at, created_at) VALUES ($1, $2, $3, $4)`, tableName) // #nosec G201 -- 表名来自内部配置常量，不是用户输入
 	_, err := s.db.ExecContext(ctx, query, userID, token, expiresAt, time.Now())
 	return err
 }
