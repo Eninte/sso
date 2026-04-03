@@ -463,7 +463,7 @@ func TestValidateJWTConfig_NegativeTTL(t *testing.T) {
 	cfg, err := config.Load()
 	assert.Error(t, err)
 	assert.Nil(t, cfg)
-	assert.Contains(t, err.Error(), "Access Token TTL 必须为正数")
+	assert.Contains(t, err.Error(), "access token TTL 必须为正数")
 }
 
 func TestValidateJWTConfig_ZeroAccessTTL(t *testing.T) {
@@ -477,7 +477,7 @@ func TestValidateJWTConfig_ZeroAccessTTL(t *testing.T) {
 	cfg, err := config.Load()
 	assert.Error(t, err)
 	assert.Nil(t, cfg)
-	assert.Contains(t, err.Error(), "Access Token TTL 必须为正数")
+	assert.Contains(t, err.Error(), "access token TTL 必须为正数")
 }
 
 func TestValidateJWTConfig_ZeroRefreshTTL(t *testing.T) {
@@ -491,7 +491,7 @@ func TestValidateJWTConfig_ZeroRefreshTTL(t *testing.T) {
 	cfg, err := config.Load()
 	assert.Error(t, err)
 	assert.Nil(t, cfg)
-	assert.Contains(t, err.Error(), "Refresh Token TTL 必须为正数")
+	assert.Contains(t, err.Error(), "refresh token TTL 必须为正数")
 }
 
 func TestValidateJWTConfig_DefaultPaths(t *testing.T) {

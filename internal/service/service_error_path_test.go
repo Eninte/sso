@@ -54,7 +54,7 @@ func TestMFAService_SetupMFA_ErrorPaths(t *testing.T) {
 	// 验证: 需求 8.6
 	t.Run("Store_Update返回数据库错误", func(t *testing.T) {
 		storeInst := mock.New()
-		
+
 		// 创建正常用户
 		user := &model.User{
 			ID:         "test-user-id",
@@ -123,7 +123,7 @@ func TestMFAService_VerifyAndEnableMFA_ErrorPaths(t *testing.T) {
 	// 验证: 需求 8.6
 	t.Run("Store_Update返回数据库错误", func(t *testing.T) {
 		storeInst := mock.New()
-		
+
 		// 创建有MFA secret但未启用的用户
 		user := &model.User{
 			ID:         "test-user-id",
@@ -171,7 +171,7 @@ func TestMFAService_DisableMFA_ErrorPaths(t *testing.T) {
 	// 验证: 需求 8.6
 	t.Run("Store_Update返回数据库错误", func(t *testing.T) {
 		storeInst := mock.New()
-		
+
 		// 创建已启用MFA的用户
 		user := &model.User{
 			ID:         "test-user-id",
@@ -241,7 +241,7 @@ func TestAuthService_RefreshToken_ComprehensiveErrorPaths(t *testing.T) {
 	// 验证: 需求 8.6
 	t.Run("Token已被撤销", func(t *testing.T) {
 		storeInst := mock.New()
-		
+
 		// 创建已撤销的token
 		revokedAt := time.Now()
 		storeInst.AddToken(&model.Token{
@@ -275,7 +275,7 @@ func TestAuthService_RefreshToken_ComprehensiveErrorPaths(t *testing.T) {
 	// 验证: 需求 8.6
 	t.Run("RevokeToken失败导致刷新失败", func(t *testing.T) {
 		storeInst := mock.New()
-		
+
 		// 创建有效token
 		storeInst.AddToken(&model.Token{
 			ID:           "token-1",
@@ -318,7 +318,7 @@ func TestAuthService_RefreshToken_ComprehensiveErrorPaths(t *testing.T) {
 	// 验证: 需求 8.6
 	t.Run("StoreToken失败", func(t *testing.T) {
 		storeInst := mock.New()
-		
+
 		// 创建有效token
 		storeInst.AddToken(&model.Token{
 			ID:           "token-1",
@@ -638,7 +638,7 @@ func TestUserService_SendVerificationEmail_ErrorPaths(t *testing.T) {
 	// 验证: 需求 8.6
 	t.Run("Store_StoreVerificationToken返回错误", func(t *testing.T) {
 		storeInst := mock.New()
-		
+
 		// 创建未验证的用户
 		user := &model.User{
 			ID:            "test-user-id",
@@ -665,7 +665,7 @@ func TestUserService_SendVerificationEmail_ErrorPaths(t *testing.T) {
 	// 验证: 需求 8.6
 	t.Run("邮箱已验证", func(t *testing.T) {
 		storeInst := mock.New()
-		
+
 		// 创建已验证的用户
 		user := &model.User{
 			ID:            "test-user-id",
@@ -710,7 +710,7 @@ func TestUserService_VerifyEmail_ComprehensiveErrorPaths(t *testing.T) {
 	// 验证: 需求 8.6
 	t.Run("Store_GetByID返回数据库错误", func(t *testing.T) {
 		storeInst := mock.New()
-		
+
 		// 添加有效的验证token
 		err := storeInst.StoreVerificationToken(ctx, "test-user-id", "valid-token", time.Now().Add(15*time.Minute))
 		require.NoError(t, err)
@@ -731,7 +731,7 @@ func TestUserService_VerifyEmail_ComprehensiveErrorPaths(t *testing.T) {
 	// 验证: 需求 8.6
 	t.Run("Store_Update返回数据库错误", func(t *testing.T) {
 		storeInst := mock.New()
-		
+
 		// 添加有效的验证token
 		err := storeInst.StoreVerificationToken(ctx, "test-user-id", "valid-token", time.Now().Add(15*time.Minute))
 		require.NoError(t, err)
@@ -783,7 +783,7 @@ func TestUserService_ResetPassword_ErrorPaths(t *testing.T) {
 	// 验证: 需求 8.6
 	t.Run("Store_GetByID返回数据库错误", func(t *testing.T) {
 		storeInst := mock.New()
-		
+
 		// 添加有效的重置token
 		err := storeInst.StoreResetToken(ctx, "test-user-id", "valid-token", time.Now().Add(1*time.Hour))
 		require.NoError(t, err)
@@ -804,7 +804,7 @@ func TestUserService_ResetPassword_ErrorPaths(t *testing.T) {
 	// 验证: 需求 8.6
 	t.Run("Store_Update返回数据库错误", func(t *testing.T) {
 		storeInst := mock.New()
-		
+
 		// 添加有效的重置token
 		err := storeInst.StoreResetToken(ctx, "test-user-id", "valid-token", time.Now().Add(1*time.Hour))
 		require.NoError(t, err)
@@ -973,7 +973,7 @@ func TestUserService_ForgotPassword_ErrorPaths(t *testing.T) {
 	// 验证: 需求 8.7
 	t.Run("Store_StoreResetToken失败_不泄露", func(t *testing.T) {
 		storeInst := mock.New()
-		
+
 		// 添加用户
 		user := &model.User{
 			ID:        "test-user-id",

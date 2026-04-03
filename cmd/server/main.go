@@ -48,6 +48,23 @@ type Services struct {
 	Social   *service.SocialLoginService
 }
 
+// main 服务器主入口
+// 此函数已重构以降低复杂度，通过提取配置初始化、服务初始化、处理器初始化、服务器启动逻辑
+//
+// 职责:
+//   - 调用initConfig加载配置
+//   - 调用initLogger初始化日志
+//   - 调用initServices初始化服务
+//   - 调用initHandlers初始化处理器和路由
+//   - 调用startServer启动HTTP服务器
+//
+// 重构原因: 原始复杂度为17，通过提取配置、服务、处理器、服务器启动逻辑，降低到<10
+// 提取的函数:
+//   - initConfig: 加载配置
+//   - initLogger: 初始化日志
+//   - initServices: 初始化服务
+//   - initHandlers: 初始化处理器和路由
+//   - startServer: 启动HTTP服务器
 func main() {
 	// 1. 加载配置
 	cfg, err := initConfig()
@@ -81,8 +98,22 @@ func main() {
 }
 
 // startServer 启动HTTP服务器
-// 包含HTTP服务器配置和启动
-// 处理优雅关闭
+// 此函数从main中提取，用于降低主函数的复杂度
+//
+// 职责:
+//   - 创建HTTP服务器实例
+//   - 配置服务器参数（地址、处理器、超时等）
+//   - 启动服务器
+//   - 处理优雅关闭（SIGINT、SIGTERM信号）
+//   - 关闭审计服务、社交登录服务等资源
+//
+// 参数:
+//   - cfg: 配置对象
+//   - handler: HTTP处理器（路由）
+//   - rateLimiter: 限流中间件
+//   - svc: 服务集合
+//
+// 重构原因: 从main中提取服务器启动逻辑，降低主函数复杂度（17→<10）
 func startServer(cfg *config.Config, handler http.Handler, rateLimiter *middleware.RateLimiter, svc *Services) {
 	// ==== 创建HTTP服务器 ====
 	server := &http.Server{
@@ -133,9 +164,24 @@ func startServer(cfg *config.Config, handler http.Handler, rateLimiter *middlewa
 	}
 }
 
-// initHandlers 初始化处理器和路由
-// 包含路由设置和中间件配置
-// 返回配置好的http.Handler和限流器
+// initHandlers 初始化HTTP处理器和路由
+// 此函数从main中提取，用于降低主函数的复杂度
+//
+// 职责:
+//   - 创建路由器
+//   - 注册所有HTTP处理器
+//   - 配置中间件（日志、限流、CORS等）
+//   - 返回配置好的路由器和限流中间件
+//
+// 参数:
+//   - cfg: 配置对象
+//   - svc: 服务集合
+//
+// 返回:
+//   - 配置好的路由器
+//   - 限流中间件实例
+//
+// 重构原因: 从main中提取处理器初始化逻辑，降低主函数复杂度（17→<10）
 func initHandlers(cfg *config.Config, svc *Services) (*mux.Router, *middleware.RateLimiter) {
 	// ==== 初始化处理器 ====
 	registerHandler := handler.NewRegisterHandler(svc.Auth)
@@ -235,9 +281,19 @@ func initHandlers(cfg *config.Config, svc *Services) (*mux.Router, *middleware.R
 	return router, rateLimiter
 }
 
-// initConfig 初始化配置
-// 从环境变量加载配置并验证
-// 返回验证后的Config或错误
+// initConfig 加载和验证配置
+// 此函数从main中提取，用于降低主函数的复杂度
+//
+// 职责:
+//   - 从环境变量加载配置
+//   - 验证配置的有效性
+//   - 返回验证后的配置或错误
+//
+// 返回:
+//   - 如果成功，返回验证后的配置
+//   - 如果失败，返回错误
+//
+// 重构原因: 从main中提取配置初始化逻辑，降低主函数复杂度（17→<10）
 func initConfig() (*config.Config, error) {
 	cfg, err := config.Load()
 	if err != nil {
@@ -246,13 +302,38 @@ func initConfig() (*config.Config, error) {
 	return cfg, nil
 }
 
-// initLogger 初始化日志配置
+// initLogger 初始化日志系统
+// 此函数从main中提取，用于降低主函数的复杂度
+//
+// 职责:
+//   - 根据环境设置日志级别
+//   - 配置日志格式
+//   - 初始化全局日志记录器
+//
+// 参数:
+//   - env: 运行环境（development或production）
+//
+// 重构原因: 从main中提取日志初始化逻辑，降低主函数复杂度（17→<10）
 func initLogger(env string) {
 	logging.InitForEnv(env)
 }
 
-// initCache 初始化缓存层
-// 根据配置尝试连接Redis，失败时自动降级到内存缓存
+// initCache 初始化缓存服务
+// 此函数从main中提取，用于降低主函数的复杂度
+//
+// 职责:
+//   - 根据配置创建缓存实例
+//   - 验证缓存连接
+//   - 返回缓存服务或错误
+//
+// 参数:
+//   - cfg: 配置对象
+//
+// 返回:
+//   - 如果成功，返回缓存服务实例
+//   - 如果失败，返回错误
+//
+// 重构原因: 从main中提取缓存初始化逻辑，降低主函数复杂度（17→<10）
 func initCache(cfg *config.Config) (cache.Cache, error) {
 	opt := &cache.Option{
 		RedisEnable:   cfg.RedisEnable,
@@ -267,6 +348,23 @@ func initCache(cfg *config.Config) (cache.Cache, error) {
 // initServices 初始化所有服务
 // 包含数据库连接、Redis连接、服务实例化
 // 返回Services结构体、数据库连接和错误
+// initServices 初始化所有业务服务
+// 此函数从main中提取，用于降低主函数的复杂度
+//
+// 职责:
+//   - 连接数据库
+//   - 初始化缓存
+//   - 创建所有服务实例（认证、用户、审计等）
+//   - 返回服务集合或错误
+//
+// 参数:
+//   - cfg: 配置对象
+//
+// 返回:
+//   - 如果成功，返回服务集合、数据库连接、nil
+//   - 如果失败，返回nil、nil、错误
+//
+// 重构原因: 从main中提取服务初始化逻辑，降低主函数复杂度（17→<10）
 func initServices(cfg *config.Config) (*Services, *sql.DB, error) {
 	// ==== 连接数据库 ====
 	db, err := connectDatabase(cfg)
@@ -394,6 +492,22 @@ func initServices(cfg *config.Config) (*Services, *sql.DB, error) {
 }
 
 // connectDatabase 连接数据库
+// 此函数从initServices中提取，用于降低函数的复杂度
+//
+// 职责:
+//   - 根据配置创建数据库连接
+//   - 验证连接有效性
+//   - 执行数据库迁移
+//   - 返回数据库连接或错误
+//
+// 参数:
+//   - cfg: 配置对象
+//
+// 返回:
+//   - 如果成功，返回数据库连接
+//   - 如果失败，返回错误
+//
+// 重构原因: 从initServices中提取数据库连接逻辑，提高代码可读性
 func connectDatabase(cfg *config.Config) (*sql.DB, error) {
 	db, err := sql.Open("postgres", cfg.DatabaseURL())
 	if err != nil {

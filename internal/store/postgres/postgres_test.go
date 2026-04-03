@@ -45,11 +45,13 @@ func setupTestStore(t *testing.T) (*postgres.Store, *sql.DB) {
 func cleanupTestData(t *testing.T, db *sql.DB) {
 	t.Helper()
 	ctx := context.Background()
+	// 删除顺序很重要：先删除有外键约束的表，再删除被引用的表
 	_, _ = db.ExecContext(ctx, "DELETE FROM audit_logs WHERE user_id LIKE 'test-%'")
 	_, _ = db.ExecContext(ctx, "DELETE FROM verification_tokens WHERE token LIKE 'test-%'")
 	_, _ = db.ExecContext(ctx, "DELETE FROM reset_tokens WHERE token LIKE 'test-%'")
-	_, _ = db.ExecContext(ctx, "DELETE FROM tokens WHERE access_token LIKE 'test-%'")
 	_, _ = db.ExecContext(ctx, "DELETE FROM authorization_codes WHERE code LIKE 'test-%'")
+	_, _ = db.ExecContext(ctx, "DELETE FROM tokens WHERE access_token LIKE 'test-%'")
+	_, _ = db.ExecContext(ctx, "DELETE FROM oauth_clients WHERE client_id LIKE 'test-%'")
 	_, _ = db.ExecContext(ctx, "DELETE FROM users WHERE email LIKE 'test-%@%'")
 }
 
@@ -76,7 +78,6 @@ func newTestUser(email string) *model.User {
 // ============================================================================
 
 func TestStore_CreateUser(t *testing.T) {
-	t.Parallel()
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		cleanupTestData(t, db)
@@ -104,7 +105,6 @@ func TestStore_CreateUser(t *testing.T) {
 }
 
 func TestStore_GetUserByEmail(t *testing.T) {
-	t.Parallel()
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		cleanupTestData(t, db)
@@ -128,7 +128,6 @@ func TestStore_GetUserByEmail(t *testing.T) {
 }
 
 func TestStore_GetUserByID(t *testing.T) {
-	t.Parallel()
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		cleanupTestData(t, db)
@@ -152,7 +151,6 @@ func TestStore_GetUserByID(t *testing.T) {
 }
 
 func TestStore_UpdateUser(t *testing.T) {
-	t.Parallel()
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		cleanupTestData(t, db)
@@ -160,10 +158,10 @@ func TestStore_UpdateUser(t *testing.T) {
 	})
 	ctx := context.Background()
 
-	user := newTestUser("update@example.com")
-	require.NoError(t, store.Create(ctx, user))
-
 	t.Run("更新用户信息", func(t *testing.T) {
+		user := newTestUser("update1@example.com")
+		require.NoError(t, store.Create(ctx, user))
+
 		user.EmailVerified = true
 		user.Status = model.UserStatusLocked
 		user.UpdatedAt = time.Now()
@@ -176,6 +174,9 @@ func TestStore_UpdateUser(t *testing.T) {
 	})
 
 	t.Run("更新登录尝试次数", func(t *testing.T) {
+		user := newTestUser("update2@example.com")
+		require.NoError(t, store.Create(ctx, user))
+
 		lockedUntil := time.Now().Add(30 * time.Minute)
 		require.NoError(t, store.UpdateLoginAttempts(ctx, user.ID, 3, &lockedUntil))
 
@@ -187,7 +188,6 @@ func TestStore_UpdateUser(t *testing.T) {
 }
 
 func TestStore_IncrementLoginAttempts(t *testing.T) {
-	t.Parallel()
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		cleanupTestData(t, db)
@@ -232,7 +232,6 @@ func TestStore_IncrementLoginAttempts(t *testing.T) {
 }
 
 func TestStore_ResetLoginAttempts(t *testing.T) {
-	t.Parallel()
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		cleanupTestData(t, db)
@@ -266,7 +265,6 @@ func TestStore_ResetLoginAttempts(t *testing.T) {
 }
 
 func TestStore_UnlockExpiredAccount(t *testing.T) {
-	t.Parallel()
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		cleanupTestData(t, db)
@@ -322,7 +320,6 @@ func TestStore_UnlockExpiredAccount(t *testing.T) {
 }
 
 func TestStore_DeleteUser(t *testing.T) {
-	t.Parallel()
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		cleanupTestData(t, db)
@@ -341,7 +338,6 @@ func TestStore_DeleteUser(t *testing.T) {
 }
 
 func TestStore_ListUsers(t *testing.T) {
-	t.Parallel()
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		cleanupTestData(t, db)
@@ -372,7 +368,6 @@ func TestStore_ListUsers(t *testing.T) {
 // ============================================================================
 
 func TestStore_TokenOperations(t *testing.T) {
-	t.Parallel()
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		cleanupTestData(t, db)
@@ -384,9 +379,10 @@ func TestStore_TokenOperations(t *testing.T) {
 	require.NoError(t, store.Create(ctx, user))
 
 	// 创建测试客户端（Token表有client_id外键）
+	uniqueClientID := "test-token-" + uuid.New().String()[:8]
 	testClient := &model.Client{
 		ID:           uuid.New().String(),
-		ClientID:     "test-token-client",
+		ClientID:     uniqueClientID,
 		ClientSecret: "secret",
 		Name:         "Token Test Client",
 		RedirectURIs: []string{"http://localhost"},
@@ -402,7 +398,7 @@ func TestStore_TokenOperations(t *testing.T) {
 			AccessToken:  "test-access-" + uuid.New().String(),
 			RefreshToken: "test-refresh-" + uuid.New().String(),
 			UserID:       user.ID,
-			ClientID:     ptrTo("test-token-client"),
+			ClientID:     ptrTo(uniqueClientID),
 			Scopes:       []string{"openid", "profile"},
 			ExpiresAt:    time.Now().Add(1 * time.Hour),
 			CreatedAt:    time.Now(),
@@ -424,7 +420,7 @@ func TestStore_TokenOperations(t *testing.T) {
 			AccessToken:  "test-access-revoke-" + uuid.New().String(),
 			RefreshToken: "test-refresh-revoke-" + uuid.New().String(),
 			UserID:       user.ID,
-			ClientID:     ptrTo("test-token-client"),
+			ClientID:     ptrTo(uniqueClientID),
 			Scopes:       []string{"openid"},
 			ExpiresAt:    time.Now().Add(1 * time.Hour),
 			CreatedAt:    time.Now(),
@@ -444,7 +440,7 @@ func TestStore_TokenOperations(t *testing.T) {
 				AccessToken:  fmt.Sprintf("test-all-%d-%s", i, uuid.New().String()),
 				RefreshToken: fmt.Sprintf("test-all-r-%d-%s", i, uuid.New().String()),
 				UserID:       user.ID,
-				ClientID:     ptrTo("test-token-client"),
+				ClientID:     ptrTo(uniqueClientID),
 				Scopes:       []string{"openid"},
 				ExpiresAt:    time.Now().Add(1 * time.Hour),
 				CreatedAt:    time.Now(),
@@ -460,7 +456,6 @@ func TestStore_TokenOperations(t *testing.T) {
 // ============================================================================
 
 func TestStore_VerificationTokens(t *testing.T) {
-	t.Parallel()
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		cleanupTestData(t, db)
@@ -499,7 +494,6 @@ func TestStore_VerificationTokens(t *testing.T) {
 // ============================================================================
 
 func TestStore_AuthorizationCode(t *testing.T) {
-	t.Parallel()
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		cleanupTestData(t, db)
@@ -510,11 +504,12 @@ func TestStore_AuthorizationCode(t *testing.T) {
 	user := newTestUser("authcode@example.com")
 	require.NoError(t, store.Create(ctx, user))
 
-	// 创建测试客户端（使用有效UUID）
+	// 创建测试客户端（使用有效UUID和唯一的ClientID）
 	testClientID := uuid.New().String()
+	uniqueClientID := "test-authcode-" + uuid.New().String()[:8]
 	testClient := &model.Client{
 		ID:           testClientID,
-		ClientID:     "test-authcode-client",
+		ClientID:     uniqueClientID,
 		ClientSecret: "test-secret",
 		Name:         "Test AuthCode Client",
 		RedirectURIs: []string{"http://localhost/callback"},
@@ -530,7 +525,7 @@ func TestStore_AuthorizationCode(t *testing.T) {
 	t.Run("创建和获取授权码", func(t *testing.T) {
 		code := &model.AuthorizationCode{
 			Code:        "test-ac-" + uuid.New().String(),
-			ClientID:    "test-authcode-client",
+			ClientID:    uniqueClientID,
 			UserID:      user.ID,
 			RedirectURI: "http://localhost/callback",
 			Scopes:      []string{"openid"},
@@ -548,7 +543,7 @@ func TestStore_AuthorizationCode(t *testing.T) {
 	t.Run("标记授权码已使用", func(t *testing.T) {
 		code := &model.AuthorizationCode{
 			Code:        "test-ac-used-" + uuid.New().String(),
-			ClientID:    "test-authcode-client",
+			ClientID:    uniqueClientID,
 			UserID:      user.ID,
 			RedirectURI: "http://localhost/callback",
 			Scopes:      []string{"openid"},
@@ -568,7 +563,6 @@ func TestStore_AuthorizationCode(t *testing.T) {
 // ============================================================================
 
 func TestStore_AuditLog(t *testing.T) {
-	t.Parallel()
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		cleanupTestData(t, db)
@@ -611,7 +605,6 @@ func TestStore_AuditLog(t *testing.T) {
 // ============================================================================
 
 func TestStore_Ping(t *testing.T) {
-	t.Parallel()
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		db.Close()
@@ -620,7 +613,6 @@ func TestStore_Ping(t *testing.T) {
 }
 
 func TestStore_Close(t *testing.T) {
-	t.Parallel()
 	db := getTestDB(t)
 	t.Cleanup(func() {
 		db.Close()
@@ -633,7 +625,6 @@ func TestStore_Close(t *testing.T) {
 // ============================================================================
 
 func TestStore_GetByClientID(t *testing.T) {
-	t.Parallel()
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		cleanupTestData(t, db)
@@ -669,7 +660,6 @@ func TestStore_GetByClientID(t *testing.T) {
 }
 
 func TestStore_ValidateRedirectURI(t *testing.T) {
-	t.Parallel()
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		cleanupTestData(t, db)
@@ -710,9 +700,7 @@ func TestStore_ValidateRedirectURI(t *testing.T) {
 // ============================================================================
 
 func TestStore_NewFromURL(t *testing.T) {
-	t.Parallel()
 	t.Run("有效URL", func(t *testing.T) {
-		t.Parallel()
 		dbURL := os.Getenv("DATABASE_URL")
 		if dbURL == "" {
 			t.Skip("跳过：未设置DATABASE_URL")
@@ -726,14 +714,12 @@ func TestStore_NewFromURL(t *testing.T) {
 	})
 
 	t.Run("无效URL格式", func(t *testing.T) {
-		t.Parallel()
 		_, err := postgres.NewFromURL("://invalid-url")
 		assert.Error(t, err)
 	})
 }
 
 func TestStore_NewFromConfig(t *testing.T) {
-	t.Parallel()
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		t.Skip("跳过：未设置DATABASE_URL")
@@ -752,7 +738,6 @@ func TestStore_NewFromConfig(t *testing.T) {
 // ============================================================================
 
 func TestStore_MarkAuthorizationCodeUsed(t *testing.T) {
-	t.Parallel()
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		cleanupTestData(t, db)
@@ -803,7 +788,6 @@ func TestStore_MarkAuthorizationCodeUsed(t *testing.T) {
 // ============================================================================
 
 func TestStore_ListUsers_Pagination(t *testing.T) {
-	t.Parallel()
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		cleanupTestData(t, db)
@@ -844,7 +828,6 @@ func TestStore_ListUsers_Pagination(t *testing.T) {
 // ============================================================================
 
 func TestStore_ListAuditLogs_Filter(t *testing.T) {
-	t.Parallel()
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		cleanupTestData(t, db)
@@ -904,7 +887,6 @@ func TestStore_ListAuditLogs_Filter(t *testing.T) {
 // ============================================================================
 
 func TestStore_CleanupExpired(t *testing.T) {
-	t.Parallel()
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		cleanupTestData(t, db)
@@ -973,7 +955,6 @@ func TestStore_CleanupExpired(t *testing.T) {
 // ============================================================================
 
 func TestStore_GetUserByField_InvalidField(t *testing.T) {
-	t.Parallel()
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		db.Close()
@@ -996,7 +977,6 @@ func TestStore_GetUserByField_InvalidField(t *testing.T) {
 // ============================================================================
 
 func TestStore_KeyOperations(t *testing.T) {
-	t.Parallel()
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		cleanupTestData(t, db)

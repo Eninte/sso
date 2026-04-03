@@ -673,7 +673,7 @@ func TestAuthService_LogoutAllWithAudit(t *testing.T) {
 		passwordSvc := crypto.NewPasswordService(4)
 		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test-issuer", 15*time.Minute, 7*24*time.Hour)
-		authSvc := service.NewAuthService(store, passwordSvc, jwtSvc, 5, 30*time.Minute) //nolint:contextcheck
+		authSvc := service.NewAuthService(store, passwordSvc, jwtSvc, 5, 30*time.Minute)
 
 		// 创建测试用户
 		testUser := &model.User{
@@ -836,7 +836,7 @@ func TestAuthService_Register_StoreErrors(t *testing.T) {
 		passwordSvc := crypto.NewPasswordService(4)
 		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test", 15*time.Minute, 7*24*time.Hour)
-		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute) //nolint:contextcheck
+		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
 
 		_, err := authSvc.Register(ctx, &model.RegisterRequest{
 			Email:    "test@example.com",
@@ -852,7 +852,7 @@ func TestAuthService_Register_StoreErrors(t *testing.T) {
 		passwordSvc := crypto.NewPasswordService(4)
 		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test", 15*time.Minute, 7*24*time.Hour)
-		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute) //nolint:contextcheck
+		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
 
 		_, err := authSvc.Register(ctx, &model.RegisterRequest{
 			Email:    "test@example.com",
@@ -872,7 +872,7 @@ func TestAuthService_Login_StoreErrors(t *testing.T) {
 		passwordSvc := crypto.NewPasswordService(4)
 		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test", 15*time.Minute, 7*24*time.Hour)
-		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute) //nolint:contextcheck
+		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
 
 		_, err := authSvc.Login(ctx, &model.LoginRequest{
 			Email:    "test@example.com",
@@ -892,7 +892,7 @@ func TestAuthService_RefreshToken_StoreErrors(t *testing.T) {
 		passwordSvc := crypto.NewPasswordService(4)
 		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test", 15*time.Minute, 7*24*time.Hour)
-		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute) //nolint:contextcheck
+		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
 
 		_, err := authSvc.RefreshToken(ctx, "some-refresh-token")
 
@@ -913,7 +913,7 @@ func TestAuthService_RefreshToken_StoreErrors(t *testing.T) {
 		passwordSvc := crypto.NewPasswordService(4)
 		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test", 15*time.Minute, 7*24*time.Hour)
-		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute) //nolint:contextcheck
+		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
 
 		_, err := authSvc.RefreshToken(ctx, "valid-refresh")
 
@@ -930,7 +930,7 @@ func TestAuthService_Logout_StoreErrors(t *testing.T) {
 		passwordSvc := crypto.NewPasswordService(4)
 		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test", 15*time.Minute, 7*24*time.Hour)
-		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute) //nolint:contextcheck
+		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
 
 		err := authSvc.Logout(ctx, "some-access-token")
 
@@ -948,7 +948,7 @@ func TestAuthService_LogoutAll_StoreErrors(t *testing.T) {
 		passwordSvc := crypto.NewPasswordService(4)
 		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 		jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test", 15*time.Minute, 7*24*time.Hour)
-		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute) //nolint:contextcheck
+		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
 
 		err := authSvc.LogoutAll(ctx, "user-123")
 

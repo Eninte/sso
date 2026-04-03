@@ -69,6 +69,7 @@ func TestValidateEmail(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := validator.ValidateEmail(tt.email)
 
 			if tt.wantErr {
@@ -153,6 +154,7 @@ func TestValidatePassword(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := validator.ValidatePassword(tt.password)
 
 			if tt.wantErr {
@@ -210,6 +212,7 @@ func TestValidatePasswordSimple(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := validator.ValidatePasswordSimple(tt.password)
 
 			if tt.wantErr {
@@ -265,6 +268,7 @@ func TestValidateRegisterRequest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := validator.ValidateRegisterRequest(tt.email, tt.password)
 
 			if tt.wantErr {
@@ -311,6 +315,7 @@ func TestValidateLoginRequest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := validator.ValidateLoginRequest(tt.email, tt.password)
 
 			if tt.wantErr {

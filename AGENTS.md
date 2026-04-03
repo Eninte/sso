@@ -311,6 +311,154 @@ make lint             # 代码质量检查
 
 
 
+## 工具模块使用指南
+
+本项目提供了三个通用工具模块，用于标准化常见的代码模式。所有新代码应该使用这些工具模块而不是重复实现相同的逻辑。
+
+### 1. 错误处理工具 (serviceutil)
+
+**位置**: `internal/util/serviceutil/errors.go`
+
+**用途**: 标准化Service层的错误处理
+
+**主要函数**:
+
+```go
+// HandleStoreError 处理store层错误并映射到service层错误
+// 保持错误语义（类型、代码、消息）
+func HandleStoreError(err error, notFoundErr error) error
+
+// WrapServiceError 包装service层错误，添加操作上下文
+func WrapServiceError(operation string, err error) error
+```
+
+**使用场景**:
+- 在Service层调用Store方法时，使用`HandleStoreError`处理错误
+- 当Store返回`ErrNotFound`时，映射到Service层的特定错误（如`ErrInvalidCredentials`）
+- 保持错误语义，不暴露内部实现细节
+
+**示例**:
+```go
+user, err := s.store.GetByEmail(ctx, email)
+if err != nil {
+    return nil, serviceutil.HandleStoreError(err, ErrInvalidCredentials)
+}
+```
+
+### 2. 审计日志工具 (auditutil)
+
+**位置**: `internal/util/auditutil/logging.go`
+
+**用途**: 标准化审计日志记录，包含自动回退处理
+
+**主要函数**:
+
+```go
+// SafeAuditLog 安全的审计日志记录函数
+// 确保审计失败不会影响主操作
+func SafeAuditLog(ctx context.Context, auditSvc AuditService, event, userID string, metadata map[string]interface{})
+
+// LogWithFallback 使用回退处理的审计日志记录
+// 当审计日志失败时，自动回退到stderr
+func LogWithFallback(auditSvc AuditService, logFunc func() error)
+```
+
+**使用场景**:
+- 在Service层记录所有可审计的操作（登录、注册、权限变更等）
+- 审计日志失败时自动回退到stderr，不影响主操作
+- 审计服务为nil时自动跳过（审计日志是可选的）
+
+**示例**:
+```go
+auditutil.SafeAuditLog(ctx, s.auditSvc, "user_login", user.ID, map[string]interface{}{
+    "email":      user.Email,
+    "ip_address": auditCtx.IPAddress,
+    "user_agent": auditCtx.UserAgent,
+})
+```
+
+**重要**: 审计日志失败不应该导致主操作失败。使用`SafeAuditLog`确保这一点。
+
+### 3. HTTP响应工具 (handlerutil)
+
+**位置**: `internal/util/handlerutil/response.go`
+
+**用途**: 标准化Handler层的HTTP响应格式
+
+**主要函数**:
+
+```go
+// WriteJSONError 写入标准化的错误响应
+// 使用apperrors包进行错误到HTTP状态码和错误码的映射
+func WriteJSONError(w http.ResponseWriter, err error)
+
+// WriteJSONSuccess 写入标准化的成功响应
+func WriteJSONSuccess(w http.ResponseWriter, data interface{})
+
+// WriteValidationError 写入标准化的验证错误响应
+func WriteValidationError(w http.ResponseWriter, field, message string)
+```
+
+**使用场景**:
+- 在Handler层返回所有错误响应时，使用`WriteJSONError`
+- 在Handler层返回成功响应时，使用`WriteJSONSuccess`
+- 处理字段级别的验证错误时，使用`WriteValidationError`
+
+**示例**:
+```go
+// 错误响应
+if err != nil {
+    handlerutil.WriteJSONError(w, err)
+    return
+}
+
+// 成功响应
+user := &model.User{ID: 1, Email: "test@example.com"}
+handlerutil.WriteJSONSuccess(w, user)
+
+// 验证错误
+if !isValidEmail(email) {
+    handlerutil.WriteValidationError(w, "email", "邮箱格式无效")
+    return
+}
+```
+
+**响应格式**:
+```json
+// 错误响应
+{
+    "error": "INVALID_CREDENTIALS",
+    "message": "邮箱或密码错误",
+    "details": "可选的详细信息"
+}
+
+// 成功响应
+{
+    "data": { /* 响应数据 */ }
+}
+
+// 验证错误
+{
+    "error": "BAD_REQUEST",
+    "field": "email",
+    "message": "邮箱格式无效"
+}
+```
+
+### 工具模块的好处
+
+1. **一致性**: 所有代码使用相同的错误处理、审计日志、响应格式
+2. **可维护性**: 修改工具函数时，所有使用它的代码都会自动受益
+3. **安全性**: 工具函数包含了最佳实践（如审计失败回退、错误语义保持）
+4. **可测试性**: 工具函数可以独立测试，提高代码质量
+
+### 禁止事项
+
+- ❌ 禁止在Service层直接处理Store错误而不使用`HandleStoreError`
+- ❌ 禁止在Service层直接调用`auditSvc.Log()`而不使用`SafeAuditLog`
+- ❌ 禁止在Handler层直接写入JSON错误响应而不使用`WriteJSONError`
+- ❌ 禁止重复实现这些工具函数已经提供的功能
+
 ## 开发工作流
 
 ### 新功能开发
@@ -318,9 +466,10 @@ make lint             # 代码质量检查
 1. 创建功能分支：`git checkout -b feature/xxx`
 2. 编写测试：先写测试用例（TDD，参考[TESTING.md](./TESTING.md)）
 3. 实现功能：按照分层架构实现
-4. 运行测试：`make test`
-5. 代码检查：`make lint`
-6. 提交代码：`git commit -m "feat: xxx"`
+4. 使用工具模块：在Service层使用`serviceutil`和`auditutil`，在Handler层使用`handlerutil`
+5. 运行测试：`make test`
+6. 代码检查：`make lint`
+7. 提交代码：`git commit -m "feat: xxx"`
 
 ### Bug修复
 
@@ -340,3 +489,5 @@ make lint             # 代码质量检查
 - [ ] 遵循错误处理规范
 - [ ] 遵循代码风格规范
 - [ ] 添加必要的文档注释
+- [ ] Service层使用了`serviceutil`和`auditutil`
+- [ ] Handler层使用了`handlerutil`

@@ -226,6 +226,29 @@ type AuditContext struct {
 // validateUserCredentials 验证用户凭据
 // 包含用户查询、密码验证、账户状态检查
 // 返回验证通过的用户对象或统一的错误类型
+// validateUserCredentials 验证用户凭据（邮箱和密码）
+// 此函数从LoginWithAudit中提取，用于降低主函数的复杂度
+//
+// 职责:
+//   - 按邮箱查询用户
+//   - 检查邮箱是否已验证
+//   - 检查账户状态（禁用/锁定）
+//   - 验证密码哈希
+//   - 处理账户锁定过期的情况
+//
+// 参数:
+//   - ctx: 请求上下文
+//   - email: 用户邮箱
+//   - password: 用户密码（明文）
+//
+// 返回:
+//   - 如果验证成功，返回用户对象
+//   - 如果用户不存在或密码错误，返回ErrInvalidCredentials
+//   - 如果邮箱未验证，返回ErrEmailNotVerified
+//   - 如果账户被禁用，返回ErrAccountDisabled
+//   - 如果账户被锁定，返回ErrAccountLocked
+//
+// 重构原因: 从LoginWithAudit中提取验证逻辑，降低主函数复杂度（21→<10）
 func (s *AuthService) validateUserCredentials(ctx context.Context, email, password string) (*model.User, error) {
 	// 查询用户
 	user, err := s.store.GetByEmail(ctx, email)
@@ -266,8 +289,25 @@ func (s *AuthService) validateUserCredentials(ctx context.Context, email, passwo
 }
 
 // handleLoginFailure 处理登录失败的情况
-// 包含失败次数递增、账户锁定检查、审计日志记录
-// 审计日志失败不会影响主流程
+// 此函数从LoginWithAudit中提取，用于降低主函数的复杂度
+//
+// 职责:
+//   - 递增登录失败次数（原子操作）
+//   - 检查是否超过最大尝试次数，如果是则锁定账户
+//   - 记录登录失败指标
+//   - 记录审计日志（使用SafeAuditLog确保失败不影响主流程）
+//   - 如果账户被锁定，记录账户锁定指标和审计日志
+//
+// 参数:
+//   - ctx: 请求上下文
+//   - email: 用户邮箱（用于查询用户）
+//   - auditCtx: 审计上下文（可以为nil）
+//
+// 返回:
+//   - 无返回值，所有错误都被记录而不返回
+//   - 确保登录失败处理不会影响主流程
+//
+// 重构原因: 从LoginWithAudit中提取失败处理逻辑，降低主函数复杂度（21→<10）
 func (s *AuthService) handleLoginFailure(ctx context.Context, email string, auditCtx *AuditContext) {
 	// 尝试获取用户以记录失败尝试
 	failedUser, getErr := s.store.GetByEmail(ctx, email)
@@ -311,8 +351,24 @@ func (s *AuthService) handleLoginFailure(ctx context.Context, email string, audi
 }
 
 // handleLoginSuccess 处理登录成功的情况
-// 包含重置登录尝试次数、审计日志记录、指标记录、token生成
-// 审计日志失败不会影响主流程
+// 此函数从LoginWithAudit中提取，用于降低主函数的复杂度
+//
+// 职责:
+//   - 重置登录失败次数
+//   - 记录登录成功指标
+//   - 记录审计日志（使用SafeAuditLog确保失败不影响主流程）
+//   - 生成并返回token对（access token和refresh token）
+//
+// 参数:
+//   - ctx: 请求上下文
+//   - user: 已验证的用户对象
+//   - auditCtx: 审计上下文（可以为nil）
+//
+// 返回:
+//   - 如果成功，返回LoginResponse（包含access token和refresh token）
+//   - 如果生成token失败，返回错误
+//
+// 重构原因: 从LoginWithAudit中提取成功处理逻辑，降低主函数复杂度（21→<10）
 func (s *AuthService) handleLoginSuccess(ctx context.Context, user *model.User, auditCtx *AuditContext) (*model.LoginResponse, error) {
 	// 重置登录尝试次数
 	if err := s.store.ResetLoginAttempts(ctx, user.ID); err != nil {
@@ -335,6 +391,29 @@ func (s *AuthService) handleLoginSuccess(ctx context.Context, user *model.User, 
 	return s.generateTokenPair(ctx, user.ID, user.Email, user.Role, []string{"openid", "profile", "email"}, nil)
 }
 
+// LoginWithAudit 执行登录操作并记录审计日志
+// 此函数已重构以降低复杂度，通过提取验证、失败处理、成功处理逻辑
+//
+// 职责:
+//   - 验证登录请求格式
+//   - 验证用户凭据（调用validateUserCredentials）
+//   - 处理登录失败（调用handleLoginFailure）
+//   - 处理登录成功（调用handleLoginSuccess）
+//
+// 参数:
+//   - ctx: 请求上下文
+//   - req: 登录请求（包含email和password）
+//   - auditCtx: 审计上下文（包含IP地址、User-Agent等）
+//
+// 返回:
+//   - 如果登录成功，返回LoginResponse（包含tokens）
+//   - 如果登录失败，返回错误
+//
+// 重构原因: 原始复杂度为21，通过提取验证、失败处理、成功处理逻辑，降低到<10
+// 提取的函数:
+//   - validateUserCredentials: 验证用户凭据
+//   - handleLoginFailure: 处理登录失败
+//   - handleLoginSuccess: 处理登录成功
 func (s *AuthService) LoginWithAudit(ctx context.Context, req *model.LoginRequest, auditCtx *AuditContext) (*model.LoginResponse, error) {
 	if err := validator.ValidateLoginRequest(req.Email, req.Password); err != nil {
 		return nil, err

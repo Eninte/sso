@@ -92,7 +92,7 @@ func SafeAuditLog(ctx context.Context, auditSvc AuditService, event, userID stri
 	LogWithFallback(auditSvc, func() error {
 		// 构建审计日志对象
 		detailsJSON, _ := json.Marshal(metadata)
-		
+
 		// 从metadata中提取IP地址、用户代理等字段
 		ipAddress := ""
 		userAgent := ""
@@ -112,7 +112,7 @@ func SafeAuditLog(ctx context.Context, auditSvc AuditService, event, userID stri
 				success = s
 			}
 		}
-		
+
 		auditLog := &model.AuditLog{
 			EventType: event,
 			UserID:    userID,

@@ -1,4 +1,4 @@
-package handlerutil
+package handlerutil_test
 
 import (
 	"encoding/json"
@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	apperrors "github.com/your-org/sso/internal/errors"
+	"github.com/your-org/sso/internal/util/handlerutil"
 )
 
 // ============================================================================
@@ -22,12 +23,12 @@ func TestWriteJSONError_WithAppError(t *testing.T) {
 	w := httptest.NewRecorder()
 	err := apperrors.ErrInvalidCredentials
 
-	WriteJSONError(w, err)
+	handlerutil.WriteJSONError(w, err)
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 	assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
 
-	var response ErrorResponse
+	var response handlerutil.ErrorResponse
 	unmarshalErr := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, unmarshalErr)
 
@@ -41,11 +42,11 @@ func TestWriteJSONError_WithEmailExists(t *testing.T) {
 	w := httptest.NewRecorder()
 	err := apperrors.ErrEmailExists
 
-	WriteJSONError(w, err)
+	handlerutil.WriteJSONError(w, err)
 
 	assert.Equal(t, http.StatusConflict, w.Code)
 
-	var response ErrorResponse
+	var response handlerutil.ErrorResponse
 	unmarshalErr := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, unmarshalErr)
 
@@ -59,11 +60,11 @@ func TestWriteJSONError_WithAccountLocked(t *testing.T) {
 	w := httptest.NewRecorder()
 	err := apperrors.ErrAccountLocked
 
-	WriteJSONError(w, err)
+	handlerutil.WriteJSONError(w, err)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 
-	var response ErrorResponse
+	var response handlerutil.ErrorResponse
 	unmarshalErr := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, unmarshalErr)
 
@@ -78,9 +79,9 @@ func TestWriteJSONError_WithDetails(t *testing.T) {
 	err := apperrors.New(apperrors.ErrCodeInvalidCredentials, "邮箱或密码错误", http.StatusUnauthorized)
 	err = err.WithDetails("用户不存在")
 
-	WriteJSONError(w, err)
+	handlerutil.WriteJSONError(w, err)
 
-	var response ErrorResponse
+	var response handlerutil.ErrorResponse
 	unmarshalErr := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, unmarshalErr)
 
@@ -93,11 +94,11 @@ func TestWriteJSONError_WithGenericError(t *testing.T) {
 	w := httptest.NewRecorder()
 	err := apperrors.New(apperrors.ErrCodeInternal, "数据库连接失败", http.StatusInternalServerError)
 
-	WriteJSONError(w, err)
+	handlerutil.WriteJSONError(w, err)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 
-	var response ErrorResponse
+	var response handlerutil.ErrorResponse
 	unmarshalErr := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, unmarshalErr)
 
@@ -111,12 +112,12 @@ func TestWriteJSONError_WithNonAppError(t *testing.T) {
 	w := httptest.NewRecorder()
 	err := apperrors.New(apperrors.ErrCodeInternal, "未知错误", http.StatusInternalServerError)
 
-	WriteJSONError(w, err)
+	handlerutil.WriteJSONError(w, err)
 
 	// 应该返回500状态码
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 
-	var response ErrorResponse
+	var response handlerutil.ErrorResponse
 	unmarshalErr := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, unmarshalErr)
 
@@ -168,11 +169,11 @@ func TestWriteJSONError_StatusCodeMapping(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			w := httptest.NewRecorder()
-			WriteJSONError(w, tt.err)
+			handlerutil.WriteJSONError(w, tt.err)
 
 			assert.Equal(t, tt.wantStatus, w.Code)
 
-			var response ErrorResponse
+			var response handlerutil.ErrorResponse
 			unmarshalErr := json.Unmarshal(w.Body.Bytes(), &response)
 			require.NoError(t, unmarshalErr)
 
@@ -194,12 +195,12 @@ func TestWriteJSONSuccess_WithData(t *testing.T) {
 		"email": "test@example.com",
 	}
 
-	WriteJSONSuccess(w, data)
+	handlerutil.WriteJSONSuccess(w, data)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
 
-	var response SuccessResponse
+	var response handlerutil.SuccessResponse
 	unmarshalErr := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, unmarshalErr)
 
@@ -212,11 +213,11 @@ func TestWriteJSONSuccess_WithNilData(t *testing.T) {
 	t.Parallel()
 	w := httptest.NewRecorder()
 
-	WriteJSONSuccess(w, nil)
+	handlerutil.WriteJSONSuccess(w, nil)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response SuccessResponse
+	var response handlerutil.SuccessResponse
 	unmarshalErr := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, unmarshalErr)
 
@@ -235,7 +236,7 @@ func TestWriteJSONSuccess_WithStruct(t *testing.T) {
 	}
 
 	user := User{ID: 1, Email: "test@example.com"}
-	WriteJSONSuccess(w, user)
+	handlerutil.WriteJSONSuccess(w, user)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
@@ -256,11 +257,11 @@ func TestWriteJSONSuccess_WithArray(t *testing.T) {
 		{"id": 2, "email": "user2@example.com"},
 	}
 
-	WriteJSONSuccess(w, data)
+	handlerutil.WriteJSONSuccess(w, data)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response SuccessResponse
+	var response handlerutil.SuccessResponse
 	unmarshalErr := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, unmarshalErr)
 
@@ -276,12 +277,12 @@ func TestWriteValidationError_EmailField(t *testing.T) {
 	t.Parallel()
 	w := httptest.NewRecorder()
 
-	WriteValidationError(w, "email", "邮箱格式无效")
+	handlerutil.WriteValidationError(w, "email", "邮箱格式无效")
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
 
-	var response ValidationErrorResponse
+	var response handlerutil.ValidationErrorResponse
 	unmarshalErr := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, unmarshalErr)
 
@@ -295,11 +296,11 @@ func TestWriteValidationError_PasswordField(t *testing.T) {
 	t.Parallel()
 	w := httptest.NewRecorder()
 
-	WriteValidationError(w, "password", "密码长度不能少于8个字符")
+	handlerutil.WriteValidationError(w, "password", "密码长度不能少于8个字符")
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
-	var response ValidationErrorResponse
+	var response handlerutil.ValidationErrorResponse
 	unmarshalErr := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, unmarshalErr)
 
@@ -321,11 +322,11 @@ func TestWriteValidationError_MultipleFields(t *testing.T) {
 
 	for _, f := range fields {
 		w := httptest.NewRecorder()
-		WriteValidationError(w, f.field, f.message)
+		handlerutil.WriteValidationError(w, f.field, f.message)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 
-		var response ValidationErrorResponse
+		var response handlerutil.ValidationErrorResponse
 		unmarshalErr := json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, unmarshalErr)
 
@@ -344,7 +345,7 @@ func TestWriteJSONError_ContentType(t *testing.T) {
 	w := httptest.NewRecorder()
 	err := apperrors.ErrInvalidCredentials
 
-	WriteJSONError(w, err)
+	handlerutil.WriteJSONError(w, err)
 
 	assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
 }
@@ -354,7 +355,7 @@ func TestWriteJSONSuccess_ContentType(t *testing.T) {
 	t.Parallel()
 	w := httptest.NewRecorder()
 
-	WriteJSONSuccess(w, map[string]string{"key": "value"})
+	handlerutil.WriteJSONSuccess(w, map[string]string{"key": "value"})
 
 	assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
 }
@@ -364,7 +365,7 @@ func TestWriteValidationError_ContentType(t *testing.T) {
 	t.Parallel()
 	w := httptest.NewRecorder()
 
-	WriteValidationError(w, "email", "邮箱格式无效")
+	handlerutil.WriteValidationError(w, "email", "邮箱格式无效")
 
 	assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
 }
@@ -375,10 +376,10 @@ func TestWriteJSONError_ValidJSON(t *testing.T) {
 	w := httptest.NewRecorder()
 	err := apperrors.ErrInvalidCredentials
 
-	WriteJSONError(w, err)
+	handlerutil.WriteJSONError(w, err)
 
 	// 验证响应体是有效的JSON
-	var response ErrorResponse
+	var response handlerutil.ErrorResponse
 	unmarshalErr := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, unmarshalErr)
 }
@@ -388,10 +389,10 @@ func TestWriteJSONSuccess_ValidJSON(t *testing.T) {
 	t.Parallel()
 	w := httptest.NewRecorder()
 
-	WriteJSONSuccess(w, map[string]string{"key": "value"})
+	handlerutil.WriteJSONSuccess(w, map[string]string{"key": "value"})
 
 	// 验证响应体是有效的JSON
-	var response SuccessResponse
+	var response handlerutil.SuccessResponse
 	unmarshalErr := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, unmarshalErr)
 }
@@ -401,10 +402,10 @@ func TestWriteValidationError_ValidJSON(t *testing.T) {
 	t.Parallel()
 	w := httptest.NewRecorder()
 
-	WriteValidationError(w, "email", "邮箱格式无效")
+	handlerutil.WriteValidationError(w, "email", "邮箱格式无效")
 
 	// 验证响应体是有效的JSON
-	var response ValidationErrorResponse
+	var response handlerutil.ValidationErrorResponse
 	unmarshalErr := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, unmarshalErr)
 }

@@ -205,11 +205,11 @@ func validateTOTP(secret, code string) bool {
 
 	now := time.Now()
 	baseTimeStep := now.Unix() / 30
-	
+
 	// 检查时间窗口: -1, 0, +1 (90秒窗口)
 	for i := -1; i <= 1; i++ {
 		var timeStep uint64
-		
+
 		if i < 0 {
 			// 安全处理负偏移，防止整数下溢
 			offset := uint64(-i)
@@ -222,7 +222,7 @@ func validateTOTP(secret, code string) bool {
 			// 正偏移总是安全的
 			timeStep = uint64(baseTimeStep) + uint64(i) // #nosec G115 -- 安全的加法，i总是非负的
 		}
-		
+
 		expectedCode := generateHOTP(secretBytes, timeStep)
 		if expectedCode == code {
 			return true

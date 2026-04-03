@@ -1,4 +1,4 @@
-package auditutil
+package auditutil_test
 
 import (
 	"bytes"
@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/your-org/sso/internal/model"
+	"github.com/your-org/sso/internal/util/auditutil"
 )
 
 // ============================================================================
@@ -72,7 +73,7 @@ func TestLogWithFallback_NilAuditService(t *testing.T) {
 	}
 
 	// 不应该panic
-	LogWithFallback(nil, logFunc)
+	auditutil.LogWithFallback(nil, logFunc)
 
 	// logFunc不应该被调用
 	assert.False(t, called)
@@ -93,7 +94,7 @@ func TestLogWithFallback_SuccessfulLog(t *testing.T) {
 	}
 
 	// 不应该panic
-	LogWithFallback(mockSvc, logFunc)
+	auditutil.LogWithFallback(mockSvc, logFunc)
 
 	// logFunc应该被调用
 	assert.True(t, called)
@@ -116,7 +117,7 @@ func TestLogWithFallback_LogFunctionError(t *testing.T) {
 	}
 
 	// 不应该panic，即使logFunc返回错误
-	LogWithFallback(mockSvc, logFunc)
+	auditutil.LogWithFallback(mockSvc, logFunc)
 
 	// 恢复stderr
 	w.Close()
@@ -152,7 +153,7 @@ func TestLogWithFallback_MultipleErrors(t *testing.T) {
 
 	// 多次调用，每次都失败
 	for i := 0; i < 3; i++ {
-		LogWithFallback(mockSvc, logFunc)
+		auditutil.LogWithFallback(mockSvc, logFunc)
 	}
 
 	// 恢复stderr
@@ -179,7 +180,7 @@ func TestSafeAuditLog_NilAuditService(t *testing.T) {
 	ctx := context.Background()
 
 	// 当auditSvc为nil时，应该直接返回，不panic
-	SafeAuditLog(ctx, nil, "user_login", "user-123", map[string]interface{}{
+	auditutil.SafeAuditLog(ctx, nil, "user_login", "user-123", map[string]interface{}{
 		"email": "test@example.com",
 	})
 
@@ -196,7 +197,7 @@ func TestSafeAuditLog_SuccessfulLog(t *testing.T) {
 		"ip_address": "192.168.1.1",
 	}
 
-	SafeAuditLog(ctx, mockSvc, "user_login", "user-123", metadata)
+	auditutil.SafeAuditLog(ctx, mockSvc, "user_login", "user-123", metadata)
 
 	// 审计日志应该被记录
 	logCalls := mockSvc.GetLogCalls()
@@ -215,7 +216,7 @@ func TestSafeAuditLog_EmptyUserID(t *testing.T) {
 	mockSvc := &MockAuditService{}
 
 	// 用户ID可以为空（例如系统事件）
-	SafeAuditLog(ctx, mockSvc, "system_start", "", map[string]interface{}{
+	auditutil.SafeAuditLog(ctx, mockSvc, "system_start", "", map[string]interface{}{
 		"version": "1.0.0",
 	})
 
@@ -234,7 +235,7 @@ func TestSafeAuditLog_NilMetadata(t *testing.T) {
 	mockSvc := &MockAuditService{}
 
 	// 元数据可以为nil
-	SafeAuditLog(ctx, mockSvc, "user_logout", "user-123", nil)
+	auditutil.SafeAuditLog(ctx, mockSvc, "user_logout", "user-123", nil)
 
 	// 审计日志应该被记录
 	logCalls := mockSvc.GetLogCalls()
@@ -270,7 +271,7 @@ func TestSafeAuditLog_AuditServiceError(t *testing.T) {
 	}
 
 	// 调用LogWithFallback来测试错误处理
-	LogWithFallback(mockSvc, logFunc)
+	auditutil.LogWithFallback(mockSvc, logFunc)
 
 	// 恢复stderr
 	w.Close()
@@ -306,7 +307,7 @@ func TestSafeAuditLog_ComplexMetadata(t *testing.T) {
 		},
 	}
 
-	SafeAuditLog(ctx, mockSvc, "user_login", "user-123", metadata)
+	auditutil.SafeAuditLog(ctx, mockSvc, "user_login", "user-123", metadata)
 
 	// 审计日志应该被记录
 	logCalls := mockSvc.GetLogCalls()
@@ -353,7 +354,7 @@ func TestSafeAuditLog_MultipleEvents(t *testing.T) {
 	}
 
 	for _, e := range events {
-		SafeAuditLog(ctx, mockSvc, e.event, e.userID, e.metadata)
+		auditutil.SafeAuditLog(ctx, mockSvc, e.event, e.userID, e.metadata)
 	}
 
 	// 所有事件都应该被记录
@@ -379,20 +380,20 @@ func TestAuditUtil_IntegrationWithMockService(t *testing.T) {
 
 	// 模拟一个完整的审计日志流程
 	// 1. 用户登录
-	SafeAuditLog(ctx, mockSvc, "user_login", "user-123", map[string]interface{}{
+	auditutil.SafeAuditLog(ctx, mockSvc, "user_login", "user-123", map[string]interface{}{
 		"email":      "test@example.com",
 		"ip_address": "192.168.1.1",
 		"success":    true,
 	})
 
 	// 2. 用户执行操作
-	SafeAuditLog(ctx, mockSvc, "user_action", "user-123", map[string]interface{}{
+	auditutil.SafeAuditLog(ctx, mockSvc, "user_action", "user-123", map[string]interface{}{
 		"action":     "update_profile",
 		"ip_address": "192.168.1.1",
 	})
 
 	// 3. 用户登出
-	SafeAuditLog(ctx, mockSvc, "user_logout", "user-123", map[string]interface{}{
+	auditutil.SafeAuditLog(ctx, mockSvc, "user_logout", "user-123", map[string]interface{}{
 		"ip_address": "192.168.1.1",
 	})
 
@@ -415,7 +416,7 @@ func TestAuditUtil_ConcurrentLogging(t *testing.T) {
 	done := make(chan bool, 10)
 	for i := 0; i < 10; i++ {
 		go func(id int) {
-			SafeAuditLog(ctx, mockSvc, "concurrent_event", "user-123", map[string]interface{}{
+			auditutil.SafeAuditLog(ctx, mockSvc, "concurrent_event", "user-123", map[string]interface{}{
 				"event_id": id,
 			})
 			done <- true
@@ -442,7 +443,7 @@ func TestSafeAuditLog_EmptyEvent(t *testing.T) {
 	mockSvc := &MockAuditService{}
 
 	// 事件类型可以为空（虽然不推荐）
-	SafeAuditLog(ctx, mockSvc, "", "user-123", nil)
+	auditutil.SafeAuditLog(ctx, mockSvc, "", "user-123", nil)
 
 	logCalls := mockSvc.GetLogCalls()
 	assert.Len(t, logCalls, 1)
@@ -461,7 +462,7 @@ func TestSafeAuditLog_LargeMetadata(t *testing.T) {
 		largeMetadata["key_"+string(rune(i))] = "value_" + string(rune(i))
 	}
 
-	SafeAuditLog(ctx, mockSvc, "large_event", "user-123", largeMetadata)
+	auditutil.SafeAuditLog(ctx, mockSvc, "large_event", "user-123", largeMetadata)
 
 	logCalls := mockSvc.GetLogCalls()
 	assert.Len(t, logCalls, 1)
@@ -483,6 +484,6 @@ func TestLogWithFallback_PanicInLogFunc(t *testing.T) {
 
 	// 这应该panic
 	assert.Panics(t, func() {
-		LogWithFallback(mockSvc, logFunc)
+		auditutil.LogWithFallback(mockSvc, logFunc)
 	})
 }
