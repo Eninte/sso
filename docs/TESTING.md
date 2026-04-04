@@ -331,6 +331,261 @@ func BenchmarkCacheGet(b *testing.B) {
 }
 ```
 
+## 压力测试
+
+详细的执行清单、场景顺序、数据准备和结果记录模板请参考：[PRESSURE_TESTING_RUNBOOK.md](./PRESSURE_TESTING_RUNBOOK.md)
+
+### 目标
+
+压力测试用于验证SSO服务在真实混合流量下的容量上限、延迟表现、保护机制和长时间运行稳定性。
+
+- 容量目标：找出最大稳定吞吐与系统拐点
+- 性能目标：观察平均延迟、P95、P99、错误率和恢复时间
+- 稳定性目标：识别内存增长、连接池耗尽、goroutine泄漏和缓存抖动
+- 安全目标：验证限流、账户锁定、无效Token、重复授权码等保护行为
+
+### 测试范围
+
+本项目建议覆盖以下压力测试范围：
+
+- 公开接口：`/health`、`/.well-known/openid-configuration`、`/.well-known/jwks.json`
+- 认证接口：`/api/v1/register`、`/api/v1/login`、`/api/v1/token`、`/api/v1/token/revoke`
+- 受保护接口：`/api/v1/userinfo`、`/api/v1/mfa/status`
+- OAuth/OIDC流程：`/api/v1/authorize` → `/api/v1/token` → `/api/v1/userinfo`
+- 管理员接口：`/api/v1/admin/health`、`/api/v1/admin/users`、`/api/v1/admin/audit-logs`
+
+### 环境模式
+
+#### 1. 容量模式
+
+用于测业务链路极限，不测保护机制。
+
+- 限流：关闭
+- 登录保护：可关闭或降低影响
+- 适用场景：登录、注册、userinfo、token刷新、OAuth完整流程
+
+#### 2. 保护模式
+
+用于验证系统在恶意流量下是否按预期保护自身。
+
+- 限流：开启
+- 登录保护：开启
+- 适用场景：错误密码风暴、同邮箱并发注册、无效Token风暴、无效授权码与PKCE校验
+
+#### 3. 稳态模式
+
+用于识别慢性问题和资源泄漏。
+
+- 限流：与容量模式保持一致
+- 持续时间：60-120分钟
+- 适用场景：混合流量、OAuth完整流程、userinfo高频访问
+
+### 压测前准备清单
+
+执行任何压力测试前，至少完成以下准备：
+
+1. 服务已正常启动，`/health`返回200
+2. 明确本次是容量模式还是保护模式
+3. 准备普通用户池、管理员用户池、恶意用户池
+4. 准备access token池与refresh token池
+5. 注册OAuth公共客户端与机密客户端
+6. 注册场景使用唯一邮箱，避免把邮箱冲突误判为容量瓶颈
+7. 邮件、审计、数据库、Redis依赖状态已确认
+8. 明确本次观测面板、日志位置和结果保存目录
+
+### 数据准备建议
+
+#### 账号与Token池
+
+- 登录压测：准备1000-5000个已验证普通账号
+- userinfo压测：准备2000-10000个access token
+- refresh token压测：准备1000-5000个refresh token
+- 注册压测：预生成10000个以上唯一邮箱
+- 管理员接口压测：准备5-20个管理员token
+- 安全专项：准备100-500个恶意账号样本
+
+#### OAuth客户端
+
+建议预置两类客户端：
+
+| 客户端类型 | 用途 | 核心配置 |
+| ----------- | ------ | ---------- |
+| 公共客户端 | SPA/移动端压测 | `public_client=true`，使用PKCE |
+| 机密客户端 | 服务端应用压测 | `public_client=false`，使用`client_secret` |
+
+建议统一使用以下基础配置：
+
+- `redirect_uri`：`http://localhost:3000/callback`
+- `grant_types`：`authorization_code`、`refresh_token`
+- `scopes`：`openid`、`profile`、`email`
+
+### 请求模板
+
+#### 登录
+
+```json
+{
+  "email": "user-0001@example.com",
+  "password": "TestPassword123!"
+}
+```
+
+#### 注册
+
+```json
+{
+  "email": "register-<unique>@example.com",
+  "password": "TestPassword123!"
+}
+```
+
+#### 刷新Token
+
+```json
+{
+  "grant_type": "refresh_token",
+  "refresh_token": "<refresh_token>"
+}
+```
+
+#### OAuth授权码交换（PKCE）
+
+```json
+{
+  "grant_type": "authorization_code",
+  "code": "<auth_code>",
+  "redirect_uri": "http://localhost:3000/callback",
+  "client_id": "public-test-client",
+  "code_verifier": "<pkce_verifier>"
+}
+```
+
+#### OAuth授权码交换（机密客户端）
+
+```json
+{
+  "grant_type": "authorization_code",
+  "code": "<auth_code>",
+  "redirect_uri": "http://localhost:3000/callback",
+  "client_id": "confidential-test-client",
+  "client_secret": "<client_secret>"
+}
+```
+
+### 场景清单
+
+| 场景 | 目标 | 主要接口 | 模式 | 通过标准 |
+| ------ | ------ | ---------- | ------ | ---------- |
+| S1 | 公开读接口基线 | `/health`、`/.well-known/*` | 容量 | 基本无5xx，延迟稳定 |
+| S2 | 登录容量 | `/api/v1/login` | 容量 | 找到稳定吞吐与CPU拐点 |
+| S3 | 注册写入压力 | `/api/v1/register` | 容量 | 错误率受控，唯一邮箱策略有效 |
+| S4 | 会话续期能力 | `/api/v1/token` | 容量 | refresh成功率稳定 |
+| S5 | 受保护读路径 | `/api/v1/userinfo` | 容量/稳态 | 高成功率，P95稳定 |
+| S6 | OAuth公共客户端完整流程 | `/api/v1/authorize` → `/api/v1/token` → `/api/v1/userinfo` | 容量/稳态 | 授权与换Token成功率稳定 |
+| S7 | OAuth机密客户端完整流程 | `/api/v1/authorize` → `/api/v1/token` → `/api/v1/userinfo` | 容量 | 客户端校验与换Token稳定 |
+| S8 | 混合流量 | 登录、注册、userinfo、token、OAuth、admin | 容量/稳态 | 接近真实业务且无系统性退化 |
+| S9 | 安全保护专项 | 错误密码、无效Token、重复code | 保护 | 429/401/409符合预期 |
+| S10 | 突刺与恢复 | 与S8相同 | 容量 | 峰值后延迟与错误率能回落 |
+
+### 建议负载曲线
+
+每个核心场景建议按照以下阶段推进：
+
+1. 冒烟：1-5并发，确认接口与脚本正确
+2. 基线：10、20、50并发，每档2分钟
+3. 阶梯加压：50 → 100 → 200 → 300 → 500 → 800并发，每档3-5分钟
+4. 峰值保持：选择拐点前一档，持续10-15分钟
+5. 突刺：从常态1倍瞬间提升到3-5倍，持续1-3分钟
+6. 稳态：以高峰50%-70%的流量运行60-120分钟
+
+### 混合流量建议配比
+
+如果要模拟真实SSO业务流量，推荐先使用以下比例：
+
+- 40% `GET /api/v1/userinfo`
+- 20% `POST /api/v1/token`（刷新）
+- 15% `POST /api/v1/login`
+- 8% `POST /api/v1/register`
+- 10% OAuth公共客户端完整流程
+- 5% OAuth机密客户端完整流程
+- 2% 管理员接口
+
+后续可根据线上真实访问占比再微调。
+
+### 观测指标
+
+#### 压测工具侧
+
+- 实际吞吐（RPS）
+- 平均延迟
+- P90、P95、P99
+- 最大延迟
+- 成功率
+- 4xx比例
+- 5xx比例
+
+#### 应用与系统侧
+
+- `http_requests_total`
+- `auth_login_total`
+- `auth_login_failed_total`
+- `auth_token_refresh_total`
+- `security_rate_limit_total`
+- `security_invalid_token_total`
+- `cache_hits_total`
+- `cache_misses_total`
+- CPU、内存、goroutine、GC、数据库连接数、Redis响应时间
+
+### 验收标准
+
+建议首版压测采用以下统一门槛：
+
+- 正常容量场景：5xx < 1%
+- userinfo场景：成功率接近100%，P95稳定
+- OAuth完整流程：授权成功率、换Token成功率、userinfo成功率稳定
+- 保护模式：429、401、409、账户锁定等行为符合预期
+- 稳态场景：内存、goroutine、连接池不持续增长
+- 突刺场景：峰值结束后指标应快速回落
+
+### 执行顺序建议
+
+建议按以下顺序分批执行：
+
+1. 第一天：S1、S2、S3、S4、S5
+2. 第二天：S6、S7、S8
+3. 第三天：S9、S10、Soak Test
+
+这样可以先拿到单链路容量结论，再进入完整业务场景，最后验证安全与稳定性。
+
+### 结果记录模板
+
+每个场景建议统一记录以下信息：
+
+| 字段 | 说明 |
+| ------ | ------ |
+| 场景编号 | S1-S10 |
+| 场景名称 | 例如“userinfo高频读取” |
+| 环境模式 | 容量/保护/稳态 |
+| 数据池规模 | 用户数、Token数、客户端数 |
+| 目标并发/RPS | 计划负载 |
+| 实际吞吐 | 实际测得RPS |
+| 平均延迟 | 平均响应时间 |
+| P95/P99 | 延迟分位数 |
+| 错误率 | 总体失败比例 |
+| 4xx/5xx分类 | 便于区分业务失败和系统失败 |
+| CPU/内存峰值 | 系统资源消耗 |
+| 数据库/Redis异常 | 依赖侧问题 |
+| 结论 | 是否达标、拐点位置、瓶颈判断 |
+
+### 注意事项
+
+- 登录和注册结果会显著受bcrypt成本影响，不适合直接代表全系统吞吐
+- 容量模式与保护模式不能混跑，否则结果不可比
+- 注册接口必须使用唯一邮箱
+- userinfo压测必须使用预生成Token池，避免混入登录成本
+- OAuth压测必须使用合法客户端和合法redirect URI
+- 当前内建HTTP耗时指标不是直方图，P95/P99应以压测工具输出为准
+
 ## 测试覆盖率
 
 ### 生成覆盖率报告
