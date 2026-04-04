@@ -58,6 +58,7 @@ linters:
     - nilerr
     - noctx
     - contextcheck
+    - testpackage
 
 linters-settings:
   gocyclo:

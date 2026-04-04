@@ -880,3 +880,8 @@ func (m *Store) DeleteUsedMFARecoveryCodes(ctx context.Context, userID string) e
 	delete(mfaRecoveryCodes, userID)
 	return nil
 }
+
+// ClearMFARecoveryCodes 清空所有MFA恢复码（测试用）
+func ClearMFARecoveryCodes() {
+	mfaRecoveryCodes = make(map[string][]string)
+}

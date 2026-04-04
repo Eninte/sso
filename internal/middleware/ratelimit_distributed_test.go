@@ -154,8 +154,8 @@ func TestDistributedRateLimiter_Middleware(t *testing.T) {
 		middlewareHandler.ServeHTTP(rr, req)
 
 		assert.Equal(t, http.StatusOK, rr.Code)
-		assert.NotEmpty(t, rr.Header().Get("X-RateLimit-Limit"))
-		assert.NotEmpty(t, rr.Header().Get("X-RateLimit-Remaining"))
+		assert.NotEmpty(t, rr.Header().Get("X-Ratelimit-Limit"))
+		assert.NotEmpty(t, rr.Header().Get("X-Ratelimit-Remaining"))
 	})
 }
 
@@ -166,8 +166,10 @@ func TestDistributedRateLimiter_BuildKey(t *testing.T) {
 	// 验证键构建
 	// buildKey 是私有方法，通过 Allow 的行为间接测试
 	ctx := context.Background()
-	_, _, _, err := limiter.Allow(ctx, "192.168.1.1")
+	allowed, _, _, err := limiter.Allow(ctx, "192.168.1.1")
 	require.NoError(t, err)
+	assert.True(t, allowed) // 第一个请求应该被允许
+	assert.True(t, allowed) // 第一个请求应该被允许
 
 	// 验证Redis中是否有正确的键
 	keys, err := redisClient.Keys(ctx, "myprefix:*").Result()

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -365,5 +366,120 @@ func TestAdminHandler_HandleEnableUser_NotFound(t *testing.T) {
 		adminHandler.HandleEnableUser(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+// ============================================================================
+// HandleDeleteUser 测试
+// ============================================================================
+
+func TestAdminHandler_HandleDeleteUser(t *testing.T) {
+	adminHandler, store := createTestAdminHandler()
+
+	t.Run("删除用户成功", func(t *testing.T) {
+		store.Reset()
+
+		// 添加测试用户
+		user := &model.User{
+			ID:        "test-user-id",
+			Email:     "test@example.com",
+			Status:    model.UserStatusActive,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+		store.AddUser(user)
+
+		req := httptest.NewRequest("DELETE", "/admin/users/test-user-id", nil)
+		req = addAdminContext(req, "admin@example.com")
+		w := httptest.NewRecorder()
+
+		// 使用 mux 设置变量
+		req = mux.SetURLVars(req, map[string]string{"id": "test-user-id"})
+
+		adminHandler.HandleDeleteUser(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("删除用户 - 缺少ID", func(t *testing.T) {
+		store.Reset()
+
+		req := httptest.NewRequest("DELETE", "/admin/users/", nil)
+		req = addAdminContext(req, "admin@example.com")
+		w := httptest.NewRecorder()
+
+		adminHandler.HandleDeleteUser(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("删除用户 - 用户不存在", func(t *testing.T) {
+		store.Reset()
+
+		req := httptest.NewRequest("DELETE", "/admin/users/nonexistent", nil)
+		req = addAdminContext(req, "admin@example.com")
+		req = mux.SetURLVars(req, map[string]string{"id": "nonexistent"})
+		w := httptest.NewRecorder()
+
+		adminHandler.HandleDeleteUser(w, req)
+
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+}
+
+// ============================================================================
+// HandleAuditLogs 测试
+// ============================================================================
+
+func TestAdminHandler_HandleAuditLogs(t *testing.T) {
+	adminHandler, store := createTestAdminHandler()
+
+	t.Run("获取审计日志 - 默认分页", func(t *testing.T) {
+		store.Reset()
+
+		// 添加测试审计日志
+		for i := 0; i < 5; i++ {
+			log := &model.AuditLog{
+				ID:        fmt.Sprintf("log-%d", i),
+				UserID:    "test-user",
+				EventType: "login",
+				IPAddress: "127.0.0.1",
+				Details:   "test details",
+				Timestamp: time.Now(),
+			}
+			_ = store.StoreAuditLog(context.Background(), log)
+		}
+
+		req := httptest.NewRequest("GET", "/admin/audit-logs", nil)
+		req = addAdminContext(req, "admin@example.com")
+		w := httptest.NewRecorder()
+
+		adminHandler.HandleAuditLogs(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("获取审计日志 - 自定义分页", func(t *testing.T) {
+		store.Reset()
+
+		req := httptest.NewRequest("GET", "/admin/audit-logs?page=2&pageSize=10", nil)
+		req = addAdminContext(req, "admin@example.com")
+		w := httptest.NewRecorder()
+
+		adminHandler.HandleAuditLogs(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("获取审计日志 - 按事件类型过滤", func(t *testing.T) {
+		store.Reset()
+
+		req := httptest.NewRequest("GET", "/admin/audit-logs?event_type=login", nil)
+		req = addAdminContext(req, "admin@example.com")
+		w := httptest.NewRecorder()
+
+		adminHandler.HandleAuditLogs(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
 	})
 }
