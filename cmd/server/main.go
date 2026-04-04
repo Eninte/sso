@@ -202,8 +202,11 @@ func initHandlers(cfg *config.Config, svc *Services) (*mux.Router, *middleware.R
 	router := mux.NewRouter()
 
 	// ==== 应用中间件 ====
-	// 创建限流器
-	rateLimiter := middleware.NewRateLimiter(cfg.RateLimitRequests, cfg.RateLimitWindow)
+	// 创建限流器并设置指标回调
+	rateLimiter := middleware.NewRateLimiter(cfg.RateLimitRequests, cfg.RateLimitWindow).
+		WithMetrics(func() {
+			svc.Metrics.Increment("security_rate_limit_total")
+		})
 
 	router.Use(middleware.SecurityHeaders)
 	router.Use(middleware.RequestID)
@@ -254,7 +257,9 @@ func initHandlers(cfg *config.Config, svc *Services) (*mux.Router, *middleware.R
 
 	// 受保护的端点 (需要认证)
 	protected := api.PathPrefix("").Subrouter()
-	protected.Use(middleware.AuthMiddlewareWithCache(svc.JWT, svc.Store, svc.Cache))
+	protected.Use(middleware.AuthMiddlewareWithMetrics(svc.JWT, svc.Store, svc.Cache, func() {
+		svc.Metrics.Increment("security_invalid_token_total")
+	}))
 	protected.HandleFunc("/userinfo", userInfoHandler.Handle).Methods("GET")
 	protected.HandleFunc("/authorize", authorizeHandler.HandleAuthorize).Methods("GET")
 	protected.HandleFunc("/authorize/approve", authorizeHandler.HandleApprove).Methods("POST")
@@ -268,7 +273,9 @@ func initHandlers(cfg *config.Config, svc *Services) (*mux.Router, *middleware.R
 
 	// 管理员端点 (需要认证 + 管理员角色)
 	admin := api.PathPrefix("/admin").Subrouter()
-	admin.Use(middleware.AuthMiddlewareWithCache(svc.JWT, svc.Store, svc.Cache))
+	admin.Use(middleware.AuthMiddlewareWithMetrics(svc.JWT, svc.Store, svc.Cache, func() {
+		svc.Metrics.Increment("security_invalid_token_total")
+	}))
 	admin.Use(middleware.RequireAdmin())
 	admin.HandleFunc("/health", adminHandler.HandleSystemHealth).Methods("GET")
 	admin.HandleFunc("/cleanup", adminHandler.HandleCleanup).Methods("POST")
@@ -335,7 +342,7 @@ func initLogger(env string) {
 //   - 如果失败，返回错误
 //
 // 重构原因: 从main中提取缓存初始化逻辑，降低主函数复杂度（17→<10）
-func initCache(cfg *config.Config) (cache.Cache, error) {
+func initCache(cfg *config.Config, metricsSvc *metrics.Service) (cache.Cache, error) {
 	opt := &cache.Option{
 		RedisEnable:   cfg.RedisEnable,
 		RedisHost:     cfg.RedisHost,
@@ -343,7 +350,25 @@ func initCache(cfg *config.Config) (cache.Cache, error) {
 		RedisDB:       cfg.RedisDB,
 		RedisPoolSize: cfg.RedisPoolSize,
 	}
-	return cache.NewCacheWithFallback(opt)
+	cacheSvc, err := cache.NewCacheWithFallback(opt)
+	if err != nil {
+		return nil, err
+	}
+
+	// 设置缓存指标回调
+	setMetrics := func(hitsFunc, missesFunc func()) {
+		if mc, ok := cacheSvc.(*cache.MemoryCache); ok {
+			mc.WithMetrics(hitsFunc, missesFunc)
+		} else if rc, ok := cacheSvc.(*cache.RedisCache); ok {
+			rc.WithMetrics(hitsFunc, missesFunc)
+		}
+	}
+	setMetrics(
+		func() { metricsSvc.Increment("cache_hits_total") },
+		func() { metricsSvc.Increment("cache_misses_total") },
+	)
+
+	return cacheSvc, nil
 }
 
 // initServices 初始化所有服务
@@ -377,11 +402,17 @@ func initServices(cfg *config.Config) (*Services, *sql.DB, error) {
 	// ==== 初始化存储层 ====
 	store := postgres.New(db)
 
+	// ==== 初始化指标服务 ====
+	metricsSvc := metrics.NewService()
+
 	// ==== 初始化缓存层 ====
-	cacheSvc, err := initCache(cfg)
+	cacheSvc, err := initCache(cfg, metricsSvc)
 	if err != nil {
 		slog.Warn("缓存初始化失败，使用内存缓存", "error", err)
-		cacheSvc = cache.NewMemoryCache()
+		cacheSvc = cache.NewMemoryCache().WithMetrics(
+			func() { metricsSvc.Increment("cache_hits_total") },
+			func() { metricsSvc.Increment("cache_misses_total") },
+		)
 	}
 	slog.Info("缓存层初始化完成")
 
@@ -444,9 +475,6 @@ func initServices(cfg *config.Config) (*Services, *sql.DB, error) {
 		slog.Error("初始化邮件服务失败", "error", err)
 		return nil, nil, fmt.Errorf("初始化邮件服务失败: %w", err)
 	}
-
-	// ==== 初始化指标服务 ====
-	metricsSvc := metrics.NewService()
 
 	// ==== 初始化Token生成服务 ====
 	tokenSvc := service.NewTokenService(jwtSvc, store)

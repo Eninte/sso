@@ -17,11 +17,12 @@ import (
 // RateLimiter 限流器
 // 使用令牌桶算法限制每个客户端的请求频率
 type RateLimiter struct {
-	mu      sync.Mutex
-	clients map[string]*clientInfo
-	limit   int           // 每个时间窗口的请求数
-	window  time.Duration // 时间窗口
-	done    chan struct{} // 停止cleanup goroutine
+	mu         sync.Mutex
+	clients    map[string]*clientInfo
+	limit      int           // 每个时间窗口的请求数
+	window     time.Duration // 时间窗口
+	done       chan struct{} // 停止cleanup goroutine
+	metricFunc func()        // 限流触发时的指标回调
 }
 
 // clientInfo 客户端信息
@@ -44,6 +45,13 @@ func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 	// 启动后台清理goroutine
 	go rl.cleanup()
 
+	return rl
+}
+
+// WithMetrics 设置指标回调函数
+// 当限流触发时会调用此函数
+func (rl *RateLimiter) WithMetrics(metricFunc func()) *RateLimiter {
+	rl.metricFunc = metricFunc
 	return rl
 }
 
@@ -75,6 +83,10 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 
 		// 检查是否超过限制
 		if !rl.Allow(clientIP) {
+			// 记录限流指标
+			if rl.metricFunc != nil {
+				rl.metricFunc()
+			}
 			w.Header().Set("Retry-After", rl.window.String())
 			writeError(w, http.StatusTooManyRequests, "请求过于频繁，请稍后再试")
 			return

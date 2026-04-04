@@ -53,7 +53,7 @@ const (
 // 验证请求中的Bearer Token
 // 将验证通过的用户信息添加到请求上下文
 func AuthMiddleware(jwtSvc *crypto.JWTService) func(http.Handler) http.Handler {
-	return authMiddlewareWithBlacklist(jwtSvc, nil)
+	return authMiddlewareWithBlacklist(jwtSvc, nil, nil)
 }
 
 // AuthMiddlewareWithStore 带数据库检查的认证中间件
@@ -67,13 +67,19 @@ func AuthMiddlewareWithStore(jwtSvc *crypto.JWTService, store store.Store) func(
 			return true
 		}
 		return tokenRecord.RevokedAt != nil
-	})
+	}, nil)
 }
 
 // AuthMiddlewareWithCache 带缓存层的认证中间件
 // 使用缓存存储Token撤销状态，减少数据库查询
 // 缓存TTL设置为与Access Token TTL一致，确保撤销状态及时更新
 func AuthMiddlewareWithCache(jwtSvc *crypto.JWTService, store store.Store, cacheSvc cache.Cache) func(http.Handler) http.Handler {
+	return AuthMiddlewareWithMetrics(jwtSvc, store, cacheSvc, nil)
+}
+
+// AuthMiddlewareWithMetrics 带指标采集的认证中间件
+// invalidTokenFunc: 当token无效时调用的指标回调函数
+func AuthMiddlewareWithMetrics(jwtSvc *crypto.JWTService, store store.Store, cacheSvc cache.Cache, invalidTokenFunc func()) func(http.Handler) http.Handler {
 	return authMiddlewareWithBlacklist(jwtSvc, func(token string) bool {
 		ctx := context.Background()
 		cacheKey := cache.TokenKey(token)
@@ -101,16 +107,19 @@ func AuthMiddlewareWithCache(jwtSvc *crypto.JWTService, store store.Store, cache
 		revoked = tokenRecord.RevokedAt != nil
 		_ = cacheSvc.Set(ctx, cacheKey, revoked, cache.TokenTTL)
 		return revoked
-	})
+	}, invalidTokenFunc)
 }
 
 // authMiddlewareWithBlacklist 内部实现
-func authMiddlewareWithBlacklist(jwtSvc *crypto.JWTService, blacklistedFunc func(token string) bool) func(http.Handler) http.Handler {
+func authMiddlewareWithBlacklist(jwtSvc *crypto.JWTService, blacklistedFunc func(token string) bool, invalidTokenFunc func()) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// 1. 从Authorization头获取Token
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
+				if invalidTokenFunc != nil {
+					invalidTokenFunc()
+				}
 				writeAdminError(w, http.StatusUnauthorized, "缺少Authorization头")
 				return
 			}
@@ -119,6 +128,9 @@ func authMiddlewareWithBlacklist(jwtSvc *crypto.JWTService, blacklistedFunc func
 			// 格式: "Bearer <token>"
 			parts := strings.SplitN(authHeader, " ", 2)
 			if len(parts) != 2 || parts[0] != "Bearer" {
+				if invalidTokenFunc != nil {
+					invalidTokenFunc()
+				}
 				writeAdminError(w, http.StatusUnauthorized, "无效的Authorization格式")
 				return
 			}
@@ -127,6 +139,9 @@ func authMiddlewareWithBlacklist(jwtSvc *crypto.JWTService, blacklistedFunc func
 
 			// 3. 检查黑名单
 			if blacklistedFunc != nil && blacklistedFunc(token) {
+				if invalidTokenFunc != nil {
+					invalidTokenFunc()
+				}
 				writeAdminError(w, http.StatusUnauthorized, "Token已失效")
 				return
 			}
@@ -134,6 +149,9 @@ func authMiddlewareWithBlacklist(jwtSvc *crypto.JWTService, blacklistedFunc func
 			// 4. 验证Token
 			claims, err := jwtSvc.ValidateAccessToken(token)
 			if err != nil {
+				if invalidTokenFunc != nil {
+					invalidTokenFunc()
+				}
 				writeAdminError(w, http.StatusUnauthorized, "无效或过期的Token")
 				return
 			}

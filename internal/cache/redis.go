@@ -84,9 +84,11 @@ func ClientKey(clientID string) string {
 // MemoryCache 内存缓存实现
 // 使用map存储缓存数据，支持并发安全和自动过期清理
 type MemoryCache struct {
-	mu     sync.RWMutex
-	data   map[string]cacheItem
-	stopCh chan struct{} // 用于停止清理goroutine
+	mu          sync.RWMutex
+	data        map[string]cacheItem
+	stopCh      chan struct{} // 用于停止清理goroutine
+	onCacheHit  func()        // 缓存命中时的回调
+	onCacheMiss func()        // 缓存未命中时的回调
 }
 
 // cacheItem 缓存项
@@ -106,6 +108,13 @@ func NewMemoryCache() *MemoryCache {
 	return cache
 }
 
+// WithMetrics 设置指标回调函数
+func (c *MemoryCache) WithMetrics(onHit, onMiss func()) *MemoryCache {
+	c.onCacheHit = onHit
+	c.onCacheMiss = onMiss
+	return c
+}
+
 // Get 获取缓存值
 // 如果key不存在或已过期，返回ErrCacheMiss
 func (c *MemoryCache) Get(ctx context.Context, key string, dest interface{}) error {
@@ -114,6 +123,9 @@ func (c *MemoryCache) Get(ctx context.Context, key string, dest interface{}) err
 	c.mu.RUnlock()
 
 	if !exists {
+		if c.onCacheMiss != nil {
+			c.onCacheMiss()
+		}
 		return ErrCacheMiss
 	}
 
@@ -125,14 +137,23 @@ func (c *MemoryCache) Get(ctx context.Context, key string, dest interface{}) err
 			delete(c.data, key)
 		}
 		c.mu.Unlock()
+		if c.onCacheMiss != nil {
+			c.onCacheMiss()
+		}
 		return ErrCacheMiss
 	}
 
 	// 检查是否是空值缓存（缓存穿透防护）
 	if len(item.value) == len(nilCacheValue) && string(item.value) == string(nilCacheValue) {
+		if c.onCacheMiss != nil {
+			c.onCacheMiss()
+		}
 		return ErrCacheMiss
 	}
 
+	if c.onCacheHit != nil {
+		c.onCacheHit()
+	}
 	return json.Unmarshal(item.value, dest)
 }
 
@@ -274,7 +295,9 @@ var (
 // RedisCache Redis缓存实现
 // 使用go-redis客户端，封装常用缓存操作
 type RedisCache struct {
-	client *redis.Client
+	client      *redis.Client
+	onCacheHit  func() // 缓存命中时的回调
+	onCacheMiss func() // 缓存未命中时的回调
 }
 
 // NewRedisCache 创建Redis缓存实例
@@ -298,6 +321,13 @@ func NewRedisCache(host, password string, db int) (*RedisCache, error) {
 	}
 
 	return &RedisCache{client: client}, nil
+}
+
+// WithMetrics 设置指标回调函数
+func (c *RedisCache) WithMetrics(onHit, onMiss func()) *RedisCache {
+	c.onCacheHit = onHit
+	c.onCacheMiss = onMiss
+	return c
 }
 
 // NewRedisCacheWithOptions 使用自定义选项创建Redis缓存实例
@@ -324,15 +354,24 @@ func (c *RedisCache) Get(ctx context.Context, key string, dest interface{}) erro
 	val, err := c.client.Get(ctx, key).Bytes()
 	if err != nil {
 		if err == redis.Nil {
+			if c.onCacheMiss != nil {
+				c.onCacheMiss()
+			}
 			return ErrCacheMiss
 		}
 		return err
 	}
 
 	if len(val) == len(nilCacheValue) && string(val) == string(nilCacheValue) {
+		if c.onCacheMiss != nil {
+			c.onCacheMiss()
+		}
 		return ErrCacheMiss
 	}
 
+	if c.onCacheHit != nil {
+		c.onCacheHit()
+	}
 	return json.Unmarshal(val, dest)
 }
 
