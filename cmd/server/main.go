@@ -346,6 +346,7 @@ func initCache(cfg *config.Config, metricsSvc *metrics.Service) (cache.Cache, er
 	opt := &cache.Option{
 		RedisEnable:   cfg.RedisEnable,
 		RedisHost:     cfg.RedisHost,
+		RedisPort:     cfg.RedisPort,
 		RedisPassword: cfg.RedisPassword,
 		RedisDB:       cfg.RedisDB,
 		RedisPoolSize: cfg.RedisPoolSize,

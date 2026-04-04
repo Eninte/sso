@@ -304,9 +304,9 @@ type RedisCache struct {
 // host: Redis主机地址 (如 "localhost")
 // password: Redis密码 (空字符串表示无需认证)
 // db: Redis数据库编号 (0-15)
-func NewRedisCache(host, password string, db int) (*RedisCache, error) {
+func NewRedisCache(host, port, password string, db int) (*RedisCache, error) {
 	client := redis.NewClient(&redis.Options{
-		Addr:         host + ":6379",
+		Addr:         host + ":" + port,
 		Password:     password,
 		DB:           db,
 		PoolSize:     10,
@@ -456,6 +456,7 @@ func (c *RedisCache) Close() error {
 type Option struct {
 	RedisEnable      bool
 	RedisHost        string
+	RedisPort        string
 	RedisPassword    string
 	RedisDB          int
 	RedisPoolSize    int
@@ -469,7 +470,7 @@ func NewCache(opt *Option) (Cache, error) {
 		return NewMemoryCache(), nil
 	}
 
-	redisCache, err := NewRedisCache(opt.RedisHost, opt.RedisPassword, opt.RedisDB)
+	redisCache, err := NewRedisCache(opt.RedisHost, opt.RedisPort, opt.RedisPassword, opt.RedisDB)
 	if err != nil {
 		return nil, fmt.Errorf("create redis cache failed: %w", err)
 	}
@@ -485,7 +486,7 @@ func NewCacheWithFallback(opt *Option) (Cache, error) {
 		return NewMemoryCache(), nil
 	}
 
-	redisCache, err := NewRedisCache(opt.RedisHost, opt.RedisPassword, opt.RedisDB)
+	redisCache, err := NewRedisCache(opt.RedisHost, opt.RedisPort, opt.RedisPassword, opt.RedisDB)
 	if err != nil {
 		slog.Warn("redis connection failed, fallback to memory cache", "error", err)
 		return NewMemoryCache(), nil

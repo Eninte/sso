@@ -198,7 +198,7 @@ func TestRedisCache_Close(t *testing.T) {
 		require.NoError(t, err)
 		defer mr.Close()
 
-		rc, err := cache.NewRedisCache(mr.Host(), "", 0)
+		rc, err := cache.NewRedisCache(mr.Host(), mr.Port(), "", 0)
 		require.NoError(t, err)
 
 		err = rc.Close()
@@ -247,6 +247,7 @@ func TestNewCache_RedisSuccess(t *testing.T) {
 		opt := &cache.Option{
 			RedisEnable: true,
 			RedisHost:   mr.Host(),
+			RedisPort:   mr.Port(),
 			RedisDB:     0,
 		}
 
@@ -274,6 +275,7 @@ func TestNewCacheWithFallback_RedisSuccess(t *testing.T) {
 		opt := &cache.Option{
 			RedisEnable: true,
 			RedisHost:   mr.Host(),
+			RedisPort:   mr.Port(),
 			RedisDB:     0,
 		}
 
@@ -404,7 +406,7 @@ func TestRedisCache_CloseError(t *testing.T) {
 		mr, err := miniredis.Run()
 		require.NoError(t, err)
 
-		rc, err := cache.NewRedisCache(mr.Host(), "", 0)
+		rc, err := cache.NewRedisCache(mr.Host(), mr.Port(), "", 0)
 		require.NoError(t, err)
 
 		err = rc.Close()
