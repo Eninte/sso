@@ -45,6 +45,10 @@ __pycache__/
 # 数据库
 /data/
 
+# 压测数据与结果
+/loadtest/data/
+/loadtest/results/
+
 # macOS
 .DS_Store
 

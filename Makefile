@@ -211,6 +211,130 @@ bench-report: ## 生成基准测试报告
 	@echo "报告已生成: docs/reports/performance-benchmark.md"
 
 # ============================================================================
+# 压力测试 (k6)
+# ============================================================================
+K6_LOADTEST_DIR=./loadtest
+K6_DATA_DIR=$(K6_LOADTEST_DIR)/data
+K6_RESULTS_DIR=$(K6_LOADTEST_DIR)/results
+K6 ?= k6
+BASE_URL ?= http://localhost:9090
+
+.PHONY: loadtest-prepare
+loadtest-prepare: ## 准备压测数据 (生成用户池、Token池等)
+	@bash scripts/prepare-loadtest-data.sh
+
+.PHONY: loadtest-s1
+loadtest-s1: ## S1: 公开读接口基线
+	@mkdir -p $(K6_RESULTS_DIR)
+	$(K6) run --out json=$(K6_RESULTS_DIR)/s1_$(shell date +%Y%m%d_%H%M%S).json \
+		-e BASE_URL=$(BASE_URL) \
+		$(K6_LOADTEST_DIR)/scenarios/s1_public_read.js
+
+.PHONY: loadtest-s2
+loadtest-s2: ## S2: 登录单接口 (需要 loadtest/data/users.json)
+	@mkdir -p $(K6_RESULTS_DIR)
+	@test -f $(K6_DATA_DIR)/users.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
+	$(K6) run --out json=$(K6_RESULTS_DIR)/s2_$(shell date +%Y%m%d_%H%M%S).json \
+		-e BASE_URL=$(BASE_URL) \
+		-e USER_POOL_FILE=$(K6_DATA_DIR)/users.json \
+		$(K6_LOADTEST_DIR)/scenarios/s2_login.js
+
+.PHONY: loadtest-s3
+loadtest-s3: ## S3: 注册单接口
+	@mkdir -p $(K6_RESULTS_DIR)
+	$(K6) run --out json=$(K6_RESULTS_DIR)/s3_$(shell date +%Y%m%d_%H%M%S).json \
+		-e BASE_URL=$(BASE_URL) \
+		$(K6_LOADTEST_DIR)/scenarios/s3_register.js
+
+.PHONY: loadtest-s4
+loadtest-s4: ## S4: Refresh Token 单接口 (需要 loadtest/data/refresh_tokens.json)
+	@mkdir -p $(K6_RESULTS_DIR)
+	@test -f $(K6_DATA_DIR)/refresh_tokens.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
+	$(K6) run --out json=$(K6_RESULTS_DIR)/s4_$(shell date +%Y%m%d_%H%M%S).json \
+		-e BASE_URL=$(BASE_URL) \
+		-e REFRESH_TOKEN_POOL_FILE=$(K6_DATA_DIR)/refresh_tokens.json \
+		$(K6_LOADTEST_DIR)/scenarios/s4_refresh_token.js
+
+.PHONY: loadtest-s5
+loadtest-s5: ## S5: UserInfo 高频读取 (需要 loadtest/data/access_tokens.json)
+	@mkdir -p $(K6_RESULTS_DIR)
+	@test -f $(K6_DATA_DIR)/access_tokens.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
+	$(K6) run --out json=$(K6_RESULTS_DIR)/s5_$(shell date +%Y%m%d_%H%M%S).json \
+		-e BASE_URL=$(BASE_URL) \
+		-e ACCESS_TOKEN_POOL_FILE=$(K6_DATA_DIR)/access_tokens.json \
+		$(K6_LOADTEST_DIR)/scenarios/s5_userinfo.js
+
+.PHONY: loadtest-s6
+loadtest-s6: ## S6: OAuth 公共客户端完整流程 (需要 loadtest/data/users.json)
+	@mkdir -p $(K6_RESULTS_DIR)
+	@test -f $(K6_DATA_DIR)/users.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
+	$(K6) run --out json=$(K6_RESULTS_DIR)/s6_$(shell date +%Y%m%d_%H%M%S).json \
+		-e BASE_URL=$(BASE_URL) \
+		-e USER_POOL_FILE=$(K6_DATA_DIR)/users.json \
+		$(K6_LOADTEST_DIR)/scenarios/s6_oauth_public.js
+
+.PHONY: loadtest-s7
+loadtest-s7: ## S7: OAuth 机密客户端完整流程 (需要 loadtest/data/users.json)
+	@mkdir -p $(K6_RESULTS_DIR)
+	@test -f $(K6_DATA_DIR)/users.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
+	$(K6) run --out json=$(K6_RESULTS_DIR)/s7_$(shell date +%Y%m%d_%H%M%S).json \
+		-e BASE_URL=$(BASE_URL) \
+		-e USER_POOL_FILE=$(K6_DATA_DIR)/users.json \
+		$(K6_LOADTEST_DIR)/scenarios/s7_oauth_confidential.js
+
+.PHONY: loadtest-s8
+loadtest-s8: ## S8: 混合流量 (需要 loadtest/data/{users,access_tokens,refresh_tokens,admin_tokens}.json)
+	@mkdir -p $(K6_RESULTS_DIR)
+	@test -f $(K6_DATA_DIR)/users.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
+	@test -f $(K6_DATA_DIR)/access_tokens.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
+	@test -f $(K6_DATA_DIR)/refresh_tokens.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
+	$(K6) run --out json=$(K6_RESULTS_DIR)/s8_$(shell date +%Y%m%d_%H%M%S).json \
+		-e BASE_URL=$(BASE_URL) \
+		-e USER_POOL_FILE=$(K6_DATA_DIR)/users.json \
+		-e ACCESS_TOKEN_POOL_FILE=$(K6_DATA_DIR)/access_tokens.json \
+		-e REFRESH_TOKEN_POOL_FILE=$(K6_DATA_DIR)/refresh_tokens.json \
+		-e ADMIN_TOKEN_POOL_FILE=$(K6_DATA_DIR)/admin_tokens.json \
+		$(K6_LOADTEST_DIR)/scenarios/s8_mixed_traffic.js
+
+.PHONY: loadtest-s9
+loadtest-s9: ## S9: 安全保护专项 (需要 loadtest/data/{users,malicious_users}.json)
+	@mkdir -p $(K6_RESULTS_DIR)
+	@test -f $(K6_DATA_DIR)/users.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
+	@test -f $(K6_DATA_DIR)/malicious_users.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
+	$(K6) run --out json=$(K6_RESULTS_DIR)/s9_$(shell date +%Y%m%d_%H%M%S).json \
+		-e BASE_URL=$(BASE_URL) \
+		-e USER_POOL_FILE=$(K6_DATA_DIR)/users.json \
+		-e MALICIOUS_POOL_FILE=$(K6_DATA_DIR)/malicious_users.json \
+		$(K6_LOADTEST_DIR)/scenarios/s9_security.js
+
+.PHONY: loadtest-s10
+loadtest-s10: ## S10: 突刺与恢复 (需要 loadtest/data/access_tokens.json)
+	@mkdir -p $(K6_RESULTS_DIR)
+	@test -f $(K6_DATA_DIR)/access_tokens.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
+	$(K6) run --out json=$(K6_RESULTS_DIR)/s10_$(shell date +%Y%m%d_%H%M%S).json \
+		-e BASE_URL=$(BASE_URL) \
+		-e ACCESS_TOKEN_POOL_FILE=$(K6_DATA_DIR)/access_tokens.json \
+		$(K6_LOADTEST_DIR)/scenarios/s10_spike.js
+
+.PHONY: loadtest-soak
+loadtest-soak: ## Soak Test: 长稳态测试 (需要 loadtest/data/{users,access_tokens,refresh_tokens}.json)
+	@mkdir -p $(K6_RESULTS_DIR)
+	@test -f $(K6_DATA_DIR)/users.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
+	@test -f $(K6_DATA_DIR)/access_tokens.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
+	@test -f $(K6_DATA_DIR)/refresh_tokens.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
+	$(K6) run --out json=$(K6_RESULTS_DIR)/soak_$(shell date +%Y%m%d_%H%M%S).json \
+		-e BASE_URL=$(BASE_URL) \
+		-e USER_POOL_FILE=$(K6_DATA_DIR)/users.json \
+		-e ACCESS_TOKEN_POOL_FILE=$(K6_DATA_DIR)/access_tokens.json \
+		-e REFRESH_TOKEN_POOL_FILE=$(K6_DATA_DIR)/refresh_tokens.json \
+		$(K6_LOADTEST_DIR)/scenarios/soak_test.js
+
+.PHONY: loadtest-clean
+loadtest-clean: ## 清理压测数据和结果
+	@rm -rf $(K6_DATA_DIR) $(K6_RESULTS_DIR)
+	@echo "✓ 压测数据已清理"
+
+# ============================================================================
 # 代码质量分析（新增 2026-03-31）
 # ============================================================================
 
