@@ -22,9 +22,9 @@ go install golang.org/x/vuln/cmd/govulncheck@latest
 ### 2. 创建分支
 
 ```bash
-# 从develop分支创建功能分支
-git checkout develop
-git pull origin develop
+# 从main分支创建功能分支
+git checkout main
+git pull origin main
 git checkout -b feature/your-feature-name
 ```
 
@@ -140,7 +140,7 @@ test(service): 添加用户服务单元测试
 1. 自动化检查通过（CI/CD）
 2. 至少1位审查者批准
 3. 解决所有审查意见
-4. 合并到develop分支
+4. 合并到main分支
 
 ## 报告问题
 
@@ -162,7 +162,7 @@ test(service): 添加用户服务单元测试
 
 ## 发布流程
 
-1. 从develop创建release分支
+1. 从main创建release分支
 2. 更新版本号和CHANGELOG
 3. 测试通过后合并到main
 4. 创建Git Tag

@@ -1,2 +1,0 @@
-gocyclo: could not get file info for path "./...": stat ./...: no such file or directory
-Average: NaN

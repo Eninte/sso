@@ -13,7 +13,7 @@
 
 ### 报告流程
 
-1. **发送邮件**：security@example.com
+1. **发送邮件**：ocean@eninte.com
 2. **加密通信**：可使用PGP加密（公钥见下方）
 3. **提供详情**：
    - 漏洞描述
@@ -153,5 +153,5 @@ make test-security
 
 ## 联系方式
 
-- 安全邮箱：security@example.com
+- 安全邮箱：ocean@eninte.com
 - 响应时间：工作日24小时内
