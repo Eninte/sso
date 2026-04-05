@@ -1,5 +1,7 @@
-# 二进制文件
+# 构建产物
 /bin/
+/server
+/service.test
 *.exe
 
 # 环境文件
@@ -21,7 +23,9 @@
 *.swo
 *~
 
-# 测试覆盖率
+# 测试覆盖率（所有变体）
+*_coverage.out
+coverage_*.out
 coverage.out
 coverage.html
 test-results.xml
@@ -55,13 +59,18 @@ __pycache__/
 # Windows
 Thumbs.db
 
-# 工具产物
+# AI工具配置
 .opencode/
 .kilo/
+.kiro/
+.kilocode/
+.lingma/
+.qoder/
+.trae/
 
 # 启动脚本（含环境敏感信息）
 start_server.sh
 
 # 集成测试结果与报告
 integration-test-results.xml
-reports/
+/reports/
