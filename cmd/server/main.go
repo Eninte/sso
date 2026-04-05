@@ -403,6 +403,16 @@ func initServices(cfg *config.Config) (*Services, *sql.DB, error) {
 	// ==== 初始化存储层 ====
 	store := postgres.New(db)
 
+	// ==== 设置MFA恢复码HMAC密钥 ====
+	if cfg.MFARecoveryHMACKey == "" {
+		if cfg.Env == "production" {
+			slog.Error("MFA_RECOVERY_HMAC_KEY未设置，生产环境必须配置")
+			return nil, nil, fmt.Errorf("MFA_RECOVERY_HMAC_KEY is required in production")
+		}
+		slog.Warn("MFA_RECOVERY_HMAC_KEY未设置（开发环境允许，生产环境会拒绝启动）")
+	}
+	postgres.SetMFARecoveryHMACKey(cfg.MFARecoveryHMACKey)
+
 	// ==== 初始化指标服务 ====
 	metricsSvc := metrics.NewService()
 

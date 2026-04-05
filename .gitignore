@@ -54,3 +54,7 @@ __pycache__/
 
 # Windows
 Thumbs.db
+
+# 工具产物
+.opencode/
+.kilo/

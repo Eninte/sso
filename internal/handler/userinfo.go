@@ -3,11 +3,11 @@
 package handler
 
 import (
-	"context"
 	"log/slog"
 	"net/http"
 	"time"
 
+	"github.com/your-org/sso/internal/cache"
 	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/middleware"
 	"github.com/your-org/sso/internal/model"
@@ -21,18 +21,11 @@ import (
 // UserInfoHandler 用户信息处理器
 type UserInfoHandler struct {
 	store store.Store
-	cache Cache
-}
-
-// Cache 缓存接口（与internal/cache/redis.go的Cache接口一致）
-type Cache interface {
-	Get(ctx context.Context, key string, dest interface{}) error
-	Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error
-	Delete(ctx context.Context, key string) error
+	cache cache.Cache
 }
 
 // NewUserInfoHandler 创建用户信息处理器
-func NewUserInfoHandler(store store.Store, cache ...Cache) *UserInfoHandler {
+func NewUserInfoHandler(store store.Store, cache ...cache.Cache) *UserInfoHandler {
 	h := &UserInfoHandler{store: store}
 	if len(cache) > 0 {
 		h.cache = cache[0]

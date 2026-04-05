@@ -24,6 +24,9 @@ import (
 
 func getTestDB(t *testing.T) *sql.DB {
 	t.Helper()
+	if testing.Short() {
+		t.Skip("跳过集成测试：-short 模式")
+	}
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		t.Skip("跳过集成测试：未设置DATABASE_URL环境变量")

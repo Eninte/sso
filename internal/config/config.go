@@ -68,11 +68,12 @@ type Config struct {
 	JWTTransitionPubKeyPaths string        // 轮换期间的旧公钥路径（逗号分隔）
 
 	// 安全配置
-	BcryptCost        int           // bcrypt成本因子
-	RateLimitRequests int           // 限流请求数
-	RateLimitWindow   time.Duration // 限流时间窗口
-	MaxLoginAttempts  int           // 最大登录失败次数
-	LockoutDuration   time.Duration // 账户锁定时长
+	BcryptCost         int           // bcrypt成本因子
+	RateLimitRequests  int           // 限流请求数
+	RateLimitWindow    time.Duration // 限流时间窗口
+	MaxLoginAttempts   int           // 最大登录失败次数
+	LockoutDuration    time.Duration // 账户锁定时长
+	MFARecoveryHMACKey string        // MFA恢复码HMAC密钥（生产环境必须设置）
 
 	// 邮件配置
 	SMTPHost     string // SMTP服务器地址
@@ -151,11 +152,12 @@ func Load() (*Config, error) {
 		// 推荐值: 12-14，值越高越安全但性能越低
 		// cost=12: ~200ms, cost=13: ~400ms, cost=14: ~800ms
 		// 生产环境必须 >= 12
-		BcryptCost:        getEnvInt("BCRYPT_COST", 12),
-		RateLimitRequests: getEnvInt("RATE_LIMIT_REQUESTS", 100),
-		RateLimitWindow:   getEnvDuration("RATE_LIMIT_WINDOW", 1*time.Minute),
-		MaxLoginAttempts:  getEnvInt("MAX_LOGIN_ATTEMPTS", 5),
-		LockoutDuration:   getEnvDuration("LOCKOUT_DURATION", 30*time.Minute),
+		BcryptCost:         getEnvInt("BCRYPT_COST", 12),
+		RateLimitRequests:  getEnvInt("RATE_LIMIT_REQUESTS", 100),
+		RateLimitWindow:    getEnvDuration("RATE_LIMIT_WINDOW", 1*time.Minute),
+		MaxLoginAttempts:   getEnvInt("MAX_LOGIN_ATTEMPTS", 5),
+		LockoutDuration:    getEnvDuration("LOCKOUT_DURATION", 30*time.Minute),
+		MFARecoveryHMACKey: getEnv("MFA_RECOVERY_HMAC_KEY", ""),
 
 		// 邮件配置
 		SMTPHost:     getEnv("SMTP_HOST", "localhost"),

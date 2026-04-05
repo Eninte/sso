@@ -6,23 +6,48 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"fmt"
-	"os"
+	"sync"
 )
 
-// recoveryCodeHMACKey 恢复码HMAC密钥（从环境变量读取，默认为固定值）
-func recoveryCodeHMACKey() []byte {
-	key := os.Getenv("MFA_RECOVERY_HMAC_KEY")
-	if key == "" {
-		key = "sso-mfa-recovery-default-key-change-in-production"
+// mfaRecoveryHMACKey HMAC密钥（通过SetMFARecoveryHMACKey设置）
+var (
+	mfaRecoveryHMACKey   []byte
+	mfaRecoveryHMACKeyMu sync.RWMutex
+)
+
+// SetMFARecoveryHMACKey 设置MFA恢复码HMAC密钥
+// 必须在服务启动时调用，生产环境必须设置强密钥
+func SetMFARecoveryHMACKey(key string) {
+	mfaRecoveryHMACKeyMu.Lock()
+	defer mfaRecoveryHMACKeyMu.Unlock()
+	mfaRecoveryHMACKey = []byte(key)
+}
+
+// getMFARecoveryHMACKey 获取HMAC密钥的副本
+// 返回切片副本，避免并发调用SetMFARecoveryHMACKey时的竞态条件
+// 如果未设置，返回nil（调用方应检查）
+func getMFARecoveryHMACKey() []byte {
+	mfaRecoveryHMACKeyMu.RLock()
+	defer mfaRecoveryHMACKeyMu.RUnlock()
+	if mfaRecoveryHMACKey == nil {
+		return nil
 	}
-	return []byte(key)
+	// 返回副本，避免返回切片引用导致并发安全问题
+	keyCopy := make([]byte, len(mfaRecoveryHMACKey))
+	copy(keyCopy, mfaRecoveryHMACKey)
+	return keyCopy
 }
 
 // hashRecoveryCode 使用HMAC-SHA256哈希恢复码，实现O(1)查找
-func hashRecoveryCode(code string) string {
-	mac := hmac.New(sha256.New, recoveryCodeHMACKey())
+// 如果HMAC密钥未设置，返回错误
+func hashRecoveryCode(code string) (string, error) {
+	key := getMFARecoveryHMACKey()
+	if len(key) == 0 {
+		return "", fmt.Errorf("MFA recovery HMAC key not set, configure MFA_RECOVERY_HMAC_KEY environment variable")
+	}
+	mac := hmac.New(sha256.New, key)
 	mac.Write([]byte(code))
-	return fmt.Sprintf("%x", mac.Sum(nil))
+	return fmt.Sprintf("%x", mac.Sum(nil)), nil
 }
 
 // ============================================================================
@@ -89,12 +114,15 @@ func (s *Store) VerifyAndUseMFARecoveryCode(ctx context.Context, userID, code st
 	defer cancel()
 
 	// 使用HMAC-SHA256哈希输入的恢复码，直接数据库匹配
-	codeHash := hashRecoveryCode(code)
+	codeHash, err := hashRecoveryCode(code)
+	if err != nil {
+		return false, fmt.Errorf("hash recovery code failed: %w", err)
+	}
 
 	// 直接匹配哈希，O(1)操作
 	var exists bool
 	query := `SELECT EXISTS(SELECT 1 FROM mfa_recovery_codes WHERE user_id = $1 AND code_hash = $2 AND used_at IS NULL)`
-	err := s.db.QueryRowContext(ctx, query, userID, codeHash).Scan(&exists)
+	err = s.db.QueryRowContext(ctx, query, userID, codeHash).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("query recovery code failed: %w", err)
 	}
