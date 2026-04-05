@@ -128,6 +128,14 @@ func (s *AdminService) DisableUser(ctx context.Context, userID string) error {
 		slog.Warn("撤销用户Token失败", "error", err, "user_id", userID)
 	}
 
+	// 失效缓存，确保用户状态变更立即生效
+	if s.cache != nil {
+		cacheKey := cache.UserIDKey(userID)
+		if err := s.cache.Delete(ctx, cacheKey); err != nil {
+			slog.Warn("失效用户缓存失败", "error", err, "user_id", userID)
+		}
+	}
+
 	return nil
 }
 
@@ -147,6 +155,14 @@ func (s *AdminService) EnableUser(ctx context.Context, userID string) error {
 		return serviceutil.WrapServiceError("更新用户", err)
 	}
 
+	// 失效缓存，确保用户状态变更立即生效
+	if s.cache != nil {
+		cacheKey := cache.UserIDKey(userID)
+		if err := s.cache.Delete(ctx, cacheKey); err != nil {
+			slog.Warn("失效用户缓存失败", "error", err, "user_id", userID)
+		}
+	}
+
 	return nil
 }
 
@@ -158,7 +174,19 @@ func (s *AdminService) DeleteUser(ctx context.Context, userID string) error {
 	}
 
 	// 删除用户
-	return s.store.Delete(ctx, userID)
+	if err := s.store.Delete(ctx, userID); err != nil {
+		return serviceutil.WrapServiceError("删除用户", err)
+	}
+
+	// 失效缓存，确保删除后立即返回404
+	if s.cache != nil {
+		cacheKey := cache.UserIDKey(userID)
+		if err := s.cache.Delete(ctx, cacheKey); err != nil {
+			slog.Warn("失效用户缓存失败", "error", err, "user_id", userID)
+		}
+	}
+
+	return nil
 }
 
 // GetAuditLogs 获取审计日志

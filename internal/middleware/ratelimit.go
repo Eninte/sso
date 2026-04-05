@@ -11,18 +11,27 @@ import (
 )
 
 // ============================================================================
-// RateLimiter 限流器
+// RateLimiter 限流器（分片锁优化）
 // ============================================================================
+
+// numShards 分片数量（2的幂，便于位运算）
+const numShards = 64
 
 // RateLimiter 限流器
 // 使用令牌桶算法限制每个客户端的请求频率
+// 优化：使用分片锁减少高并发下的锁竞争
 type RateLimiter struct {
-	mu         sync.Mutex
-	clients    map[string]*clientInfo
+	shards     [numShards]*shard
 	limit      int           // 每个时间窗口的请求数
 	window     time.Duration // 时间窗口
 	done       chan struct{} // 停止cleanup goroutine
 	metricFunc func()        // 限流触发时的指标回调
+}
+
+// shard 分片
+type shard struct {
+	mu      sync.Mutex
+	clients map[string]*clientInfo
 }
 
 // clientInfo 客户端信息
@@ -36,16 +45,28 @@ type clientInfo struct {
 // window: 时间窗口长度
 func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 	rl := &RateLimiter{
-		clients: make(map[string]*clientInfo),
-		limit:   limit,
-		window:  window,
-		done:    make(chan struct{}),
+		limit:  limit,
+		window: window,
+		done:   make(chan struct{}),
+	}
+	for i := 0; i < numShards; i++ {
+		rl.shards[i] = &shard{clients: make(map[string]*clientInfo)}
 	}
 
 	// 启动后台清理goroutine
 	go rl.cleanup()
 
 	return rl
+}
+
+// getShard 根据IP获取对应的分片
+func (rl *RateLimiter) getShard(clientIP string) *shard {
+	// 使用简单的哈希分片
+	h := uint64(0)
+	for i := 0; i < len(clientIP); i++ {
+		h = h*31 + uint64(clientIP[i])
+	}
+	return rl.shards[h&(numShards-1)]
 }
 
 // WithMetrics 设置指标回调函数
@@ -125,15 +146,16 @@ func (rl *RateLimiter) Allow(clientIP string) bool {
 		return true
 	}
 
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
+	shard := rl.getShard(clientIP)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
 
 	now := time.Now()
-	client, exists := rl.clients[clientIP]
+	client, exists := shard.clients[clientIP]
 
 	if !exists {
 		// 新客户端，创建记录
-		rl.clients[clientIP] = &clientInfo{
+		shard.clients[clientIP] = &clientInfo{
 			tokens:    rl.limit - 1,
 			lastReset: now,
 		}
@@ -168,15 +190,17 @@ func (rl *RateLimiter) cleanup() {
 		case <-rl.done:
 			return
 		case <-ticker.C:
-			rl.mu.Lock()
 			now := time.Now()
-			for ip, client := range rl.clients {
-				// 清理超过2个时间窗口未活动的客户端
-				if now.Sub(client.lastReset) >= rl.window*2 {
-					delete(rl.clients, ip)
+			for i := 0; i < numShards; i++ {
+				rl.shards[i].mu.Lock()
+				for ip, client := range rl.shards[i].clients {
+					// 清理超过2个时间窗口未活动的客户端
+					if now.Sub(client.lastReset) >= rl.window*2 {
+						delete(rl.shards[i].clients, ip)
+					}
 				}
+				rl.shards[i].mu.Unlock()
 			}
-			rl.mu.Unlock()
 		}
 	}
 }

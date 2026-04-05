@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -188,11 +189,12 @@ func (s *AuthService) Register(ctx context.Context, req *model.RegisterRequest) 
 		return nil, serviceutil.WrapServiceError("创建用户", err)
 	}
 
-	// 5. 发送验证邮件
-	if err := s.sendVerificationEmail(ctx, user); err != nil {
-		// 记录错误但不阻止注册
-		slog.Warn("发送验证邮件失败", "error", err, "userID", user.ID)
-	}
+	// 5. 异步发送验证邮件（不阻塞注册响应）
+	go func() {
+		if err := s.sendVerificationEmail(context.Background(), user); err != nil {
+			slog.Warn("发送验证邮件失败", "error", err, "userID", user.ID)
+		}
+	}()
 
 	// 记录注册成功指标
 	s.incrementMetric("auth_register_total")
@@ -282,7 +284,8 @@ func (s *AuthService) validateUserCredentials(ctx context.Context, email, passwo
 
 	// 验证密码
 	if err := s.passwordSvc.VerifyPassword(user.PasswordHash, password); err != nil {
-		return nil, ErrInvalidCredentials
+		// 密码错误时仍返回user对象，避免handleLoginFailure重复查询DB
+		return user, ErrInvalidCredentials
 	}
 
 	return user, nil
@@ -300,26 +303,19 @@ func (s *AuthService) validateUserCredentials(ctx context.Context, email, passwo
 //
 // 参数:
 //   - ctx: 请求上下文
-//   - email: 用户邮箱（用于查询用户）
+//   - user: 已查询的用户对象（避免重复查询DB）
 //   - auditCtx: 审计上下文（可以为nil）
 //
 // 返回:
 //   - 无返回值，所有错误都被记录而不返回
 //   - 确保登录失败处理不会影响主流程
 //
-// 重构原因: 从LoginWithAudit中提取失败处理逻辑，降低主函数复杂度（21→<10）
-func (s *AuthService) handleLoginFailure(ctx context.Context, email string, auditCtx *AuditContext) {
-	// 尝试获取用户以记录失败尝试
-	failedUser, getErr := s.store.GetByEmail(ctx, email)
-	if getErr != nil {
-		// 用户不存在或查询失败，无法记录失败尝试
-		return
-	}
-
+// 优化: 接收user对象而非email，消除冗余的GetByEmail查询
+func (s *AuthService) handleLoginFailure(ctx context.Context, user *model.User, auditCtx *AuditContext) {
 	// 使用原子操作递增登录尝试次数，避免竞态条件
-	attempts, locked, _, incErr := s.store.IncrementLoginAttempts(ctx, failedUser.ID, s.maxAttempts, s.lockoutDuration)
+	attempts, locked, _, incErr := s.store.IncrementLoginAttempts(ctx, user.ID, s.maxAttempts, s.lockoutDuration)
 	if incErr != nil {
-		slog.Warn("更新登录尝试次数失败", "error", incErr, "user_id", failedUser.ID)
+		slog.Warn("更新登录尝试次数失败", "error", incErr, "user_id", user.ID)
 		return
 	}
 
@@ -328,12 +324,12 @@ func (s *AuthService) handleLoginFailure(ctx context.Context, email string, audi
 		s.incrementMetric("auth_account_locked_total")
 		// 使用统一的审计日志工具记录账户锁定事件
 		if auditCtx != nil {
-			auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventAccountLocked), failedUser.ID, map[string]interface{}{
+			auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventAccountLocked), user.ID, map[string]interface{}{
 				"ip_address": auditCtx.IPAddress,
 				"attempts":   attempts,
 			})
 		}
-		slog.Warn("账户因多次登录失败被锁定", "user_id", failedUser.ID, "attempts", attempts)
+		slog.Warn("账户因多次登录失败被锁定", "user_id", user.ID, "attempts", attempts)
 	}
 
 	// 记录登录失败指标
@@ -341,8 +337,8 @@ func (s *AuthService) handleLoginFailure(ctx context.Context, email string, audi
 
 	// 使用统一的审计日志工具记录登录失败事件
 	if auditCtx != nil {
-		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventUserLogin), failedUser.ID, map[string]interface{}{
-			"email":      failedUser.Email,
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventUserLogin), user.ID, map[string]interface{}{
+			"email":      user.Email,
 			"ip_address": auditCtx.IPAddress,
 			"user_agent": auditCtx.UserAgent,
 			"success":    false,
@@ -370,25 +366,41 @@ func (s *AuthService) handleLoginFailure(ctx context.Context, email string, audi
 //
 // 重构原因: 从LoginWithAudit中提取成功处理逻辑，降低主函数复杂度（21→<10）
 func (s *AuthService) handleLoginSuccess(ctx context.Context, user *model.User, auditCtx *AuditContext) (*model.LoginResponse, error) {
-	// 重置登录尝试次数
-	if err := s.store.ResetLoginAttempts(ctx, user.ID); err != nil {
-		slog.Warn("重置登录尝试次数失败", "error", err, "user_id", user.ID)
-	}
+	// 并行执行：重置登录尝试 + 审计日志
+	var wg sync.WaitGroup
 
-	// 记录登录成功指标
+	// 异步重置登录尝试次数
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := s.store.ResetLoginAttempts(ctx, user.ID); err != nil {
+			slog.Warn("重置登录尝试次数失败", "error", err, "user_id", user.ID)
+		}
+	}()
+
+	// 异步记录审计日志
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if auditCtx != nil {
+			auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventUserLogin), user.ID, map[string]interface{}{
+				"email":      user.Email,
+				"ip_address": auditCtx.IPAddress,
+				"user_agent": auditCtx.UserAgent,
+			})
+		}
+	}()
+
+	// 记录登录成功指标（轻量操作，无需异步）
 	s.incrementMetric("auth_login_total")
 
-	// 使用统一的审计日志工具记录登录成功事件
-	if auditCtx != nil {
-		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventUserLogin), user.ID, map[string]interface{}{
-			"email":      user.Email,
-			"ip_address": auditCtx.IPAddress,
-			"user_agent": auditCtx.UserAgent,
-		})
-	}
+	// 生成token对（必须等待，依赖用户信息）
+	resp, err := s.generateTokenPair(ctx, user.ID, user.Email, user.Role, []string{"openid", "profile", "email"}, nil)
 
-	// 生成token对
-	return s.generateTokenPair(ctx, user.ID, user.Email, user.Role, []string{"openid", "profile", "email"}, nil)
+	// 等待异步操作完成
+	wg.Wait()
+
+	return resp, err
 }
 
 // LoginWithAudit 执行登录操作并记录审计日志
@@ -422,8 +434,9 @@ func (s *AuthService) LoginWithAudit(ctx context.Context, req *model.LoginReques
 	user, err := s.validateUserCredentials(ctx, req.Email, req.Password)
 	if err != nil {
 		// 处理密码验证失败的情况
-		if apperrors.Is(err, ErrInvalidCredentials) {
-			s.handleLoginFailure(ctx, req.Email, auditCtx)
+		if apperrors.Is(err, ErrInvalidCredentials) && user != nil {
+			// validateUserCredentials在密码错误时返回user对象，避免重复查询DB
+			s.handleLoginFailure(ctx, user, auditCtx)
 		}
 		return nil, err
 	}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 
 	apperrors "github.com/your-org/sso/internal/errors"
 )
@@ -215,14 +216,24 @@ func (c *MemoryCache) Delete(ctx context.Context, key string) error {
 
 // DeletePattern 按模式删除缓存
 // pattern支持通配符*，如"user:*"删除所有user前缀的缓存
+// 优化：使用读锁遍历收集需要删除的key，再逐个加锁删除，避免长时间持有写锁
 func (c *MemoryCache) DeletePattern(ctx context.Context, pattern string) error {
-	c.mu.Lock()
+	// 第一步：使用读锁遍历收集需要删除的key
+	c.mu.RLock()
+	var keysToDelete []string
 	for key := range c.data {
 		if matchesPattern(key, pattern) {
-			delete(c.data, key)
+			keysToDelete = append(keysToDelete, key)
 		}
 	}
-	c.mu.Unlock()
+	c.mu.RUnlock()
+
+	// 第二步：逐个删除收集到的key
+	for _, key := range keysToDelete {
+		c.mu.Lock()
+		delete(c.data, key)
+		c.mu.Unlock()
+	}
 	return nil
 }
 
@@ -494,4 +505,62 @@ func NewCacheWithFallback(opt *Option) (Cache, error) {
 
 	slog.Info("redis cache enabled")
 	return redisCache, nil
+}
+
+// ============================================================================
+// SingleflightCache 防缓存击穿包装
+// ============================================================================
+
+// SingleflightCache 使用singleflight防止缓存击穿
+// 当多个并发请求同时请求同一个不存在的key时，只有一个请求会查询数据库
+// 其他请求等待结果，避免缓存击穿
+//
+// 使用方式:
+//
+//	sf := cache.NewSingleflightCache(baseCache)
+//	value, err := sf.Do(ctx, key, 5*time.Minute, func() (interface{}, error) {
+//	    return store.GetByID(ctx, userID)
+//	})
+type SingleflightCache struct {
+	cache Cache
+	sf    singleflight.Group
+}
+
+// NewSingleflightCache 创建带防缓存击穿的缓存包装
+func NewSingleflightCache(cache Cache) *SingleflightCache {
+	return &SingleflightCache{cache: cache}
+}
+
+// Do 执行查询并缓存结果（防缓存击穿）
+// 如果多个请求同时查询同一个key，只有一个会执行load函数
+// 其他请求等待结果并复用
+//
+// 参数:
+//   - ctx: 上下文
+//   - key: 缓存键
+//   - ttl: 缓存有效期
+//   - load: 缓存未命中时的加载函数
+//
+// 返回:
+//   - 查询结果
+//   - 错误信息（如果load函数返回错误）
+func (sf *SingleflightCache) Do(ctx context.Context, key string, ttl time.Duration, load func() (interface{}, error)) (interface{}, error) {
+	v, err, _ := sf.sf.Do(key, func() (interface{}, error) {
+		// 再次检查缓存（可能已被其他请求设置）
+		var dest interface{}
+		if err := sf.cache.Get(ctx, key, &dest); err == nil {
+			return dest, nil
+		}
+
+		// 缓存未命中，执行查询
+		value, err := load()
+		if err != nil {
+			return nil, err
+		}
+
+		// 写入缓存
+		_ = sf.cache.Set(ctx, key, value, ttl)
+		return value, nil
+	})
+	return v, err
 }

@@ -5,8 +5,11 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -825,4 +828,88 @@ func TestGetRequestIDFromContext(t *testing.T) {
 		ctx := context.WithValue(context.Background(), middleware.RequestIDKey, 12345)
 		assert.Equal(t, "", middleware.GetRequestIDFromContext(ctx))
 	})
+}
+
+// ============================================================================
+// RateLimiter 分片锁优化测试
+// ============================================================================
+
+func TestRateLimiter_ShardedLock_Basic(t *testing.T) {
+	rl := middleware.NewRateLimiter(5, time.Minute)
+	defer rl.Stop()
+
+	// 前5次应该允许
+	for i := 0; i < 5; i++ {
+		assert.True(t, rl.Allow("127.0.0.1"))
+	}
+
+	// 第6次应该被拒绝
+	assert.False(t, rl.Allow("127.0.0.1"))
+}
+
+func TestRateLimiter_ShardedLock_DifferentIPs(t *testing.T) {
+	rl := middleware.NewRateLimiter(1, time.Minute)
+	defer rl.Stop()
+
+	// 不同IP应该独立计数
+	for i := 0; i < 10; i++ {
+		ip := fmt.Sprintf("192.168.1.%d", i)
+		assert.True(t, rl.Allow(ip), "IP %s should be allowed", ip)
+	}
+}
+
+func TestRateLimiter_ShardedLock_Concurrent(t *testing.T) {
+	rl := middleware.NewRateLimiter(100, time.Minute)
+	defer rl.Stop()
+
+	var wg sync.WaitGroup
+	allowed := int64(0)
+	denied := int64(0)
+
+	// 200个并发请求，限制100
+	for i := 0; i < 200; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if rl.Allow("10.0.0.1") {
+				atomic.AddInt64(&allowed, 1)
+			} else {
+				atomic.AddInt64(&denied, 1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// 应该正好100个允许，100个拒绝
+	assert.Equal(t, int64(100), allowed)
+	assert.Equal(t, int64(100), denied)
+}
+
+func TestRateLimiter_ShardedLock_NoRace(t *testing.T) {
+	rl := middleware.NewRateLimiter(1000, time.Minute)
+	defer rl.Stop()
+
+	// 大量并发请求，验证无竞态条件
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			ip := fmt.Sprintf("10.0.%d.%d", idx/256, idx%256)
+			for j := 0; j < 10; j++ {
+				rl.Allow(ip)
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
+func TestRateLimiter_Disabled(t *testing.T) {
+	rl := middleware.NewRateLimiter(0, time.Minute)
+	defer rl.Stop()
+
+	// limit=0应该允许所有请求
+	for i := 0; i < 1000; i++ {
+		assert.True(t, rl.Allow("127.0.0.1"))
+	}
 }

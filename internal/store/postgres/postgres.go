@@ -92,7 +92,7 @@ func NewFromURLWithTimeout(databaseURL string, timeout time.Duration) (*Store, e
 }
 
 // NewFromConfig 从URL和配置创建PostgreSQL存储实例
-func NewFromConfig(databaseURL string, maxOpenConns, maxIdleConns int, connMaxLifetime, queryTimeout time.Duration) (*Store, error) {
+func NewFromConfig(databaseURL string, maxOpenConns, maxIdleConns int, connMaxLifetime, connMaxIdleTime, queryTimeout time.Duration) (*Store, error) {
 	db, err := sql.Open("postgres", databaseURL)
 	if err != nil {
 		return nil, err
@@ -102,6 +102,9 @@ func NewFromConfig(databaseURL string, maxOpenConns, maxIdleConns int, connMaxLi
 	db.SetMaxOpenConns(maxOpenConns)
 	db.SetMaxIdleConns(maxIdleConns)
 	db.SetConnMaxLifetime(connMaxLifetime)
+	if connMaxIdleTime > 0 {
+		db.SetConnMaxIdleTime(connMaxIdleTime)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

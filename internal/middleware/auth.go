@@ -60,8 +60,7 @@ func AuthMiddleware(jwtSvc *crypto.JWTService) func(http.Handler) http.Handler {
 // 会检查token是否被撤销
 // 注意：此方法每次请求都查询数据库，建议使用AuthMiddlewareWithCache以获得更好性能
 func AuthMiddlewareWithStore(jwtSvc *crypto.JWTService, store store.Store) func(http.Handler) http.Handler {
-	return authMiddlewareWithBlacklist(jwtSvc, func(token string) bool {
-		ctx := context.Background()
+	return authMiddlewareWithBlacklist(jwtSvc, func(ctx context.Context, token string) bool {
 		tokenRecord, err := store.GetTokenByAccessToken(ctx, token)
 		if err != nil {
 			return true
@@ -80,8 +79,7 @@ func AuthMiddlewareWithCache(jwtSvc *crypto.JWTService, store store.Store, cache
 // AuthMiddlewareWithMetrics 带指标采集的认证中间件
 // invalidTokenFunc: 当token无效时调用的指标回调函数
 func AuthMiddlewareWithMetrics(jwtSvc *crypto.JWTService, store store.Store, cacheSvc cache.Cache, invalidTokenFunc func()) func(http.Handler) http.Handler {
-	return authMiddlewareWithBlacklist(jwtSvc, func(token string) bool {
-		ctx := context.Background()
+	return authMiddlewareWithBlacklist(jwtSvc, func(ctx context.Context, token string) bool {
 		cacheKey := cache.TokenKey(token)
 
 		var revoked bool
@@ -111,7 +109,7 @@ func AuthMiddlewareWithMetrics(jwtSvc *crypto.JWTService, store store.Store, cac
 }
 
 // authMiddlewareWithBlacklist 内部实现
-func authMiddlewareWithBlacklist(jwtSvc *crypto.JWTService, blacklistedFunc func(token string) bool, invalidTokenFunc func()) func(http.Handler) http.Handler {
+func authMiddlewareWithBlacklist(jwtSvc *crypto.JWTService, blacklistedFunc func(ctx context.Context, token string) bool, invalidTokenFunc func()) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// 1. 从Authorization头获取Token
@@ -138,7 +136,7 @@ func authMiddlewareWithBlacklist(jwtSvc *crypto.JWTService, blacklistedFunc func
 			token := parts[1]
 
 			// 3. 检查黑名单
-			if blacklistedFunc != nil && blacklistedFunc(token) {
+			if blacklistedFunc != nil && blacklistedFunc(r.Context(), token) {
 				if invalidTokenFunc != nil {
 					invalidTokenFunc()
 				}

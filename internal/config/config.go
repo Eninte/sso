@@ -41,6 +41,7 @@ type Config struct {
 	DBMaxOpenConns    int           // 最大打开连接数
 	DBMaxIdleConns    int           // 最大空闲连接数
 	DBConnMaxLifetime time.Duration // 连接最大生命周期
+	DBConnMaxIdleTime time.Duration // 连接最大空闲时间
 	DBQueryTimeout    time.Duration // 查询超时时间
 
 	// Redis配置
@@ -116,9 +117,10 @@ func Load() (*Config, error) {
 		DBSSLMode:  getEnv("DB_SSL_MODE", "prefer"),
 
 		// 数据库连接池配置
-		DBMaxOpenConns:    getEnvInt("DB_MAX_OPEN_CONNS", 50),
-		DBMaxIdleConns:    getEnvInt("DB_MAX_IDLE_CONNS", 25),
+		DBMaxOpenConns:    getEnvInt("DB_MAX_OPEN_CONNS", 100),
+		DBMaxIdleConns:    getEnvInt("DB_MAX_IDLE_CONNS", 50),
 		DBConnMaxLifetime: getEnvDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute),
+		DBConnMaxIdleTime: getEnvDuration("DB_CONN_MAX_IDLE_TIME", 1*time.Minute),
 		DBQueryTimeout:    getEnvDuration("DB_QUERY_TIMEOUT", 10*time.Second),
 
 		// Redis配置

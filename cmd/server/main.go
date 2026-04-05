@@ -188,7 +188,7 @@ func initHandlers(cfg *config.Config, svc *Services) (*mux.Router, *middleware.R
 	registerHandler := handler.NewRegisterHandler(svc.Auth)
 	loginHandler := handler.NewLoginHandler(svc.Auth)
 	tokenHandler := handler.NewTokenHandler(svc.Auth, svc.OAuth)
-	userInfoHandler := handler.NewUserInfoHandler(svc.Store)
+	userInfoHandler := handler.NewUserInfoHandler(svc.Store, svc.Cache)
 	authorizeHandler := handler.NewAuthorizeHandler(svc.OAuth)
 	userHandler := handler.NewUserHandler(svc.User)
 	mfaHandler := handler.NewMFAHandler(svc.MFA)
@@ -552,6 +552,9 @@ func connectDatabase(cfg *config.Config) (*sql.DB, error) {
 	db.SetMaxOpenConns(cfg.DBMaxOpenConns)
 	db.SetMaxIdleConns(cfg.DBMaxIdleConns)
 	db.SetConnMaxLifetime(cfg.DBConnMaxLifetime)
+	if cfg.DBConnMaxIdleTime > 0 {
+		db.SetConnMaxIdleTime(cfg.DBConnMaxIdleTime)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.DBQueryTimeout)
 	defer cancel()

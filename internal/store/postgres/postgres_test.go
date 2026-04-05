@@ -725,7 +725,7 @@ func TestStore_NewFromConfig(t *testing.T) {
 		t.Skip("跳过：未设置DATABASE_URL")
 	}
 
-	store, err := postgres.NewFromConfig(dbURL, 10, 5, 5*time.Minute, 30*time.Second)
+	store, err := postgres.NewFromConfig(dbURL, 10, 5, 5*time.Minute, 1*time.Minute, 30*time.Second)
 	require.NoError(t, err)
 	assert.NotNil(t, store)
 	t.Cleanup(func() {
