@@ -54,9 +54,9 @@ func (drl *DistributedRateLimiter) Middleware(next http.Handler) http.Handler {
 		}
 
 		// 设置限流响应头
-		w.Header().Set("X-RateLimit-Limit", strconv.Itoa(drl.limit))
-		w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
-		w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetTime.Unix(), 10))
+		w.Header().Set("X-Ratelimit-Limit", strconv.Itoa(drl.limit))
+		w.Header().Set("X-Ratelimit-Remaining", strconv.Itoa(remaining))
+		w.Header().Set("X-Ratelimit-Reset", strconv.FormatInt(resetTime.Unix(), 10))
 
 		if !allowed {
 			w.Header().Set("Retry-After", drl.window.String())
