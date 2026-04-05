@@ -431,9 +431,12 @@ func generateRecoveryCode() (string, error) {
 		bytes[0:2], bytes[2:4], bytes[4:6], bytes[6:8]), nil
 }
 
+// bcryptCost bcrypt成本因子，测试可通过覆盖此变量降低耗时
+var bcryptCost = bcrypt.DefaultCost
+
 // bcryptHash 使用bcrypt哈希字符串
 func bcryptHash(password string) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
 	if err != nil {
 		return "", ErrRecoveryCodeGenerate
 	}

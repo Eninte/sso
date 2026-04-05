@@ -14,6 +14,11 @@ import (
 func TestMFAService_GenerateRecoveryCodes(t *testing.T) {
 	t.Cleanup(mock.ClearMFARecoveryCodes)
 
+	// 降低bcrypt cost加速测试
+	oldCost := bcryptCost
+	bcryptCost = 4
+	t.Cleanup(func() { bcryptCost = oldCost })
+
 	t.Run("默认生成8个恢复码", func(t *testing.T) {
 		m := mock.New()
 		svc := NewMFAService(m)
@@ -57,6 +62,11 @@ func TestMFAService_GenerateRecoveryCodes(t *testing.T) {
 
 func TestMFAService_VerifyRecoveryCode(t *testing.T) {
 	t.Cleanup(mock.ClearMFARecoveryCodes)
+
+	// 降低bcrypt cost加速测试（默认cost=10在-race下~300ms/次）
+	oldCost := bcryptCost
+	bcryptCost = 4
+	t.Cleanup(func() { bcryptCost = oldCost })
 
 	t.Run("验证成功", func(t *testing.T) {
 		m := mock.New()
@@ -132,6 +142,11 @@ func TestMFAService_VerifyRecoveryCode(t *testing.T) {
 func TestMFAService_GetRecoveryCodeStatus(t *testing.T) {
 	mock.ClearMFARecoveryCodes()
 	t.Cleanup(mock.ClearMFARecoveryCodes)
+
+	// 降低bcrypt cost加速测试
+	oldCost := bcryptCost
+	bcryptCost = 4
+	t.Cleanup(func() { bcryptCost = oldCost })
 
 	t.Run("返回剩余数量", func(t *testing.T) {
 		m := mock.New()
@@ -218,6 +233,11 @@ func TestMFAService_generateRecoveryCode(t *testing.T) {
 }
 
 func TestMFAService_bcryptHash(t *testing.T) {
+	// 降低bcrypt cost加速测试
+	oldCost := bcryptCost
+	bcryptCost = 4
+	t.Cleanup(func() { bcryptCost = oldCost })
+
 	t.Run("哈希值可以验证", func(t *testing.T) {
 		code, err := generateRecoveryCode()
 		require.NoError(t, err)
