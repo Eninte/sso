@@ -428,7 +428,7 @@ func initServices(cfg *config.Config) (*Services, *sql.DB, error) {
 	slog.Info("缓存层初始化完成")
 
 	// ==== 初始化加密服务 ====
-	passwordSvc := crypto.NewPasswordService(cfg.BcryptCost)
+	passwordSvc := crypto.NewPasswordService(crypto.NormalizeBcryptCost(cfg.BcryptCost))
 	var jwtSvc *crypto.JWTService
 
 	// 根据是否启用密钥轮换选择不同的初始化方式

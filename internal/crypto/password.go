@@ -3,8 +3,6 @@
 package crypto
 
 import (
-	"sync"
-
 	"golang.org/x/crypto/bcrypt"
 
 	apperrors "github.com/your-org/sso/internal/errors"
@@ -43,34 +41,12 @@ func NormalizeBcryptCost(cost int) int {
 	return cost
 }
 
-// ============================================================================
-// 测试模式支持（仅测试文件通过 SetTestMode 设置）
-// ============================================================================
-
-var (
-	testMode     bool
-	testModeOnce sync.Once
-)
-
-// SetTestMode 设置测试模式（仅测试使用）
-// 测试环境下自动使用 cost=4 加速密码哈希
-// 使用 sync.Once 确保只能设置一次
-func SetTestMode(enabled bool) {
-	testModeOnce.Do(func() {
-		testMode = enabled
-	})
-}
-
 // NewPasswordService 创建密码服务
-// cost: bcrypt成本因子
+// cost: bcrypt成本因子，调用者负责确保值合理
 // 推荐值: 12-14，越高越安全但性能越低
 // 生产环境必须 >= 12（由 config.validate() 强制执行）
-// 测试模式下自动使用 cost=4（由测试文件 SetTestMode 触发）
 func NewPasswordService(cost int) *PasswordService {
-	if testMode {
-		return &PasswordService{cost: bcrypt.MinCost}
-	}
-	return &PasswordService{cost: NormalizeBcryptCost(cost)}
+	return &PasswordService{cost: cost}
 }
 
 // HashPassword 对密码进行哈希

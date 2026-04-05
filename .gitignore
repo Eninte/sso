@@ -58,3 +58,10 @@ Thumbs.db
 # 工具产物
 .opencode/
 .kilo/
+
+# 启动脚本（含环境敏感信息）
+start_server.sh
+
+# 集成测试结果与报告
+integration-test-results.xml
+reports/
