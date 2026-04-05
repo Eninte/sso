@@ -48,7 +48,7 @@ DB_PORT=5432
 DB_NAME=sso
 DB_USER=sso
 DB_PASSWORD=your_strong_password_here
-DB_SSL_MODE=disable
+DB_SSL_MODE=require
 
 # Redis配置
 REDIS_HOST=redis
@@ -63,8 +63,8 @@ JWT_REFRESH_TOKEN_TTL=168h
 JWT_ISSUER=sso
 
 # 安全配置
-BCRYPT_COST=14
-RATE_LIMIT_REQUESTS=50
+BCRYPT_COST=12
+RATE_LIMIT_REQUESTS=100
 RATE_LIMIT_WINDOW=1m
 MAX_LOGIN_ATTEMPTS=5
 LOCKOUT_DURATION=30m
@@ -105,7 +105,7 @@ docker-compose -f docker/docker-compose.yml up -d
 
 ```bash
 docker-compose -f docker/docker-compose.yml exec sso \
-  migrate -path /app/migrations -database "postgres://sso:your_password@postgres:5432/sso?sslmode=disable" up
+  migrate -path /app/migrations -database "postgres://sso:your_password@postgres:5432/sso?sslmode=require" up
 ```
 
 6. **验证部署**
@@ -366,9 +366,9 @@ metadata:
   name: sso-ingress
   namespace: sso
   annotations:
-    kubernetes.io/ingress.class: nginx
     cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
+  ingressClassName: nginx
   tls:
   - hosts:
     - sso.yourdomain.com
@@ -497,7 +497,7 @@ sudo systemctl status sso
 
 ```bash
 cd /opt/sso
-export DATABASE_URL='postgres://sso:your_password@localhost:5432/sso?sslmode=disable'
+export DATABASE_URL='postgres://sso:your_password@localhost:5432/sso?sslmode=require'
 ./migrate -path ./migrations -database "$DATABASE_URL" up
 ```
 
@@ -726,8 +726,8 @@ SELECT pg_reload_conf();
 
 ```bash
 # 连接池配置
-DB_MAX_OPEN_CONNS=50
-DB_MAX_IDLE_CONNS=25
+DB_MAX_OPEN_CONNS=100
+DB_MAX_IDLE_CONNS=50
 DB_CONN_MAX_LIFETIME=5m
 
 # bcrypt成本（生产环境建议12-14）
