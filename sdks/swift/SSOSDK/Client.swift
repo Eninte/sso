@@ -26,7 +26,7 @@ public actor SSOClient {
         self.timeout = timeout
         self.accessToken = accessToken
         self.refreshToken = refreshToken
-        self.tokenExpiry = Date()
+        self.tokenExpiry = Date.distantFuture
     }
 
     public var currentAccessToken: String { accessToken }

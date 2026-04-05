@@ -109,7 +109,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	if body != nil {
 		bodyBytes, err := json.Marshal(body)
 		if err != nil {
-			return nil, fmt.Errorf("sdo: marshal request: %w", err)
+			return nil, fmt.Errorf("sso: marshal request: %w", err)
 		}
 		bodyReader = strings.NewReader(string(bodyBytes))
 	}

@@ -16,6 +16,13 @@ pub enum ErrorCode {
     InvalidToken,
     TokenExpired,
     EmailExists,
+    EmailInvalid,
+    EmailRequired,
+    PasswordTooShort,
+    PasswordTooLong,
+    PasswordRequired,
+    InvalidRequestFormat,
+    RequestBodyTooLarge,
     Other(String),
 }
 
@@ -35,6 +42,13 @@ impl fmt::Display for ErrorCode {
             Self::InvalidToken => write!(f, "INVALID_TOKEN"),
             Self::TokenExpired => write!(f, "TOKEN_EXPIRED"),
             Self::EmailExists => write!(f, "EMAIL_EXISTS"),
+            Self::EmailInvalid => write!(f, "EMAIL_INVALID"),
+            Self::EmailRequired => write!(f, "EMAIL_REQUIRED"),
+            Self::PasswordTooShort => write!(f, "PASSWORD_TOO_SHORT"),
+            Self::PasswordTooLong => write!(f, "PASSWORD_TOO_LONG"),
+            Self::PasswordRequired => write!(f, "PASSWORD_REQUIRED"),
+            Self::InvalidRequestFormat => write!(f, "INVALID_REQUEST_FORMAT"),
+            Self::RequestBodyTooLarge => write!(f, "REQUEST_BODY_TOO_LARGE"),
             Self::Other(s) => write!(f, "{s}"),
         }
     }
@@ -56,6 +70,13 @@ impl ErrorCode {
             "INVALID_TOKEN" => Self::InvalidToken,
             "TOKEN_EXPIRED" => Self::TokenExpired,
             "EMAIL_EXISTS" => Self::EmailExists,
+            "EMAIL_INVALID" => Self::EmailInvalid,
+            "EMAIL_REQUIRED" => Self::EmailRequired,
+            "PASSWORD_TOO_SHORT" => Self::PasswordTooShort,
+            "PASSWORD_TOO_LONG" => Self::PasswordTooLong,
+            "PASSWORD_REQUIRED" => Self::PasswordRequired,
+            "INVALID_REQUEST_FORMAT" => Self::InvalidRequestFormat,
+            "REQUEST_BODY_TOO_LARGE" => Self::RequestBodyTooLarge,
             other => Self::Other(other.to_string()),
         }
     }

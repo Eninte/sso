@@ -103,7 +103,7 @@ class SSOClient:
     # =======================================================================
 
     def register(self, email: str, password: str) -> RegisterResponse:
-        resp = self._request("POST", "/api/v1/register", {"email": password})
+        resp = self._request("POST", "/api/v1/register", {"email": email, "password": password})
         data = resp.get("data", {})
         return RegisterResponse(
             message=resp.get("message", ""),
@@ -265,7 +265,11 @@ class SSOClient:
 
     def get_user(self, user_id: str) -> UserItem:
         resp = self._request("GET", f"/admin/users?id={user_id}", auth=True)
-        return UserItem(**{k: resp.get(k, "") for k in UserItem.__dataclass_fields__})
+        data = {}
+        for k, field in UserItem.__dataclass_fields__.items():
+            default = field.default if field.default is not field.default_factory else ""
+            data[k] = resp.get(k, default)
+        return UserItem(**data)
 
     def disable_user(self, user_id: str) -> MessageResponse:
         resp = self._request("POST", "/admin/users/disable", {"user_id": user_id}, auth=True)

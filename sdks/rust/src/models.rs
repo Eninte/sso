@@ -54,6 +54,11 @@ pub struct DisableUserRequest {
     pub user_id: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct EnableUserRequest {
+    pub user_id: String,
+}
+
 // ============================================================================
 // 响应类型
 // ============================================================================

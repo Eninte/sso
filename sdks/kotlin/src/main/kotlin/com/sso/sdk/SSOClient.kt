@@ -48,7 +48,18 @@ object SSOErrorCode {
     const val FORBIDDEN = "FORBIDDEN"
     const val TOO_MANY_REQUESTS = "TOO_MANY_REQUESTS"
     const val INVALID_CREDENTIALS = "INVALID_CREDENTIALS"
+    const val ACCOUNT_LOCKED = "ACCOUNT_LOCKED"
+    const val ACCOUNT_DISABLED = "ACCOUNT_DISABLED"
+    const val INVALID_TOKEN = "INVALID_TOKEN"
+    const val TOKEN_EXPIRED = "TOKEN_EXPIRED"
     const val EMAIL_EXISTS = "EMAIL_EXISTS"
+    const val EMAIL_INVALID = "EMAIL_INVALID"
+    const val EMAIL_REQUIRED = "EMAIL_REQUIRED"
+    const val PASSWORD_TOO_SHORT = "PASSWORD_TOO_SHORT"
+    const val PASSWORD_TOO_LONG = "PASSWORD_TOO_LONG"
+    const val PASSWORD_REQUIRED = "PASSWORD_REQUIRED"
+    const val INVALID_REQUEST_FORMAT = "INVALID_REQUEST_FORMAT"
+    const val REQUEST_BODY_TOO_LARGE = "REQUEST_BODY_TOO_LARGE"
 }
 
 // ============================================================================
@@ -178,6 +189,23 @@ class SSOClient(
                 val jsonBody = if (body != null) gson.toJson(body) else "{}"
                 builder.post(jsonBody.toRequestBody(json))
             }
+            "PUT" -> {
+                val jsonBody = if (body != null) gson.toJson(body) else "{}"
+                builder.put(jsonBody.toRequestBody(json))
+            }
+            "DELETE" -> {
+                if (body != null) {
+                    val jsonBody = gson.toJson(body)
+                    builder.delete(jsonBody.toRequestBody(json))
+                } else {
+                    builder.delete()
+                }
+            }
+            "PATCH" -> {
+                val jsonBody = if (body != null) gson.toJson(body) else "{}"
+                builder.patch(jsonBody.toRequestBody(json))
+            }
+            else -> throw IllegalArgumentException("Unsupported HTTP method: $method")
         }
 
         http.newCall(builder.build()).execute().use { resp ->

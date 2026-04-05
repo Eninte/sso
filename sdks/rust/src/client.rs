@@ -494,7 +494,7 @@ impl SSOClient {
         self.request(
             Method::POST,
             "/admin/users/enable",
-            Some(&DisableUserRequest {
+            Some(&EnableUserRequest {
                 user_id: user_id.to_string(),
             }),
             true,
@@ -522,13 +522,20 @@ impl SSOClient {
     }
 }
 
-/// URL 编码（简单实现）
+/// URL 编码（完整实现，符合RFC 3986）
 fn url_encode(s: &str) -> String {
-    s.replace('%', "%25")
-        .replace(' ', "%20")
-        .replace('?', "%3F")
-        .replace('&', "%26")
-        .replace('=', "%3D")
-        .replace('+', "%2B")
-        .replace('#', "%23")
+    let mut result = String::with_capacity(s.len() * 3);
+    for byte in s.bytes() {
+        match byte {
+            // 未保留字符（unreserved characters）- 不需要编码
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                result.push(byte as char);
+            }
+            // 其他字符都需要百分号编码
+            _ => {
+                result.push_str(&format!("%{:02X}", byte));
+            }
+        }
+    }
+    result
 }
