@@ -219,15 +219,36 @@ K6_RESULTS_DIR=$(K6_LOADTEST_DIR)/results
 K6 ?= k6
 BASE_URL ?= http://localhost:9090
 
+# 压测环境变量默认值（与 .env.test 保持一致，可通过 shell 环境变量或命令行覆盖）
+E2E_ADMIN_EMAIL ?= system@eninte.com
+E2E_ADMIN_PASSWORD ?= Admin123!
+TEST_PASSWORD ?= TestPassword123!
+OAUTH_CLIENT_SECRET ?=
+OAUTH_PUBLIC_CLIENT_ID ?= public-test-client
+OAUTH_CONFIDENTIAL_CLIENT_ID ?= confidential-test-client
+OAUTH_REDIRECT_URI ?= http://localhost:3000/callback
+
+# 压测通用环境变量（从 .env.test 读取，可通过命令行覆盖）
+K6_ENV_COMMON = \
+	-e BASE_URL=$(BASE_URL) \
+	-e E2E_ADMIN_EMAIL=$(E2E_ADMIN_EMAIL) \
+	-e E2E_ADMIN_PASSWORD=$(E2E_ADMIN_PASSWORD) \
+	-e TEST_PASSWORD=$(TEST_PASSWORD) \
+	-e OAUTH_CLIENT_SECRET=$(OAUTH_CLIENT_SECRET) \
+	-e OAUTH_PUBLIC_CLIENT_ID=$(OAUTH_PUBLIC_CLIENT_ID) \
+	-e OAUTH_CONFIDENTIAL_CLIENT_ID=$(OAUTH_CONFIDENTIAL_CLIENT_ID) \
+	-e OAUTH_REDIRECT_URI=$(OAUTH_REDIRECT_URI)
+
 .PHONY: loadtest-prepare
 loadtest-prepare: ## 准备压测数据 (生成用户池、Token池等)
-	@bash scripts/prepare-loadtest-data.sh
+	@E2E_ADMIN_EMAIL=$(E2E_ADMIN_EMAIL) E2E_ADMIN_PASSWORD=$(E2E_ADMIN_PASSWORD) TEST_PASSWORD=$(TEST_PASSWORD) BASE_URL=$(BASE_URL) \
+	bash scripts/prepare-loadtest-data.sh
 
 .PHONY: loadtest-s1
 loadtest-s1: ## S1: 公开读接口基线
 	@mkdir -p $(K6_RESULTS_DIR)
 	$(K6) run --out json=$(K6_RESULTS_DIR)/s1_$(shell date +%Y%m%d_%H%M%S).json \
-		-e BASE_URL=$(BASE_URL) \
+		$(K6_ENV_COMMON) \
 		$(K6_LOADTEST_DIR)/scenarios/s1_public_read.js
 
 .PHONY: loadtest-s2
@@ -235,7 +256,7 @@ loadtest-s2: ## S2: 登录单接口 (需要 loadtest/data/users.json)
 	@mkdir -p $(K6_RESULTS_DIR)
 	@test -f $(K6_DATA_DIR)/users.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
 	$(K6) run --out json=$(K6_RESULTS_DIR)/s2_$(shell date +%Y%m%d_%H%M%S).json \
-		-e BASE_URL=$(BASE_URL) \
+		$(K6_ENV_COMMON) \
 		-e USER_POOL_FILE=$(K6_DATA_DIR)/users.json \
 		$(K6_LOADTEST_DIR)/scenarios/s2_login.js
 
@@ -243,7 +264,7 @@ loadtest-s2: ## S2: 登录单接口 (需要 loadtest/data/users.json)
 loadtest-s3: ## S3: 注册单接口
 	@mkdir -p $(K6_RESULTS_DIR)
 	$(K6) run --out json=$(K6_RESULTS_DIR)/s3_$(shell date +%Y%m%d_%H%M%S).json \
-		-e BASE_URL=$(BASE_URL) \
+		$(K6_ENV_COMMON) \
 		$(K6_LOADTEST_DIR)/scenarios/s3_register.js
 
 .PHONY: loadtest-s4
@@ -251,7 +272,7 @@ loadtest-s4: ## S4: Refresh Token 单接口 (需要 loadtest/data/refresh_tokens
 	@mkdir -p $(K6_RESULTS_DIR)
 	@test -f $(K6_DATA_DIR)/refresh_tokens.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
 	$(K6) run --out json=$(K6_RESULTS_DIR)/s4_$(shell date +%Y%m%d_%H%M%S).json \
-		-e BASE_URL=$(BASE_URL) \
+		$(K6_ENV_COMMON) \
 		-e REFRESH_TOKEN_POOL_FILE=$(K6_DATA_DIR)/refresh_tokens.json \
 		$(K6_LOADTEST_DIR)/scenarios/s4_refresh_token.js
 
@@ -260,7 +281,7 @@ loadtest-s5: ## S5: UserInfo 高频读取 (需要 loadtest/data/access_tokens.js
 	@mkdir -p $(K6_RESULTS_DIR)
 	@test -f $(K6_DATA_DIR)/access_tokens.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
 	$(K6) run --out json=$(K6_RESULTS_DIR)/s5_$(shell date +%Y%m%d_%H%M%S).json \
-		-e BASE_URL=$(BASE_URL) \
+		$(K6_ENV_COMMON) \
 		-e ACCESS_TOKEN_POOL_FILE=$(K6_DATA_DIR)/access_tokens.json \
 		$(K6_LOADTEST_DIR)/scenarios/s5_userinfo.js
 
@@ -269,7 +290,7 @@ loadtest-s6: ## S6: OAuth 公共客户端完整流程 (需要 loadtest/data/user
 	@mkdir -p $(K6_RESULTS_DIR)
 	@test -f $(K6_DATA_DIR)/users.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
 	$(K6) run --out json=$(K6_RESULTS_DIR)/s6_$(shell date +%Y%m%d_%H%M%S).json \
-		-e BASE_URL=$(BASE_URL) \
+		$(K6_ENV_COMMON) \
 		-e USER_POOL_FILE=$(K6_DATA_DIR)/users.json \
 		$(K6_LOADTEST_DIR)/scenarios/s6_oauth_public.js
 
@@ -278,7 +299,7 @@ loadtest-s7: ## S7: OAuth 机密客户端完整流程 (需要 loadtest/data/user
 	@mkdir -p $(K6_RESULTS_DIR)
 	@test -f $(K6_DATA_DIR)/users.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
 	$(K6) run --out json=$(K6_RESULTS_DIR)/s7_$(shell date +%Y%m%d_%H%M%S).json \
-		-e BASE_URL=$(BASE_URL) \
+		$(K6_ENV_COMMON) \
 		-e USER_POOL_FILE=$(K6_DATA_DIR)/users.json \
 		$(K6_LOADTEST_DIR)/scenarios/s7_oauth_confidential.js
 
@@ -289,7 +310,7 @@ loadtest-s8: ## S8: 混合流量 (需要 loadtest/data/{users,access_tokens,refr
 	@test -f $(K6_DATA_DIR)/access_tokens.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
 	@test -f $(K6_DATA_DIR)/refresh_tokens.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
 	$(K6) run --out json=$(K6_RESULTS_DIR)/s8_$(shell date +%Y%m%d_%H%M%S).json \
-		-e BASE_URL=$(BASE_URL) \
+		$(K6_ENV_COMMON) \
 		-e USER_POOL_FILE=$(K6_DATA_DIR)/users.json \
 		-e ACCESS_TOKEN_POOL_FILE=$(K6_DATA_DIR)/access_tokens.json \
 		-e REFRESH_TOKEN_POOL_FILE=$(K6_DATA_DIR)/refresh_tokens.json \
@@ -302,7 +323,7 @@ loadtest-s9: ## S9: 安全保护专项 (需要 loadtest/data/{users,malicious_us
 	@test -f $(K6_DATA_DIR)/users.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
 	@test -f $(K6_DATA_DIR)/malicious_users.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
 	$(K6) run --out json=$(K6_RESULTS_DIR)/s9_$(shell date +%Y%m%d_%H%M%S).json \
-		-e BASE_URL=$(BASE_URL) \
+		$(K6_ENV_COMMON) \
 		-e USER_POOL_FILE=$(K6_DATA_DIR)/users.json \
 		-e MALICIOUS_POOL_FILE=$(K6_DATA_DIR)/malicious_users.json \
 		$(K6_LOADTEST_DIR)/scenarios/s9_security.js
@@ -312,7 +333,7 @@ loadtest-s10: ## S10: 突刺与恢复 (需要 loadtest/data/access_tokens.json)
 	@mkdir -p $(K6_RESULTS_DIR)
 	@test -f $(K6_DATA_DIR)/access_tokens.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
 	$(K6) run --out json=$(K6_RESULTS_DIR)/s10_$(shell date +%Y%m%d_%H%M%S).json \
-		-e BASE_URL=$(BASE_URL) \
+		$(K6_ENV_COMMON) \
 		-e ACCESS_TOKEN_POOL_FILE=$(K6_DATA_DIR)/access_tokens.json \
 		$(K6_LOADTEST_DIR)/scenarios/s10_spike.js
 
@@ -323,7 +344,7 @@ loadtest-soak: ## Soak Test: 长稳态测试 (需要 loadtest/data/{users,access
 	@test -f $(K6_DATA_DIR)/access_tokens.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
 	@test -f $(K6_DATA_DIR)/refresh_tokens.json || { echo "错误: 数据文件不存在，请先运行 make loadtest-prepare"; exit 1; }
 	$(K6) run --out json=$(K6_RESULTS_DIR)/soak_$(shell date +%Y%m%d_%H%M%S).json \
-		-e BASE_URL=$(BASE_URL) \
+		$(K6_ENV_COMMON) \
 		-e USER_POOL_FILE=$(K6_DATA_DIR)/users.json \
 		-e ACCESS_TOKEN_POOL_FILE=$(K6_DATA_DIR)/access_tokens.json \
 		-e REFRESH_TOKEN_POOL_FILE=$(K6_DATA_DIR)/refresh_tokens.json \
