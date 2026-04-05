@@ -129,7 +129,8 @@ Content-Type: application/json
   "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
   "refresh_token": "dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4...",
   "token_type": "Bearer",
-  "expires_in": 900
+  "expires_in": 900,
+  "scopes": ["openid", "profile", "email"]
 }
 ```
 
@@ -176,7 +177,8 @@ Content-Type: application/json
   "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
   "refresh_token": "bmV3IHJlZnJlc2ggdG9rZW4...",
   "token_type": "Bearer",
-  "expires_in": 900
+  "expires_in": 900,
+  "scopes": ["openid", "profile", "email"]
 }
 ```
 
@@ -203,11 +205,14 @@ Content-Type: application/json
 **成功响应** `200 OK`:
 ```json
 {
-  "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "refresh_token": "bmV3IHJlZnJlc2ggdG9rZW4...",
-  "token_type": "Bearer",
-  "expires_in": 900,
-  "scope": "openid profile email"
+  "message": "success",
+  "data": {
+    "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "refresh_token": "bmV3IHJlZnJlc2ggdG9rZW4...",
+    "token_type": "Bearer",
+    "expires_in": 900,
+    "scope": "openid profile email"
+  }
 }
 ```
 
@@ -226,12 +231,27 @@ Content-Type: application/json
 |------|------|------|------|
 | token | string | 是 | 要撤销的Token |
 
+**请求示例**:
+```json
+{
+  "token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
 **成功响应** `200 OK`:
 ```json
 {
-  "message": "Token已撤销"
+  "message": "Token已撤销",
+  "data": null
 }
 ```
+
+**错误响应**:
+
+| 状态码 | 说明 |
+|--------|------|
+| 422 | 缺少token参数 |
+| 500 | 服务器内部错误 |
 
 ---
 
@@ -269,7 +289,8 @@ Authorization: Bearer <access_token>
 **成功响应** `200 OK`:
 ```json
 {
-  "message": "已登出所有设备"
+  "message": "已登出所有设备",
+  "data": null
 }
 ```
 
@@ -288,12 +309,22 @@ Content-Type: application/json
 |------|------|------|------|
 | email | string | 是 | 用户邮箱 |
 
+**请求示例**:
+```json
+{
+  "email": "user@example.com"
+}
+```
+
 **成功响应** `200 OK`:
 ```json
 {
-  "message": "重置邮件已发送"
+  "message": "如果该邮箱已注册，重置邮件已发送",
+  "data": null
 }
 ```
+
+> **安全说明**: 无论邮箱是否存在，均返回相同响应，防止用户枚举。
 
 ### 重置密码
 
@@ -309,14 +340,31 @@ Content-Type: application/json
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | token | string | 是 | 重置令牌 |
-| password | string | 是 | 新密码 |
+| user_id | string | 是 | 用户ID |
+| new_password | string | 是 | 新密码 |
+
+**请求示例**:
+```json
+{
+  "token": "reset-token-string",
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "new_password": "NewPassword123!"
+}
+```
 
 **成功响应** `200 OK`:
 ```json
 {
-  "message": "密码已重置"
+  "message": "密码重置成功",
+  "data": null
 }
 ```
+
+**错误响应**:
+
+| 状态码 | 说明 |
+|--------|------|
+| 400 | 缺少参数或重置失败 |
 
 ### 修改密码
 
@@ -335,10 +383,19 @@ Content-Type: application/json
 | old_password | string | 是 | 当前密码 |
 | new_password | string | 是 | 新密码 |
 
+**请求示例**:
+```json
+{
+  "old_password": "OldPassword123!",
+  "new_password": "NewPassword123!"
+}
+```
+
 **成功响应** `200 OK`:
 ```json
 {
-  "message": "密码已修改"
+  "message": "密码修改成功",
+  "data": null
 }
 ```
 
@@ -356,7 +413,8 @@ Authorization: Bearer <access_token>
 **成功响应** `200 OK`:
 ```json
 {
-  "message": "验证邮件已发送"
+  "message": "验证邮件已发送",
+  "data": null
 }
 ```
 
@@ -365,15 +423,29 @@ Authorization: Bearer <access_token>
 使用验证令牌验证邮箱。
 
 ```
-GET /api/v1/verify-email?token=<verification_token>
+GET /api/v1/verify-email?token=<verification_token>&user_id=<user_id>
 ```
+
+**查询参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| token | string | 是 | 验证令牌 |
+| user_id | string | 是 | 用户ID |
 
 **成功响应** `200 OK`:
 ```json
 {
-  "message": "邮箱验证成功"
+  "message": "邮箱验证成功",
+  "data": null
 }
 ```
+
+**错误响应**:
+
+| 状态码 | 说明 |
+|--------|------|
+| 400 | 缺少参数或验证失败 |
 
 ---
 
@@ -392,10 +464,18 @@ Authorization: Bearer <access_token>
 ```json
 {
   "secret": "JBSWY3DPEHPK3PXP",
-  "qr_code": "otpauth://totp/SSO:user@example.com?secret=JBSWY3DPEHPK3PXP&issuer=SSO",
-  "backup_codes": ["12345678", "23456789", "34567890"]
+  "qr_code_url": "otpauth://totp/SSO:user@example.com?secret=JBSWY3DPEHPK3PXP&issuer=SSO",
+  "manual_entry": "JBSWY3DPEHPK3PXP"
 }
 ```
+
+**错误响应**:
+
+| 状态码 | 说明 |
+|--------|------|
+| 401 | 未认证 |
+| 409 | MFA已启用 |
+| 500 | 服务器内部错误 |
 
 ### 验证MFA
 
@@ -413,10 +493,18 @@ Content-Type: application/json
 |------|------|------|------|
 | code | string | 是 | TOTP代码 |
 
+**请求示例**:
+```json
+{
+  "code": "123456"
+}
+```
+
 **成功响应** `200 OK`:
 ```json
 {
-  "message": "MFA已启用"
+  "message": "MFA已启用",
+  "data": null
 }
 ```
 
@@ -434,14 +522,30 @@ Content-Type: application/json
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| password | string | 是 | 用户密码 |
+| code | string | 是 | 当前TOTP代码 |
+
+**请求示例**:
+```json
+{
+  "code": "123456"
+}
+```
 
 **成功响应** `200 OK`:
 ```json
 {
-  "message": "MFA已禁用"
+  "message": "MFA已禁用",
+  "data": null
 }
 ```
+
+**错误响应**:
+
+| 状态码 | 说明 |
+|--------|------|
+| 400 | 缺少代码、MFA未启用或TOTP无效 |
+| 401 | 未认证 |
+| 500 | 服务器内部错误 |
 
 ### MFA状态
 
@@ -480,10 +584,25 @@ Authorization: Bearer <access_token>
 | client_id | 是 | 客户端ID |
 | redirect_uri | 是 | 回调地址 |
 | response_type | 是 | 固定值: `code` |
-| scope | 否 | 权限范围 |
-| state | 否 | 状态参数 |
+| scope | 否 | 权限范围（空格分隔） |
+| state | 是 | 状态参数（最小16字符，CSRF保护） |
 | code_challenge | 否 | PKCE挑战 |
 | code_challenge_method | 否 | PKCE方法 |
+
+**成功响应** `200 OK`:
+```json
+{
+  "code": "authorization_code",
+  "state": "xyz"
+}
+```
+
+**错误响应**:
+
+| 状态码 | 说明 |
+|--------|------|
+| 400 | 请求参数错误或state无效 |
+| 401 | 需要登录 |
 
 ### 批准授权
 
@@ -499,14 +618,18 @@ Content-Type: application/json
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| request_id | string | 是 | 授权请求ID |
-| approved | boolean | 是 | 是否批准 |
-| scope | string[] | 否 | 批准的权限范围 |
+| client_id | string | 是 | 客户端ID |
+| redirect_uri | string | 是 | 回调地址 |
+| scope | string | 否 | 权限范围（空格分隔） |
+| state | string | 是 | 状态参数 |
+| code_challenge | string | 否 | PKCE挑战 |
+| code_challenge_method | string | 否 | PKCE方法 |
 
 **成功响应** `200 OK`:
 ```json
 {
-  "redirect_url": "https://client.example.com/callback?code=authorization_code&state=xyz"
+  "code": "authorization_code",
+  "state": "xyz"
 }
 ```
 
@@ -530,12 +653,15 @@ GET /.well-known/openid-configuration
   "token_endpoint": "http://localhost:9090/api/v1/token",
   "userinfo_endpoint": "http://localhost:9090/api/v1/userinfo",
   "jwks_uri": "http://localhost:9090/.well-known/jwks.json",
+  "revocation_endpoint": "http://localhost:9090/api/v1/token/revoke",
   "response_types_supported": ["code"],
+  "grant_types_supported": ["authorization_code", "refresh_token"],
   "subject_types_supported": ["public"],
   "id_token_signing_alg_values_supported": ["RS256"],
   "scopes_supported": ["openid", "profile", "email"],
   "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post", "none"],
-  "claims_supported": ["sub", "email", "email_verified"]
+  "code_challenge_methods_supported": ["S256"],
+  "claims_supported": ["sub", "iss", "aud", "exp", "iat", "email", "email_verified", "name", "picture"]
 }
 ```
 
@@ -554,7 +680,7 @@ GET /.well-known/jwks.json
     {
       "kty": "RSA",
       "use": "sig",
-      "kid": "key-id",
+      "kid": "sso-key-1",
       "n": "0vx7agoebGcQSuuPiLJXZpt...",
       "e": "AQAB"
     }
@@ -576,20 +702,18 @@ GET /auth/providers
 
 **成功响应** `200 OK`:
 ```json
-{
-  "providers": [
-    {
-      "name": "google",
-      "display_name": "Google",
-      "auth_url": "/auth/google"
-    },
-    {
-      "name": "github",
-      "display_name": "GitHub",
-      "auth_url": "/auth/github"
-    }
-  ]
-}
+[
+  {
+    "name": "google",
+    "label": "Google",
+    "icon": "https://www.google.com/favicon.ico"
+  },
+  {
+    "name": "github",
+    "label": "GitHub",
+    "icon": "https://github.com/favicon.ico"
+  }
+]
 ```
 
 ### 第三方登录
@@ -606,7 +730,15 @@ GET /auth/{provider}
 |------|------|
 | provider | 提供商名称（google/github） |
 
-**响应**: 302重定向到第三方授权页面
+**查询参数**:
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| provider | 否 | 优先使用路径参数，其次查询参数 |
+| redirect_uri | 否 | 回调地址，默认Referer头 |
+| state | 否 | CSRF保护参数 |
+
+**响应**: 307重定向到第三方授权页面
 
 ### 第三方回调
 
@@ -615,6 +747,21 @@ GET /auth/{provider}
 ```
 GET /auth/{provider}/callback?code=<code>&state=<state>
 ```
+
+**路径参数**:
+
+| 参数 | 说明 |
+|------|------|
+| provider | 提供商名称 |
+
+**查询参数**:
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| code | 是 | OAuth授权码 |
+| state | 是 | CSRF验证 |
+| provider | 否 | 优先使用路径参数 |
+| redirect_uri | 否 | 回调地址 |
 
 **成功响应** `200 OK`:
 ```json
@@ -625,6 +772,13 @@ GET /auth/{provider}/callback?code=<code>&state=<state>
   "expires_in": 900
 }
 ```
+
+**错误响应**:
+
+| 状态码 | 说明 |
+|--------|------|
+| 400 | 缺少code或state无效 |
+| 500 | 登录失败 |
 
 ---
 
@@ -637,7 +791,7 @@ GET /auth/{provider}/callback?code=<code>&state=<state>
 获取详细的系统健康信息。
 
 ```
-GET /api/v1/api/v1/admin/health
+GET /api/v1/admin/health
 Authorization: Bearer <access_token>
 ```
 
@@ -645,9 +799,8 @@ Authorization: Bearer <access_token>
 ```json
 {
   "status": "healthy",
+  "timestamp": "2024-01-15T10:30:00Z",
   "database": "connected",
-  "cache": "connected",
-  "uptime": "24h30m",
   "version": "1.0.0"
 }
 ```
@@ -657,7 +810,7 @@ Authorization: Bearer <access_token>
 清理过期的Token和其他数据。
 
 ```
-POST /api/v1/api/v1/admin/cleanup
+POST /api/v1/admin/cleanup
 Authorization: Bearer <access_token>
 ```
 
@@ -665,7 +818,7 @@ Authorization: Bearer <access_token>
 ```json
 {
   "message": "清理完成",
-  "cleaned_tokens": 1234
+  "data": null
 }
 ```
 
@@ -674,17 +827,16 @@ Authorization: Bearer <access_token>
 获取用户列表。
 
 ```
-GET /api/v1/admin/users?page=1&limit=20&status=active
+GET /api/v1/admin/users?page=1&pageSize=20
 Authorization: Bearer <access_token>
 ```
 
 **查询参数**:
 
-| 参数 | 必填 | 说明 |
-|------|------|------|
-| page | 否 | 页码（默认1） |
-| limit | 否 | 每页数量（默认20） |
-| status | 否 | 用户状态过滤 |
+| 参数 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| page | 否 | 1 | 页码，必须>0 |
+| pageSize | 否 | 20 | 每页数量，必须>0且<=100 |
 
 **成功响应** `200 OK`:
 ```json
@@ -693,14 +845,17 @@ Authorization: Bearer <access_token>
     {
       "id": "550e8400-e29b-41d4-a716-446655440000",
       "email": "user@example.com",
-      "status": "active",
       "email_verified": true,
-      "created_at": "2024-01-01T00:00:00Z"
+      "mfa_enabled": false,
+      "status": "active",
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-15T10:30:00Z"
     }
   ],
   "total": 100,
   "page": 1,
-  "limit": 20
+  "page_size": 20,
+  "total_pages": 5
 }
 ```
 
@@ -713,20 +868,31 @@ GET /api/v1/admin/users/{id}
 Authorization: Bearer <access_token>
 ```
 
+**路径参数**:
+
+| 参数 | 说明 |
+|------|------|
+| id | 用户ID |
+
 **成功响应** `200 OK`:
 ```json
 {
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "email": "user@example.com",
-  "status": "active",
   "email_verified": true,
   "mfa_enabled": false,
-  "login_attempts": 0,
-  "last_login": "2024-01-15T10:30:00Z",
+  "status": "active",
   "created_at": "2024-01-01T00:00:00Z",
   "updated_at": "2024-01-15T10:30:00Z"
 }
 ```
+
+**错误响应**:
+
+| 状态码 | 说明 |
+|--------|------|
+| 400 | 缺少用户ID |
+| 404 | 用户不存在 |
 
 ### 禁用用户
 
@@ -743,10 +909,18 @@ Authorization: Bearer <access_token>
 |------|------|
 | id | 用户ID |
 
+**请求体** (可选，也可通过路径参数指定):
+```json
+{
+  "user_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
 **成功响应** `200 OK`:
 ```json
 {
-  "message": "用户已禁用"
+  "message": "用户已禁用",
+  "data": null
 }
 ```
 
@@ -765,10 +939,18 @@ Authorization: Bearer <access_token>
 |------|------|
 | id | 用户ID |
 
+**请求体** (可选，也可通过路径参数指定):
+```json
+{
+  "user_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
 **成功响应** `200 OK`:
 ```json
 {
-  "message": "用户已启用"
+  "message": "用户已启用",
+  "data": null
 }
 ```
 
@@ -790,9 +972,17 @@ Authorization: Bearer <access_token>
 **成功响应** `200 OK`:
 ```json
 {
-  "message": "用户已删除"
+  "message": "用户已删除",
+  "data": null
 }
 ```
+
+**错误响应**:
+
+| 状态码 | 说明 |
+|--------|------|
+| 400 | 缺少用户ID |
+| 404 | 用户不存在 |
 
 ### 审计日志
 
@@ -805,11 +995,11 @@ Authorization: Bearer <access_token>
 
 **查询参数**:
 
-| 参数 | 必填 | 说明 |
-|------|------|------|
-| page | 否 | 页码（默认1） |
-| pageSize | 否 | 每页数量（默认20） |
-| event_type | 否 | 事件类型过滤 |
+| 参数 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| page | 否 | 1 | 页码 |
+| pageSize | 否 | 20 | 每页数量，最大100 |
+| event_type | 否 | "" | 事件类型过滤 |
 
 **成功响应** `200 OK`:
 ```json
@@ -820,6 +1010,7 @@ Authorization: Bearer <access_token>
       "event_type": "user.login",
       "user_id": "550e8400-e29b-41d4-a716-446655440000",
       "ip_address": "192.168.1.1",
+      "details": "{}",
       "success": true,
       "timestamp": "2026-03-28T15:30:00Z"
     }
@@ -854,6 +1045,7 @@ Authorization: Bearer <access_token>
 | 403 | 无权限或账户状态异常 |
 | 404 | 资源不存在 |
 | 409 | 资源冲突（如邮箱已注册） |
+| 422 | 请求参数缺失 |
 | 429 | 请求过于频繁 |
 | 500 | 服务器内部错误 |
 

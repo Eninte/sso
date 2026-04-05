@@ -301,10 +301,11 @@ func TestAdminService_GetAuditLogs(t *testing.T) {
 func TestAdminService_NewAdminServiceWithVersion(t *testing.T) {
 	t.Run("自定义版本号", func(t *testing.T) {
 		m := mock.New()
-		adminSvc := NewAdminServiceWithVersion(m, nil, "v1.2.3")
+		adminSvc := NewAdminServiceWithVersion(m, nil, "v1.2.3", "2026-01-01T00:00:00Z")
 
 		info, _ := adminSvc.SystemHealth(context.Background())
 		assert.Equal(t, "v1.2.3", info.Version)
+		assert.Equal(t, "2026-01-01T00:00:00Z", info.BuildTime)
 	})
 
 	t.Run("默认版本号", func(t *testing.T) {
@@ -313,6 +314,7 @@ func TestAdminService_NewAdminServiceWithVersion(t *testing.T) {
 
 		info, _ := adminSvc.SystemHealth(context.Background())
 		assert.Equal(t, "dev", info.Version)
+		assert.Equal(t, "unknown", info.BuildTime)
 	})
 }
 

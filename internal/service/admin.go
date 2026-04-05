@@ -44,6 +44,7 @@ type SystemHealthInfo struct {
 	Timestamp time.Time `json:"timestamp"`
 	Database  string    `json:"database"`
 	Version   string    `json:"version"`
+	BuildTime string    `json:"build_time"`
 }
 
 // ============================================================================
@@ -52,24 +53,25 @@ type SystemHealthInfo struct {
 
 // AdminService 管理员服务实现
 type AdminService struct {
-	store   store.Store
-	cache   cache.Cache
-	version string
+	store     store.Store
+	cache     cache.Cache
+	version   string
+	buildTime string
 }
 
 // NewAdminService 创建管理员服务
 func NewAdminService(store store.Store) *AdminService {
-	return &AdminService{store: store, version: "dev"}
+	return &AdminService{store: store, version: "dev", buildTime: "unknown"}
 }
 
 // NewAdminServiceWithCache 创建带缓存的管理员服务
 func NewAdminServiceWithCache(store store.Store, cacheSvc cache.Cache) *AdminService {
-	return &AdminService{store: store, cache: cacheSvc, version: "dev"}
+	return &AdminService{store: store, cache: cacheSvc, version: "dev", buildTime: "unknown"}
 }
 
 // NewAdminServiceWithVersion 创建带版本号的管理员服务
-func NewAdminServiceWithVersion(store store.Store, cacheSvc cache.Cache, version string) *AdminService {
-	return &AdminService{store: store, cache: cacheSvc, version: version}
+func NewAdminServiceWithVersion(store store.Store, cacheSvc cache.Cache, version string, buildTime string) *AdminService {
+	return &AdminService{store: store, cache: cacheSvc, version: version, buildTime: buildTime}
 }
 
 // ============================================================================
@@ -210,6 +212,7 @@ func (s *AdminService) SystemHealth(ctx context.Context) (*SystemHealthInfo, err
 		Timestamp: time.Now(),
 		Database:  dbStatus,
 		Version:   s.version,
+		BuildTime: s.buildTime,
 	}, nil
 }
 

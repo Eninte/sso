@@ -31,6 +31,9 @@ import (
 // Version 服务版本号，通过 -ldflags 注入
 var Version = "dev"
 
+// BuildTime 构建时间，通过 -ldflags 注入
+var BuildTime = "unknown"
+
 // Services 包含所有服务实例
 type Services struct {
 	Store    *postgres.Store
@@ -67,6 +70,12 @@ type Services struct {
 //   - initHandlers: 初始化处理器和路由
 //   - startServer: 启动HTTP服务器
 func main() {
+	// 检查是否为 version 子命令
+	if len(os.Args) > 1 && os.Args[1] == "version" {
+		fmt.Printf("SSO %s (构建时间: %s)\n", Version, BuildTime)
+		os.Exit(0)
+	}
+
 	// 1. 加载配置
 	cfg, err := initConfig()
 	if err != nil {
@@ -505,7 +514,7 @@ func initServices(cfg *config.Config) (*Services, *sql.DB, error) {
 	oauthSvc := service.NewOAuthServiceWithCache(store, cacheSvc, tokenSvc)
 	auditSvc := service.NewAuditService(store)
 	mfaSvc := service.NewMFAService(store)
-	adminSvc := service.NewAdminServiceWithVersion(store, cacheSvc, Version)
+	adminSvc := service.NewAdminServiceWithVersion(store, cacheSvc, Version, BuildTime)
 
 	// ==== 初始化第三方登录服务 ====
 	socialSvc := service.NewSocialLoginService(store, jwtSvc, cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GitHubClientID, cfg.GitHubClientSecret)

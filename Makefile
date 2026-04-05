@@ -8,6 +8,11 @@ BUILD_DIR=./bin
 MIGRATION_DIR=./migrations
 TEST_DATABASE_URL ?= postgres://sso:sso@192.168.1.3:5432/sso_test?sslmode=disable
 
+# 版本信息（通过git自动获取）
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+BUILD_TIME ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
+LDFLAGS = -ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
+
 # ============================================================================
 # 默认目标
 # ============================================================================
@@ -18,11 +23,18 @@ all: test build  ## 运行测试并构建
 # 构建相关
 # ============================================================================
 .PHONY: build
-build: ## 构建应用二进制文件
-	@echo "构建 $(APP_NAME)..."
+build: ## 构建应用二进制文件（自动注入版本信息）
+	@echo "构建 $(APP_NAME) $(VERSION)..."
 	@mkdir -p $(BUILD_DIR)
-	go build -o $(BUILD_DIR)/$(APP_NAME) cmd/server/main.go
-	@echo "构建完成: $(BUILD_DIR)/$(APP_NAME)"
+	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP_NAME) cmd/server/main.go
+	@echo "构建完成: $(BUILD_DIR)/$(APP_NAME) (版本: $(VERSION), 构建时间: $(BUILD_TIME))"
+
+.PHONY: release
+release: ## 构建发布版本（清理后构建，带版本标签）
+	@echo "构建发布版本..."
+	$(MAKE) clean
+	$(MAKE) build
+	@echo "发布版本构建完成"
 
 .PHONY: run
 run: ## 运行应用

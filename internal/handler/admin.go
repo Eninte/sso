@@ -282,10 +282,11 @@ func (h *AdminHandler) HandleSystemHealth(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"status":    health.Status,
-		"timestamp": health.Timestamp.Format("2006-01-02T15:04:05Z07:00"),
-		"database":  health.Database,
-		"version":   health.Version,
+		"status":     health.Status,
+		"timestamp":  health.Timestamp.Format("2006-01-02T15:04:05Z07:00"),
+		"database":   health.Database,
+		"version":    health.Version,
+		"build_time": health.BuildTime,
 	})
 }
 

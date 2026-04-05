@@ -201,6 +201,7 @@ func TestAdminService_SystemHealth(t *testing.T) {
 		assert.Equal(t, "ok", health.Status)
 		assert.Equal(t, "ok", health.Database)
 		assert.Equal(t, "dev", health.Version)
+		assert.Equal(t, "unknown", health.BuildTime)
 		assert.NotZero(t, health.Timestamp)
 	})
 

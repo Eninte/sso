@@ -291,6 +291,7 @@ func TestAdminHandler_HandleSystemHealth(t *testing.T) {
 		assert.Contains(t, resp, "timestamp")
 		assert.Contains(t, resp, "database")
 		assert.Contains(t, resp, "version")
+		assert.Contains(t, resp, "build_time")
 	})
 }
 
