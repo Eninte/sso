@@ -15,7 +15,7 @@ TrueNAS SCALE支持两种部署方式：
 
 ### 前置要求
 
-- TrueNAS SCALE 22.12+
+- TrueNAS SCALE 22.12+（已在 25.04 版本验证）
 - 已启用Apps功能
 - 至少4GB可用内存
 - 至少20GB可用存储
@@ -26,8 +26,6 @@ TrueNAS SCALE支持两种部署方式：
 
 ```
 /mnt/pool/sso/
-├── postgres/          # PostgreSQL数据
-├── redis/             # Redis数据
 ├── keys/              # RSA密钥
 ├── config/            # 配置文件
 └── logs/              # 日志文件
@@ -39,10 +37,10 @@ TrueNAS SCALE支持两种部署方式：
 2. 选择您的存储池
 3. 点击 **Add Dataset**
 4. 创建以下数据集：
-   - `sso-postgres`
-   - `sso-redis`
    - `sso-keys`
    - `sso-config`
+
+> **注意**：PostgreSQL 和 Redis 已经部署好了，无需创建相关数据集。
 
 ### 步骤2：生成RSA密钥
 
@@ -74,24 +72,30 @@ SERVER_HOST=0.0.0.0
 SERVER_PORT=9090
 SERVER_ENV=production
 
-# 数据库配置
-DB_HOST=sso-postgres
+# 数据库配置（指向已部署的 PostgreSQL）
+DB_HOST=your-postgres-host  # 修改为您的 PostgreSQL 主机地址
 DB_PORT=5432
 DB_NAME=sso
 DB_USER=sso
 DB_PASSWORD=YourStrongPassword123!
-DB_SSL_MODE=disable
+DB_SSL_MODE=disable  # 内网可使用 disable，生产环境建议 require
 
-# 数据库连接池
-DB_MAX_OPEN_CONNS=50
-DB_MAX_IDLE_CONNS=25
+# 数据库连接池配置
+DB_MAX_OPEN_CONNS=100
+DB_MAX_IDLE_CONNS=50
 DB_CONN_MAX_LIFETIME=5m
+DB_CONN_MAX_IDLE_TIME=1m
 DB_QUERY_TIMEOUT=10s
 
-# Redis配置
-REDIS_HOST=sso-redis
+# Redis配置（指向已部署的 Redis）
+REDIS_ENABLE=true
+REDIS_HOST=your-redis-host  # 修改为您的 Redis 主机地址
 REDIS_PORT=6379
-REDIS_PASSWORD=
+REDIS_PASSWORD=  # 如有密码请填写
+REDIS_DB=0
+REDIS_CONN_TIMEOUT=5s
+REDIS_POOL_SIZE=10
+REDIS_MIN_IDLE_CONNS=5
 
 # JWT配置
 JWT_PRIVATE_KEY_PATH=/app/keys/private.pem
@@ -100,6 +104,11 @@ JWT_ACCESS_TOKEN_TTL=15m
 JWT_REFRESH_TOKEN_TTL=168h
 JWT_ISSUER=sso
 
+# 密钥轮换配置
+KEY_ROTATION_ENABLED=false
+KEY_ROTATION_INTERVAL=2160h
+KEY_TRANSITION_PERIOD=24h
+
 # 安全配置
 BCRYPT_COST=12
 RATE_LIMIT_REQUESTS=100
@@ -107,8 +116,25 @@ RATE_LIMIT_WINDOW=1m
 MAX_LOGIN_ATTEMPTS=5
 LOCKOUT_DURATION=30m
 
+# MFA配置（⚠️ 生产环境必须设置强密钥，否则恢复码可被伪造）
+MFA_RECOVERY_HMAC_KEY=your_strong_hmac_key_here
+
+# 邮件配置
+SMTP_HOST=smtp.example.com
+SMTP_PORT=465
+SMTP_USER=your_smtp_username
+SMTP_PASSWORD=your_smtp_password
+SMTP_FROM=noreply@yourdomain.com
+
 # CORS配置（根据您的域名修改）
 CORS_ALLOWED_ORIGINS=http://localhost:3000,https://yourdomain.com
+
+# Metrics配置 (Prometheus指标端点认证)
+METRICS_USERNAME=metrics
+METRICS_PASSWORD=your_metrics_password
+
+# 优雅关闭配置
+SHUTDOWN_TIMEOUT=30s
 EOF
 ```
 
@@ -132,53 +158,12 @@ services:
       - /mnt/pool/sso/config/.env
     volumes:
       - /mnt/pool/sso/keys:/app/keys:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
-    networks:
-      - sso-network
-
-  # PostgreSQL数据库
-  postgres:
-    image: postgres:15-alpine
-    container_name: sso-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: sso
-      POSTGRES_USER: sso
-      POSTGRES_PASSWORD: YourStrongPassword123!
-    volumes:
-      - /mnt/pool/sso/postgres:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sso -d sso"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    networks:
-      - sso-network
-
-  # Redis缓存
-  redis:
-    image: redis:7-alpine
-    container_name: sso-redis
-    restart: unless-stopped
-    volumes:
-      - /mnt/pool/sso/redis:/data
-    command: redis-server --appendonly yes
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
     networks:
       - sso-network
 
@@ -190,13 +175,19 @@ EOF
 
 ### 步骤5：通过TrueNAS界面部署
 
-1. **进入Apps界面**
+> **TrueNAS 25.04 版本界面说明**：
+> - 菜单名称为 **Applications**（不是 "Apps"）
+> - 需要先配置应用目录才能安装 Custom App
+
+1. **进入Applications界面**
    - 登录TrueNAS SCALE
-   - 点击左侧菜单 **Apps**
+   - 点击左侧菜单 **Applications**
+   - 如果是首次使用，需要先配置 **Apps** → **Configuration** → **Choose Pool**
 
 2. **安装Custom App**
    - 点击 **Discover Apps**
-   - 搜索 "Custom App"
+   - 在右上角搜索框输入 "Custom App"
+   - 或者直接点击 **Custom App** 按钮
    - 点击 **Install**
 
 3. **配置Custom App**
@@ -213,6 +204,8 @@ EOF
    
    **Environment Variables**:
    添加所有环境变量（从.env文件）
+   
+   > **提示**：可以点击 "Add from YAML" 批量导入环境变量
 
    **Storage**:
    - Host Path: `/mnt/pool/sso/keys`
@@ -249,7 +242,8 @@ docker compose logs -f
 ssh admin@truenas-ip
 
 # 运行迁移
-docker exec sso-app migrate -path /app/migrations -database "postgres://sso:YourStrongPassword123!@sso-postgres:5432/sso?sslmode=disable" up
+# 使用环境变量 DATABASE_URL（推荐）
+docker exec sso-app migrate -path /app/migrations -database "postgres://sso:YourStrongPassword123!@your-postgres-host:5432/sso?sslmode=disable" up
 ```
 
 ### 步骤8：验证部署
@@ -264,13 +258,16 @@ curl http://localhost:9090/health
 
 ---
 
-## 方式二：分别部署各个服务
+## 方式二：分别部署各个服务（可选）
+
+> **注意**：您的 TrueNAS 25.04 已经部署了 PostgreSQL 和 Redis，可以跳过此部分。
+> 此部分仅作为参考，如果需要重新部署或在其他环境部署时使用。
 
 如果需要更精细的控制，可以分别通过TrueNAS Apps部署各个服务。
 
 ### 部署PostgreSQL
 
-1. 进入 **Apps** → **Discover Apps**
+1. 进入 **Applications** → **Discover Apps**
 2. 搜索 "PostgreSQL"
 3. 点击 **Install**
 4. 配置：
@@ -283,18 +280,20 @@ curl http://localhost:9090/health
 
 ### 部署Redis
 
-1. 搜索 "Redis"
-2. 点击 **Install**
-3. 配置：
+1. 进入 **Applications** → **Discover Apps**
+2. 搜索 "Redis"
+3. 点击 **Install**
+4. 配置：
    - App Name: `sso-redis`
    - Storage: 选择数据集 `/mnt/pool/sso/redis`
    - Port: `6379`
 
 ### 部署SSO应用
 
-1. 搜索 "Custom App"
-2. 点击 **Install**
-3. 配置SSO容器，指向PostgreSQL和Redis服务
+1. 进入 **Applications** → **Discover Apps**
+2. 搜索 "Custom App"
+3. 点击 **Install**
+4. 配置SSO容器，指向PostgreSQL和Redis服务
 
 ---
 
@@ -594,15 +593,14 @@ chmod 644 /mnt/pool/sso/keys/public.pem
 cd /mnt/pool/sso
 docker compose down
 
-# 删除数据（谨慎操作！）
-rm -rf /mnt/pool/sso/postgres/*
-rm -rf /mnt/pool/sso/redis/*
+# 删除 SSO 应用数据（谨慎操作！）
+rm -rf /mnt/pool/sso/config/*
 
 # 重新启动
 docker compose up -d
 
 # 重新运行迁移
-docker exec sso-app migrate -path /app/migrations -database "postgres://sso:YourStrongPassword123!@sso-postgres:5432/sso?sslmode=disable" up
+docker exec sso-app migrate -path /app/migrations -database "postgres://sso:YourStrongPassword123!@your-postgres-host:5432/sso?sslmode=disable" up
 ```
 
 ---
@@ -654,13 +652,15 @@ docker compose -f /mnt/pool/sso/docker-compose.yml pull
 docker compose -f /mnt/pool/sso/docker-compose.yml up -d
 
 # 运行数据库迁移
-docker exec sso-app migrate -path /app/migrations -database "postgres://sso:PASSWORD@sso-postgres:5432/sso?sslmode=disable" up
+docker exec sso-app migrate -path /app/migrations -database "postgres://sso:PASSWORD@your-postgres-host:5432/sso?sslmode=disable" up
 
-# 备份数据库
-docker exec sso-postgres pg_dump -U sso sso | gzip > backup.sql.gz
+# 备份数据库（替换 your-postgres-container 为您的 PostgreSQL 容器名称）
+docker exec your-postgres-container pg_dump -U sso sso | gzip > backup.sql.gz
 
 # 进入容器
 docker exec -it sso-app sh
-docker exec -it sso-postgres psql -U sso sso
-docker exec -it sso-redis redis-cli
+# 进入 PostgreSQL（替换 your-postgres-container 为您的 PostgreSQL 容器名称）
+docker exec -it your-postgres-container psql -U sso sso
+# 进入 Redis（替换 your-redis-container 为您的 Redis 容器名称）
+docker exec -it your-redis-container redis-cli
 ```

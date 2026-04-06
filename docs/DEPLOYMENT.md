@@ -50,10 +50,22 @@ DB_USER=sso
 DB_PASSWORD=your_strong_password_here
 DB_SSL_MODE=require
 
+# 数据库连接池配置
+DB_MAX_OPEN_CONNS=100
+DB_MAX_IDLE_CONNS=50
+DB_CONN_MAX_LIFETIME=5m
+DB_CONN_MAX_IDLE_TIME=1m
+DB_QUERY_TIMEOUT=10s
+
 # Redis配置
+REDIS_ENABLE=true
 REDIS_HOST=redis
 REDIS_PORT=6379
 REDIS_PASSWORD=your_redis_password
+REDIS_DB=0
+REDIS_CONN_TIMEOUT=5s
+REDIS_POOL_SIZE=10
+REDIS_MIN_IDLE_CONNS=5
 
 # JWT配置
 JWT_PRIVATE_KEY_PATH=/app/keys/private.pem
@@ -62,12 +74,27 @@ JWT_ACCESS_TOKEN_TTL=15m
 JWT_REFRESH_TOKEN_TTL=168h
 JWT_ISSUER=sso
 
+# 密钥轮换配置
+KEY_ROTATION_ENABLED=false
+KEY_ROTATION_INTERVAL=2160h
+KEY_TRANSITION_PERIOD=24h
+
 # 安全配置
 BCRYPT_COST=12
 RATE_LIMIT_REQUESTS=100
 RATE_LIMIT_WINDOW=1m
 MAX_LOGIN_ATTEMPTS=5
 LOCKOUT_DURATION=30m
+
+# MFA配置（⚠️ 生产环境必须设置强密钥，否则恢复码可被伪造）
+MFA_RECOVERY_HMAC_KEY=your_strong_hmac_key_here
+
+# 邮件配置
+SMTP_HOST=smtp.example.com
+SMTP_PORT=465
+SMTP_USER=your_smtp_username
+SMTP_PASSWORD=your_smtp_password
+SMTP_FROM=noreply@yourdomain.com
 
 # 优雅关闭配置
 SHUTDOWN_TIMEOUT=30s
@@ -104,8 +131,16 @@ docker-compose -f docker/docker-compose.yml up -d
 5. **运行数据库迁移**
 
 ```bash
+# 使用环境变量 DATABASE_URL
+export DATABASE_URL='postgres://sso:your_strong_password_here@postgres:5432/sso?sslmode=require'
 docker-compose -f docker/docker-compose.yml exec sso \
-  migrate -path /app/migrations -database "postgres://sso:your_password@postgres:5432/sso?sslmode=require" up
+  migrate -path /app/migrations -database "$DATABASE_URL" up
+```
+
+或使用 Makefile（需要在宿主机安装 migrate 工具）：
+```bash
+export DATABASE_URL='postgres://sso:your_strong_password_here@localhost:5432/sso?sslmode=require'
+make migrate-up
 ```
 
 6. **验证部署**
@@ -116,8 +151,12 @@ curl http://localhost:9090/health
 
 ### Docker Compose配置说明
 
+完整配置请参考 `docker/docker-compose.yml`，以下是关键配置说明：
+
 ```yaml
 # docker/docker-compose.yml
+
+version: '3.8'
 
 services:
   sso:
@@ -127,9 +166,36 @@ services:
     ports:
       - "9090:9090"
     environment:
-      # 环境变量配置
+      # 服务器配置
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=9090
+      - SERVER_ENV=production
+      # 数据库配置
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=sso
+      - DB_USER=sso
+      # ⚠️ 必须设置 DB_PASSWORD 环境变量
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_SSL_MODE=require
+      # Redis配置
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # JWT配置
+      - JWT_PRIVATE_KEY_PATH=/app/keys/private.pem
+      - JWT_PUBLIC_KEY_PATH=/app/keys/public.pem
+      - JWT_ACCESS_TOKEN_TTL=15m
+      - JWT_REFRESH_TOKEN_TTL=168h
+      - JWT_ISSUER=sso
+      # 安全配置
+      - BCRYPT_COST=12
+      - RATE_LIMIT_REQUESTS=100
+      - RATE_LIMIT_WINDOW=1m
+      - MAX_LOGIN_ATTEMPTS=5
+      - LOCKOUT_DURATION=30m
     volumes:
-      - ../keys:/app/keys:ro  # 挂载密钥（只读）
+      # 挂载密钥文件 (生产环境应使用Secrets)
+      - ../keys:/app/keys:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -141,6 +207,56 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 10s
+    networks:
+      - sso-network
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: sso
+      POSTGRES_USER: sso
+      # ⚠️ 必须设置 DB_PASSWORD 环境变量
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sso -d sso"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - sso-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sso-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  sso-network:
+    driver: bridge
 ```
 
 ---
@@ -436,7 +552,11 @@ sudo -u postgres psql -c "ALTER USER sso WITH PASSWORD 'your_password';"
 3. **构建应用**
 
 ```bash
-go build -o sso cmd/server/main.go
+# 使用 Makefile 构建（推荐，自动注入版本信息）
+make build
+
+# 或手动构建（不包含版本信息）
+go build -o ./bin/sso cmd/server/main.go
 ```
 
 4. **创建系统用户**
@@ -450,7 +570,7 @@ sudo chown -R sso:sso /opt/sso
 5. **复制文件**
 
 ```bash
-sudo cp sso /opt/sso/
+sudo cp ./bin/sso /opt/sso/
 sudo cp keys/*.pem /opt/sso/keys/
 sudo cp .env /opt/sso/
 sudo chmod 600 /opt/sso/keys/private.pem
