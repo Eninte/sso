@@ -217,10 +217,9 @@ func validateDatabaseConfig(c *Config) error {
 		return ErrDBPasswordRequired
 	}
 
-	// 生产环境必须启用数据库SSL
+	// 生产环境建议启用数据库SSL（内网部署时允许disable）
 	if c.Env == "production" && c.DBSSLMode == "disable" {
-		slog.Error("生产环境数据库必须启用SSL")
-		return fmt.Errorf("生产环境必须设置 DB_SSL_MODE=require 或更高")
+		slog.Warn("生产环境数据库未启用SSL，建议使用require或更高模式")
 	}
 
 	return nil
