@@ -166,7 +166,8 @@ func validateKeyPath(path string) error {
 	}
 
 	perm := info.Mode().Perm()
-	if perm&0077 != 0 {
+	// Docker bind mount场景下文件owner会变为root，仅在显式开启时检查权限
+	if os.Getenv("STRICT_KEY_PERMISSIONS") == "true" && perm&0077 != 0 {
 		return fmt.Errorf("%w: %o", ErrKeyPermissionOpen, perm)
 	}
 
@@ -176,7 +177,7 @@ func validateKeyPath(path string) error {
 	}
 
 	// 允许的路径前缀
-	allowedPrefixes := []string{"/etc/sso/", "/keys/", "/home/"}
+	allowedPrefixes := []string{"/etc/sso/", "/keys/", "/home/", "/app/"}
 
 	// 生产环境不允许/tmp/路径
 	env := os.Getenv("SERVER_ENV")

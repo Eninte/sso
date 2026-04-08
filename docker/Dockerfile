@@ -21,6 +21,9 @@ WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
 
+# 安装数据库迁移工具
+RUN go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+
 # 复制源代码
 COPY . .
 
@@ -50,13 +53,18 @@ RUN addgroup -g 1000 sso && \
 # 创建应用目录
 WORKDIR /app
 
-# 从构建阶段复制二进制文件
+# 从构建阶段复制二进制文件和迁移工具
 COPY --from=builder /build/sso /app/sso
+COPY --from=builder /go/bin/migrate /usr/local/bin/migrate
+COPY --from=builder /build/migrations /app/migrations
 
 # 创建必要的目录
 RUN mkdir -p /app/keys && chown -R sso:sso /app
 
-# 切换到非root用户
+# 复制并设置entrypoint
+COPY docker/entrypoint.sh /app/entrypoint.sh
+USER root
+RUN chmod +x /app/entrypoint.sh
 USER sso
 
 # 暴露端口
@@ -66,5 +74,5 @@ EXPOSE 9090
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:9090/health || exit 1
 
-# 启动命令
-ENTRYPOINT ["/app/sso"]
+# 启动命令（通过entrypoint自动迁移后启动）
+ENTRYPOINT ["/app/entrypoint.sh"]

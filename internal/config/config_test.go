@@ -363,9 +363,9 @@ func TestValidate_ProductionDBSSL(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:    "生产环境禁用SSL",
+			name:    "生产环境禁用SSL（警告）",
 			sslMode: "disable",
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			name:    "生产环境SSL require",

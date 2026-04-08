@@ -353,16 +353,26 @@ func validateProductionConfig(c *Config) error {
 		return nil
 	}
 
+	lanMode := os.Getenv("LAN_DEPLOYMENT") == "true"
+
 	// 检查CORS配置不包含localhost
 	if strings.Contains(strings.ToLower(c.CORSAllowedOrigins), "localhost") {
-		slog.Error("生产环境CORS配置不能包含localhost", "cors_origins", c.CORSAllowedOrigins)
-		return fmt.Errorf("生产环境CORS_ALLOWED_ORIGINS不能包含localhost")
+		if lanMode {
+			slog.Warn("生产环境CORS配置包含localhost（LAN部署模式）", "cors_origins", c.CORSAllowedOrigins)
+		} else {
+			slog.Error("生产环境CORS配置不能包含localhost", "cors_origins", c.CORSAllowedOrigins)
+			return fmt.Errorf("生产环境CORS_ALLOWED_ORIGINS不能包含localhost")
+		}
 	}
 
 	// 检查默认CORS配置
 	if c.CORSAllowedOrigins == "http://localhost:3000" {
-		slog.Error("生产环境不能使用默认CORS配置")
-		return fmt.Errorf("生产环境必须设置 CORS_ALLOWED_ORIGINS")
+		if lanMode {
+			slog.Warn("生产环境使用默认CORS配置（LAN部署模式）")
+		} else {
+			slog.Error("生产环境不能使用默认CORS配置")
+			return fmt.Errorf("生产环境必须设置 CORS_ALLOWED_ORIGINS")
+		}
 	}
 
 	// 检查JWT Issuer配置

@@ -1,6 +1,7 @@
 .git
 .kilo
 .kiro
+.github
 reports
 bin
 coverage.out
@@ -9,4 +10,13 @@ test-results.xml
 *.md
 !README.md
 docs/
-loadtest/results
+loadtest/
+test/
+scripts/
+docker/
+!docker/entrypoint.sh
+.env*
+*.yml
+*_test.go
+.air.toml
+.golangci.yml

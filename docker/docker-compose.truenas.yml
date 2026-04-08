@@ -11,7 +11,7 @@ services:
   # SSO服务
   # --------------------------------------------------------------------------
   sso:
-    image: ${DOCKERHUB_USER:-your-dockerhub-user}/sso:${IMAGE_TAG:-latest}
+    image: ${IMAGE_NAME:-sso}:${IMAGE_TAG:-latest}
     container_name: sso-app
     restart: unless-stopped
     ports:
@@ -20,7 +20,7 @@ services:
       - .env
     volumes:
       # 挂载RSA密钥 (只读)
-      - ${KEYS_PATH:-./keys}:/app/keys:ro
+      - ${KEYS_PATH:-./keys}:/keys:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
       interval: 30s

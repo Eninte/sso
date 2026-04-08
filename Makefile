@@ -164,6 +164,16 @@ docker-push-tag: ## 构建并推送带版本标签的镜像到Docker Hub
 	docker push $(IMAGE_NAME):latest
 
 # ============================================================================
+# TrueNAS 部署
+# ============================================================================
+TRUENAS_HOST ?= 192.168.1.3
+TRUENAS_USER ?= root
+
+.PHONY: deploy
+deploy: ## 部署到TrueNAS (用法: make deploy [TRUENAS_HOST=192.168.1.3])
+	TRUENAS_HOST=$(TRUENAS_HOST) TRUENAS_USER=$(TRUENAS_USER) bash scripts/deploy-truenas.sh
+
+# ============================================================================
 # 代码质量
 # ============================================================================
 .PHONY: lint
