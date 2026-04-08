@@ -4,14 +4,15 @@
 
 ## 部署方式
 
-TrueNAS SCALE支持两种部署方式：
+TrueNAS SCALE支持三种部署方式：
 
-1. **Custom App（推荐）** - 使用Docker Compose
-2. **TrueCharts** - 使用预构建的Helm Chart
+1. **Docker Hub + Custom App（推荐）** - 本地构建镜像推送到Docker Hub，TrueNAS拉取部署
+2. **Custom App（直接构建）** - 在TrueNAS上直接构建Docker镜像
+3. **TrueCharts** - 使用预构建的Helm Chart
 
 ---
 
-## 方式一：Custom App部署（推荐）
+## 方式一：Docker Hub + Custom App（推荐）
 
 ### 前置要求
 
@@ -19,6 +20,178 @@ TrueNAS SCALE支持两种部署方式：
 - 已启用Apps功能
 - 至少4GB可用内存
 - 至少20GB可用存储
+- Docker Hub账号
+- PostgreSQL 和 Redis 已部署（本项目假设已存在）
+
+### 步骤1：本地构建并推送镜像
+
+```bash
+# 登录Docker Hub
+docker login
+
+# 构建并推送镜像（latest标签）
+make docker-push DOCKERHUB_USER=your-dockerhub-user
+
+# 或者带版本标签推送
+make docker-push-tag DOCKERHUB_USER=your-dockerhub-user VERSION=v1.0.0
+```
+
+### 步骤2：在TrueNAS上准备数据集
+
+在TrueNAS中创建数据集用于持久化存储：
+
+```
+/mnt/pool/sso/
+├── keys/              # RSA密钥
+└── config/            # 配置文件
+```
+
+**创建数据集**：
+
+1. 进入 **Storage** → **Pools**
+2. 选择您的存储池
+3. 点击 **Add Dataset**
+4. 创建以下数据集：
+   - `sso-keys`
+   - `sso-config`
+
+### 步骤3：生成RSA密钥
+
+通过SSH连接到TrueNAS：
+
+```bash
+ssh admin@truenas-ip
+
+# 创建密钥目录
+mkdir -p /mnt/pool/sso/keys
+
+# 生成RSA密钥对
+openssl genrsa -out /mnt/pool/sso/keys/private.pem 2048
+openssl rsa -in /mnt/pool/sso/keys/private.pem -pubout -out /mnt/pool/sso/keys/public.pem
+
+# 设置权限
+chmod 600 /mnt/pool/sso/keys/private.pem
+chmod 644 /mnt/pool/sso/keys/public.pem
+```
+
+### 步骤4：创建配置文件
+
+复制环境配置模板并修改：
+
+```bash
+# 从项目目录复制模板到TrueNAS
+scp docker/.env.truenas.example admin@truenas-ip:/mnt/pool/sso/config/.env
+
+# SSH连接到TrueNAS并编辑
+ssh admin@truenas-ip
+nano /mnt/pool/sso/config/.env
+```
+
+必须修改的配置项：
+- `DOCKERHUB_USER` - 您的Docker Hub用户名
+- `DB_HOST` - TrueNAS PostgreSQL地址
+- `DB_PASSWORD` - 数据库密码
+- `REDIS_HOST` - TrueNAS Redis地址
+- `MFA_RECOVERY_HMAC_KEY` - HMAC密钥（生产环境必须设置）
+- `CORS_ALLOWED_ORIGINS` - 您的域名
+- `METRICS_PASSWORD` - Metrics密码
+
+### 步骤5：通过Docker Compose部署
+
+```bash
+# SSH连接到TrueNAS
+ssh admin@truenas-ip
+
+# 进入配置目录
+cd /mnt/pool/sso/config
+
+# 复制docker-compose.truenas.yml到当前目录
+# 可以从项目目录复制，或手动创建
+```
+
+创建 `docker-compose.yml`（或使用项目中的 `docker-compose.truenas.yml`）：
+
+```bash
+cat > /mnt/pool/sso/config/docker-compose.yml << 'EOF'
+services:
+  sso:
+    image: ${DOCKERHUB_USER:-your-dockerhub-user}/sso:${IMAGE_TAG:-latest}
+    container_name: sso-app
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    env_file:
+      - .env
+    volumes:
+      - /mnt/pool/sso/keys:/app/keys:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - sso-network
+
+networks:
+  sso-network:
+    driver: bridge
+EOF
+```
+
+启动服务：
+
+```bash
+cd /mnt/pool/sso/config
+docker compose up -d
+```
+
+### 步骤6：运行数据库迁移（首次部署）
+
+确保已安装 `migrate` CLI 工具：
+
+```bash
+go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+```
+
+在本地运行迁移（需将项目 `migrations` 目录放在当前目录下）：
+
+```bash
+migrate -path ./migrations -database "postgres://sso:YourPassword@postgres-host:5432/sso?sslmode=disable" up
+```
+
+### 步骤7：验证部署
+
+```bash
+# 检查健康状态
+curl http://localhost:9090/health
+
+# 预期响应
+{"status":"ok","service":"sso","timestamp":"2024-01-15T10:30:00Z"}
+```
+
+### 日常更新
+
+当有新版本需要部署时：
+
+```bash
+# 1. 本地推送新镜像
+make docker-push DOCKERHUB_USER=your-dockerhub-user
+
+# 2. TrueNAS上拉取并重启
+ssh admin@truenas-ip
+cd /mnt/pool/sso/config
+docker compose pull
+docker compose up -d
+```
+
+---
+
+## 方式二：Custom App部署（直接构建）
+
+> 注意：此方式需要在TrueNAS上直接构建Docker镜像，适用于没有Docker Hub账号或内网部署场景。
+
+### 前置要求
 
 ### 步骤1：准备数据集
 
@@ -42,7 +215,7 @@ TrueNAS SCALE支持两种部署方式：
 
 > **注意**：PostgreSQL 和 Redis 已经部署好了，无需创建相关数据集。
 
-### 步骤2：生成RSA密钥
+### 步骤2：在TrueNAS上生成RSA密钥（或从本地上传）
 
 通过SSH连接到TrueNAS：
 
@@ -142,8 +315,6 @@ EOF
 
 ```bash
 cat > /mnt/pool/sso/docker-compose.yml << 'EOF'
-version: '3.8'
-
 services:
   # SSO服务
   sso:
@@ -238,12 +409,9 @@ docker compose logs -f
 ### 步骤7：运行数据库迁移
 
 ```bash
-# SSH连接到TrueNAS
-ssh admin@truenas-ip
-
-# 运行迁移
-# 使用环境变量 DATABASE_URL（推荐）
-docker exec sso-app migrate -path /app/migrations -database "postgres://sso:YourStrongPassword123!@your-postgres-host:5432/sso?sslmode=disable" up
+# 在本地运行迁移（需要安装 migrate 工具）
+# go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+migrate -path ./migrations -database "postgres://sso:YourStrongPassword123!@your-postgres-host:5432/sso?sslmode=disable" up
 ```
 
 ### 步骤8：验证部署
@@ -600,7 +768,7 @@ rm -rf /mnt/pool/sso/config/*
 docker compose up -d
 
 # 重新运行迁移
-docker exec sso-app migrate -path /app/migrations -database "postgres://sso:YourStrongPassword123!@your-postgres-host:5432/sso?sslmode=disable" up
+migrate -path ./migrations -database "postgres://sso:YourStrongPassword123!@your-postgres-host:5432/sso?sslmode=disable" up
 ```
 
 ---
@@ -651,8 +819,8 @@ docker compose -f /mnt/pool/sso/docker-compose.yml restart
 docker compose -f /mnt/pool/sso/docker-compose.yml pull
 docker compose -f /mnt/pool/sso/docker-compose.yml up -d
 
-# 运行数据库迁移
-docker exec sso-app migrate -path /app/migrations -database "postgres://sso:PASSWORD@your-postgres-host:5432/sso?sslmode=disable" up
+# 运行数据库迁移（需要本地安装 migrate 工具）
+migrate -path ./migrations -database "postgres://sso:PASSWORD@your-postgres-host:5432/sso?sslmode=disable" up
 
 # 备份数据库（替换 your-postgres-container 为您的 PostgreSQL 容器名称）
 docker exec your-postgres-container pg_dump -U sso sso | gzip > backup.sql.gz

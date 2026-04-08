@@ -1,0 +1,38 @@
+# ============================================================================
+# SSO服务 Docker Compose配置 (TrueNAS SCALE - 使用外部PostgreSQL和Redis)
+# ============================================================================
+# 使用方法:
+#   1. 复制 .env.truenas.example 为 .env 并填写配置
+#   2. docker compose -f docker-compose.truenas.yml up -d
+# ============================================================================
+
+services:
+  # --------------------------------------------------------------------------
+  # SSO服务
+  # --------------------------------------------------------------------------
+  sso:
+    image: ${DOCKERHUB_USER:-your-dockerhub-user}/sso:${IMAGE_TAG:-latest}
+    container_name: sso-app
+    restart: unless-stopped
+    ports:
+      - "${SSO_HOST_PORT:-9090}:9090"
+    env_file:
+      - .env
+    volumes:
+      # 挂载RSA密钥 (只读)
+      - ${KEYS_PATH:-./keys}:/app/keys:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - sso-network
+
+# ============================================================================
+# 网络
+# ============================================================================
+networks:
+  sso-network:
+    driver: bridge

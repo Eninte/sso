@@ -147,6 +147,23 @@ docker-logs: ## 查看Docker日志
 	docker-compose -f docker/docker-compose.yml logs -f
 
 # ============================================================================
+# Docker镜像推送 (Docker Hub)
+# ============================================================================
+DOCKERHUB_USER ?= your-dockerhub-user
+IMAGE_NAME = $(DOCKERHUB_USER)/$(APP_NAME)
+
+.PHONY: docker-push
+docker-push: ## 构建并推送镜像到Docker Hub (latest标签)
+	docker build -f docker/Dockerfile -t $(IMAGE_NAME):latest .
+	docker push $(IMAGE_NAME):latest
+
+.PHONY: docker-push-tag
+docker-push-tag: ## 构建并推送带版本标签的镜像到Docker Hub
+	docker build -f docker/Dockerfile -t $(IMAGE_NAME):$(VERSION) -t $(IMAGE_NAME):latest .
+	docker push $(IMAGE_NAME):$(VERSION)
+	docker push $(IMAGE_NAME):latest
+
+# ============================================================================
 # 代码质量
 # ============================================================================
 .PHONY: lint
