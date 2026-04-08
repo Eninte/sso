@@ -8,6 +8,9 @@
 # --------------------------------------------------------------------------
 FROM golang:1.26.1-alpine AS builder
 
+# 使用国内Alpine镜像源（阿里云）
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
+
 # 安装必要的构建工具
 RUN apk add --no-cache git gcc musl-dev
 
@@ -30,6 +33,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/sso cmd/server/
 # 阶段2: 运行
 # --------------------------------------------------------------------------
 FROM alpine:3.19
+
+# 使用国内Alpine镜像源（阿里云）
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 
 # 安装运行时依赖
 RUN apk add --no-cache ca-certificates curl tzdata
