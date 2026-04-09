@@ -1,7 +1,15 @@
 .git
-.kilo
-.kiro
 .github
+
+# IDE/AI工具配置目录
+.claude
+.kilo
+.kilocode
+.kiro
+.lingma
+.opencode
+.qoder
+.trae
 reports
 bin
 coverage.out
@@ -20,3 +28,18 @@ docker/
 *_test.go
 .air.toml
 .golangci.yml
+
+# SDKs（构建时不需要）
+sdks/
+
+# 端到端测试
+test/e2e/
+
+# 许可证文件
+LICENSE
+
+# Go模块校验文件（go.mod已足够）
+go.sum
+
+# 其他Git配置文件
+.gitignore
