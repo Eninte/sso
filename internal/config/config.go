@@ -97,6 +97,7 @@ type Config struct {
 
 	// 优雅关闭配置
 	ShutdownTimeout time.Duration // 优雅关闭超时时间
+	LANDeployment   bool          // LAN部署模式（放宽部分生产环境校验）
 }
 
 // Load 从环境变量加载配置
@@ -181,6 +182,7 @@ func Load() (*Config, error) {
 
 		// 优雅关闭配置
 		ShutdownTimeout: getEnvDuration("SHUTDOWN_TIMEOUT", 30*time.Second),
+		LANDeployment:   getEnvBool("LAN_DEPLOYMENT", false),
 	}
 
 	// 验证必需的配置
@@ -353,7 +355,7 @@ func validateProductionConfig(c *Config) error {
 		return nil
 	}
 
-	lanMode := os.Getenv("LAN_DEPLOYMENT") == "true"
+	lanMode := c.LANDeployment
 
 	// 检查CORS配置不包含localhost
 	if strings.Contains(strings.ToLower(c.CORSAllowedOrigins), "localhost") {
@@ -534,4 +536,72 @@ func splitAndTrim(s string) []string {
 		}
 	}
 	return result
+}
+
+// GetEnvPath 返回.env文件路径
+func GetEnvPath() string {
+	return getEnv("ENV_FILE_PATH", "/app/.env")
+}
+
+// escapeEnvValue 转义.env文件值中的特殊字符
+// 防止值中包含换行符、引号等导致注入
+func escapeEnvValue(value string) string {
+	// 如果值包含特殊字符，使用双引号包裹并转义内部字符
+	needsQuoting := false
+	for _, c := range value {
+		if c == '\n' || c == '\r' || c == '"' || c == '\\' || c == ' ' || c == '#' || c == '$' {
+			needsQuoting = true
+			break
+		}
+	}
+	if !needsQuoting {
+		return value
+	}
+	// 转义反斜杠、双引号和美元符号
+	escaped := strings.ReplaceAll(value, "\\", "\\\\")
+	escaped = strings.ReplaceAll(escaped, "\"", "\\\"")
+	escaped = strings.ReplaceAll(escaped, "$", "\\$")
+	escaped = strings.ReplaceAll(escaped, "\n", "\\n")
+	escaped = strings.ReplaceAll(escaped, "\r", "\\r")
+	return "\"" + escaped + "\""
+}
+
+// WriteEnvFile 将配置键值对写入.env文件
+func WriteEnvFile(path string, values map[string]string) error {
+	var lines []string
+	// 按固定顺序写入，方便阅读
+	order := []string{
+		"SERVER_HOST", "SERVER_PORT", "SERVER_ENV",
+		"DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD", "DB_SSL_MODE",
+		"DB_MAX_OPEN_CONNS", "DB_MAX_IDLE_CONNS", "DB_CONN_MAX_LIFETIME", "DB_CONN_MAX_IDLE_TIME", "DB_QUERY_TIMEOUT",
+		"REDIS_ENABLE", "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_DB",
+		"REDIS_CONN_TIMEOUT", "REDIS_POOL_SIZE", "REDIS_MIN_IDLE_CONNS",
+		"JWT_PRIVATE_KEY_PATH", "JWT_PUBLIC_KEY_PATH", "JWT_ACCESS_TOKEN_TTL", "JWT_REFRESH_TOKEN_TTL", "JWT_ISSUER",
+		"KEY_ROTATION_ENABLED", "KEY_ROTATION_INTERVAL", "KEY_TRANSITION_PERIOD",
+		"BCRYPT_COST", "RATE_LIMIT_REQUESTS", "RATE_LIMIT_WINDOW",
+		"MAX_LOGIN_ATTEMPTS", "LOCKOUT_DURATION", "MFA_RECOVERY_HMAC_KEY",
+		"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM",
+		"CORS_ALLOWED_ORIGINS",
+		"METRICS_USERNAME", "METRICS_PASSWORD",
+		"SHUTDOWN_TIMEOUT", "LAN_DEPLOYMENT",
+	}
+	written := make(map[string]bool)
+	for _, key := range order {
+		if val, ok := values[key]; ok {
+			lines = append(lines, key+"="+escapeEnvValue(val))
+			written[key] = true
+		}
+	}
+	// 写入剩余的键（不在顺序列表中的）
+	for key, val := range values {
+		if !written[key] {
+			lines = append(lines, key+"="+escapeEnvValue(val))
+		}
+	}
+	content := strings.Join(lines, "\n") + "\n"
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, []byte(content), 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }

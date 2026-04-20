@@ -79,8 +79,9 @@ func main() {
 	// 1. 加载配置
 	cfg, err := initConfig()
 	if err != nil {
-		slog.Error("配置加载失败", "error", err)
-		os.Exit(1)
+		slog.Warn("配置加载失败，启动配置向导", "error", err)
+		startSetupWizard(err)
+		return
 	}
 
 	// 2. 初始化日志
@@ -239,6 +240,13 @@ func initHandlers(cfg *config.Config, svc *Services) (*mux.Router, *middleware.R
 	// ==== 注册路由 ====
 	// 健康检查端点 (不需要认证)
 	router.HandleFunc("/health", healthHandler).Methods("GET")
+
+	// 初始化面板端点 (无管理员时可用，有管理员时返回404)
+	initHandler := handler.NewInitHandler(svc.Store, svc.Password, svc.Cache, svc.Audit, Version, BuildTime)
+	router.HandleFunc("/init", initHandler.HandleInitPage).Methods("GET")
+	router.HandleFunc("/api/v1/init/status", initHandler.HandleSystemStatus).Methods("GET")
+	router.HandleFunc("/api/v1/init/admin", initHandler.HandleCreateAdmin).Methods("POST")
+	router.HandleFunc("/api/v1/init/client", initHandler.HandleCreateClient).Methods("POST")
 
 	// Prometheus指标端点 (使用Basic Auth保护)
 	router.Handle("/metrics", middleware.BasicAuth(cfg.MetricsUsername, cfg.MetricsPassword)(http.HandlerFunc(metricsHandler.HandleMetrics))).Methods("GET")
@@ -590,6 +598,54 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"ok","service":"sso","timestamp":"` + time.Now().Format(time.RFC3339) + `"}`))
+}
+
+// startSetupWizard 启动配置向导HTTP服务
+// 当config.Load()失败时调用，启动轻量HTTP服务显示配置向导
+// 阻塞直到收到配置写入后通过syscall.Exec重启进程
+func startSetupWizard(loadErr error) {
+	envPath := config.GetEnvPath()
+	setupHandler := handler.NewSetupHandler(envPath, Version)
+
+	router := mux.NewRouter()
+	router.Use(middleware.SecurityHeaders)
+	router.Use(middleware.RequestID)
+	router.Use(middleware.Logger)
+
+	// 配置向导限流：10请求/分钟，防止暴力攻击
+	setupRateLimiter := middleware.NewRateLimiter(10, time.Minute)
+	defer setupRateLimiter.Stop()
+	router.Use(setupRateLimiter.Middleware)
+
+	router.HandleFunc("/setup", setupHandler.HandleSetupPage).Methods("GET")
+	router.HandleFunc("/api/v1/setup/save", setupHandler.HandleSetupSave).Methods("POST")
+	router.HandleFunc("/api/v1/setup/test-db", setupHandler.HandleSetupTestDB).Methods("POST")
+	router.HandleFunc("/api/v1/setup/test-redis", setupHandler.HandleSetupTestRedis).Methods("POST")
+	router.HandleFunc("/api/v1/setup/generate-keys", setupHandler.HandleSetupGenerateKeys).Methods("POST")
+
+	// 根路径重定向到/setup
+	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/setup", http.StatusFound)
+	})
+
+	addr := os.Getenv("SERVER_HOST") + ":" + os.Getenv("SERVER_PORT")
+	if addr == ":" {
+		addr = "127.0.0.1:9090"
+	}
+	slog.Info("配置向导启动", "address", addr, "config_error", loadErr.Error())
+
+	server := &http.Server{
+		Addr:         addr,
+		Handler:      router,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+
+	if err := server.ListenAndServe(); err != nil {
+		slog.Error("配置向导服务启动失败", "error", err)
+		os.Exit(1)
+	}
 }
 
 // gracefulShutdown 优雅关闭服务器

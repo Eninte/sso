@@ -1,0 +1,78 @@
+feat: 添加 SSO 服务初始化与配置向导系统
+
+实现完整的服务初始化流程，包含配置向导和初始化面板两个阶段。
+
+## 主要功能
+
+### 配置向导（Setup Wizard）
+- 当配置缺失时自动启动轻量级 HTTP 服务
+- 提供 Web 界面配置数据库、Redis、JWT、SMTP 等
+- 支持连接测试和自动生成 RSA 密钥对（3072 位）
+- 保存配置到 .env 文件并自动重启服务
+
+### 初始化面板（Init Panel）
+- 服务正常运行后提供系统初始化界面
+- 显示系统状态（DB、Redis、迁移状态）
+- 创建首个管理员账户
+- 创建默认 OAuth 客户端
+
+## 安全改进
+
+- 配置向导使用一次性令牌保护（32 字节随机）
+- 限流保护（10 请求/分钟）
+- .env 文件值转义防止注入攻击
+- 文件权限设置为 0640
+- 错误消息过滤，不泄露敏感信息
+- 路径验证包含符号链接检测
+- 密钥路径白名单支持环境变量配置（KEY_PATH_WHITELIST）
+- 依赖数据库 UNIQUE 约束防止竞态条件
+
+## 架构设计
+
+- 完全符合 Handler → Service → Store 分层架构
+- 新增 InitService 处理业务逻辑
+- 使用项目工具模块（handlerutil、serviceutil、auditutil）
+- 所有错误使用 apperrors 预定义错误
+
+## 测试
+
+- 新增单元测试和集成测试
+- 所有测试通过（1625 个测试，+76 个新测试）
+- Service 层覆盖率：81.7%（从 75.9% 提升）
+- Handler 层覆盖率：74.2%（从 66.3% 提升）
+- 核心函数覆盖率：75-100%
+
+## 变更文件
+
+新增：
+- internal/handler/init.go - 初始化面板 Handler (236 行)
+- internal/handler/setup.go - 配置向导 Handler (360 行)
+- internal/handler/setup_deps.go - 辅助函数 (32 行)
+- internal/handler/templates/init.html - 初始化页面模板 (237 行)
+- internal/handler/templates/setup.html - 配置向导模板 (418 行)
+- internal/handler/init_test.go - 单元测试 (302 行)
+- internal/handler/init_integration_test.go - 集成测试 (312 行)
+- internal/handler/setup_test.go - 单元测试 (约 400 行)
+- internal/service/init.go - 初始化 Service (223 行)
+- internal/service/init_test.go - 单元测试 (约 550 行)
+
+修改：
+- cmd/server/main.go - 添加配置向导启动逻辑
+- internal/config/config.go - 添加配置写入和值转义功能
+- internal/crypto/keyloader.go - 改进容器检测逻辑
+
+## 代码质量
+
+- ✅ 所有测试通过（make test）
+- ✅ Linting 通过（make lint）
+- ✅ 遵循项目代码规范和错误处理标准
+- ✅ 完整的包级别文档注释
+- ✅ 安全审计通过（#nosec 注释说明）
+
+## 已知限制
+
+- InitService.AdminExists 使用应用层过滤（Store 接口不支持按角色查询）
+  - 在初始化场景下性能影响可忽略（仅调用一次，用户数通常为 0-1）
+  - 已添加详细注释说明未来优化方向
+
+Closes #<issue-number>

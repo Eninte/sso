@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSO 部署初始化</title>
+    <style nonce="{{.Nonce}}">
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f7fa; color: #333; line-height: 1.6; }
+        .container { max-width: 640px; margin: 0 auto; padding: 24px 16px; }
+        h1 { text-align: center; margin-bottom: 8px; font-size: 24px; }
+        .subtitle { text-align: center; color: #666; margin-bottom: 32px; font-size: 14px; }
+        .card { background: #fff; border-radius: 8px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .card h2 { font-size: 18px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid #eee; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-size: 14px; font-weight: 500; margin-bottom: 4px; color: #555; }
+        .form-group input { width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+        .form-group input:focus { outline: none; border-color: #4a90d9; box-shadow: 0 0 0 2px rgba(74,144,217,0.2); }
+        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; }
+        .btn-primary { background: #4a90d9; color: #fff; }
+        .btn-primary:hover { background: #357abd; }
+        .btn-primary:disabled { background: #a0c4e8; cursor: not-allowed; }
+        .btn-block { width: 100%; padding: 12px; font-size: 16px; }
+        .status-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
+        .status-row:last-child { border-bottom: none; }
+        .status-label { font-weight: 500; }
+        .status-badge { padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+        .badge-ok { background: #d4edda; color: #155724; }
+        .badge-error { background: #f8d7da; color: #721c24; }
+        .badge-warn { background: #fff3cd; color: #856404; }
+        .badge-info { background: #e2e3e5; color: #383d41; }
+        #alert-area { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 100; }
+        .alert { padding: 12px 24px; border-radius: 6px; margin-bottom: 8px; font-size: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+        .alert-success { background: #d4edda; color: #155724; }
+        .alert-error { background: #f8d7da; color: #721c24; }
+        .completed-overlay { text-align: center; padding: 48px 24px; }
+        .completed-overlay h2 { color: #28a745; margin-bottom: 12px; }
+        .step { margin-bottom: 8px; }
+        .step.done { color: #28a745; }
+        .step.current { color: #4a90d9; font-weight: 500; }
+    </style>
+</head>
+<body>
+<div id="alert-area"></div>
+<div class="container">
+    <h1>SSO 部署初始化</h1>
+    <p class="subtitle">版本 {{.Version}} · 构建时间 {{.BuildTime}}</p>
+
+    <!-- 系统状态 -->
+    <div class="card" id="statusCard">
+        <h2>系统状态</h2>
+        <div id="statusArea"><p style="color:#888">加载中...</p></div>
+    </div>
+
+    <!-- 管理员创建 -->
+    <div class="card" id="adminCard">
+        <h2>创建管理员账户</h2>
+        <div id="adminForm">
+            <div class="form-group">
+                <label>邮箱 *</label>
+                <input id="adminEmail" type="email" placeholder="admin@example.com" required>
+            </div>
+            <div class="form-group">
+                <label>密码 *</label>
+                <input id="adminPassword" type="password" placeholder="至少8位，包含大小写字母和数字" required>
+            </div>
+            <div class="form-group">
+                <label>确认密码 *</label>
+                <input id="adminPasswordConfirm" type="password" required>
+            </div>
+            <button class="btn btn-primary btn-block" id="adminBtn" onclick="createAdmin()">创建管理员</button>
+        </div>
+    </div>
+
+    <!-- OAuth客户端创建 -->
+    <div class="card" id="clientCard">
+        <h2>创建 OAuth 客户端</h2>
+        <div id="clientForm">
+            <div class="form-group">
+                <label>客户端名称 *</label>
+                <input id="clientName" placeholder="例如: My Application" required>
+            </div>
+            <div class="form-group">
+                <label>回调地址 *</label>
+                <input id="clientRedirect" placeholder="https://app.example.com/callback" required>
+            </div>
+            <button class="btn btn-primary btn-block" id="clientBtn" onclick="createClient()">创建客户端</button>
+            <div id="clientResult" style="display:none; margin-top:16px; padding:16px; background:#f8f9fa; border-radius:4px;">
+                <p style="font-weight:500; margin-bottom:8px;">客户端凭证 (请妥善保存):</p>
+                <div class="form-group"><label>Client ID</label><input id="outClientId" readonly></div>
+                <div class="form-group"><label>Client Secret</label><input id="outClientSecret" readonly></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script nonce="{{.Nonce}}">
+function showAlert(msg, type) {
+    const area = document.getElementById('alert-area');
+    const div = document.createElement('div');
+    div.className = 'alert alert-' + type;
+    div.textContent = msg;
+    area.appendChild(div);
+    setTimeout(() => div.remove(), 5000);
+}
+
+async function loadStatus() {
+    try {
+        const res = await fetch('/api/v1/init/status');
+        if (res.status === 404) {
+            showCompleted();
+            return;
+        }
+        const data = await res.json();
+        const statusArea = document.getElementById('statusArea');
+        statusArea.innerHTML = '';
+
+        const db = data.db;
+        if (db.status === 'ok') {
+            statusArea.appendChild(statusRow('数据库', 'ok', '正常'));
+        } else {
+            statusArea.appendChild(statusRow('数据库', 'error', db.message));
+        }
+
+        const redis = data.redis;
+        if (redis.status === 'ok') {
+            statusArea.appendChild(statusRow('Redis', 'ok', '正常'));
+        } else if (redis.status === 'disabled') {
+            statusArea.appendChild(statusRow('Redis', 'info', '已禁用 (内存缓存)'));
+        } else {
+            statusArea.appendChild(statusRow('Redis', 'error', redis.message));
+        }
+
+        const mig = data.migrations;
+        if (mig && mig.status === 'ok') {
+            statusArea.appendChild(statusRow('数据库迁移', 'ok', 'v' + mig.version));
+        } else if (mig && mig.status === 'dirty') {
+            statusArea.appendChild(statusRow('数据库迁移', 'warn', 'v' + mig.version + ' (脏数据)'));
+        } else if (mig) {
+            statusArea.appendChild(statusRow('数据库迁移', 'error', mig.message));
+        }
+
+        statusArea.appendChild(statusRow('服务版本', 'info', data.version));
+        statusArea.appendChild(statusRow('构建时间', 'info', data.build_time));
+    } catch(e) {
+        document.getElementById('statusArea').innerHTML = '<p style="color:#dc3545">加载状态失败: ' + e.message + '</p>';
+    }
+}
+
+function statusRow(label, badge, text) {
+    const div = document.createElement('div');
+    div.className = 'status-row';
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'status-label';
+    labelSpan.textContent = label;
+    const badgeSpan = document.createElement('span');
+    badgeSpan.className = 'status-badge badge-' + badge;
+    badgeSpan.textContent = text;
+    div.appendChild(labelSpan);
+    div.appendChild(badgeSpan);
+    return div;
+}
+
+function showCompleted() {
+    document.getElementById('statusCard').innerHTML = '<div class="completed-overlay"><h2>初始化已完成</h2><p>管理员账户已存在，系统已就绪。</p></div>';
+    document.getElementById('adminCard').style.display = 'none';
+    document.getElementById('clientCard').style.display = 'none';
+}
+
+async function createAdmin() {
+    const email = document.getElementById('adminEmail').value;
+    const password = document.getElementById('adminPassword').value;
+    const confirm = document.getElementById('adminPasswordConfirm').value;
+
+    if (!email || !password) { showAlert('请填写所有必填项', 'error'); return; }
+    if (password !== confirm) { showAlert('两次密码不一致', 'error'); return; }
+
+    const btn = document.getElementById('adminBtn');
+    btn.disabled = true;
+    btn.textContent = '创建中...';
+
+    try {
+        const res = await fetch('/api/v1/init/admin', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({email, password})
+        });
+        const json = await res.json();
+        if (res.ok) {
+            showAlert('管理员创建成功!', 'success');
+            document.getElementById('adminForm').innerHTML = '<p style="color:#28a745; text-align:center; padding:16px;">管理员账户已创建: ' + email + '</p>';
+        } else {
+            showAlert(json.message || '创建失败', 'error');
+            btn.disabled = false;
+            btn.textContent = '创建管理员';
+        }
+    } catch(e) {
+        showAlert('请求失败: ' + e.message, 'error');
+        btn.disabled = false;
+        btn.textContent = '创建管理员';
+    }
+}
+
+async function createClient() {
+    const name = document.getElementById('clientName').value;
+    const redirect = document.getElementById('clientRedirect').value;
+
+    if (!name || !redirect) { showAlert('请填写所有必填项', 'error'); return; }
+
+    const btn = document.getElementById('clientBtn');
+    btn.disabled = true;
+    btn.textContent = '创建中...';
+
+    try {
+        const res = await fetch('/api/v1/init/client', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name, redirect_uri: redirect})
+        });
+        const json = await res.json();
+        if (res.ok) {
+            showAlert('OAuth客户端创建成功!', 'success');
+            document.getElementById('outClientId').value = json.data.client_id;
+            document.getElementById('outClientSecret').value = json.data.client_secret;
+            document.getElementById('clientResult').style.display = 'block';
+            btn.style.display = 'none';
+        } else {
+            showAlert(json.message || '创建失败', 'error');
+            btn.disabled = false;
+            btn.textContent = '创建客户端';
+        }
+    } catch(e) {
+        showAlert('请求失败: ' + e.message, 'error');
+        btn.disabled = false;
+        btn.textContent = '创建客户端';
+    }
+}
+
+loadStatus();
+</script>
+</body>
+</html>

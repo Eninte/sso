@@ -166,8 +166,14 @@ func validateKeyPath(path string) error {
 	}
 
 	perm := info.Mode().Perm()
-	// Docker bind mount场景下文件owner会变为root，仅在显式开启时检查权限
-	if os.Getenv("STRICT_KEY_PERMISSIONS") == "true" && perm&0077 != 0 {
+	isContainer := func() bool {
+		if v := os.Getenv("STRICT_KEY_PERMISSIONS"); v == "false" {
+			return true
+		}
+		_, err := os.Stat("/.dockerenv")
+		return err == nil
+	}()
+	if !isContainer && perm&0077 != 0 {
 		return fmt.Errorf("%w: %o", ErrKeyPermissionOpen, perm)
 	}
 
