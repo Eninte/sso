@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <meta name="x-apple-disable-message-reformatting">
+    <meta name="format-detection" content="telephone=no">
+    <title>{{.Subject}}</title>
+    <style type="text/css">
+        /* ====== 重置样式 ====== */
+        * {
+            margin: 0;
+            padding: 0;
+            border: 0;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            min-width: 100% !important;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+            font-size: 16px;
+            line-height: 1.5;
+            color: #333333;
+            background-color: #ffffff;
+        }
+
+        /* ====== 深色模式支持 ====== */
+        @media (prefers-color-scheme: dark) {
+            body {
+                background-color: #1a1a1a !important;
+                color: #e0e0e0 !important;
+            }
+
+            .email-container {
+                background-color: #2d2d2d !important;
+            }
+
+            .email-header {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+            }
+
+            .email-content {
+                background-color: #2d2d2d !important;
+                color: #e0e0e0 !important;
+            }
+
+            .email-footer {
+                background-color: #1a1a1a !important;
+                color: #999999 !important;
+                border-top-color: #444444 !important;
+            }
+
+            h1, h2, h3, h4, h5, h6 {
+                color: #ffffff !important;
+            }
+
+            p, span, a {
+                color: #e0e0e0 !important;
+            }
+
+            a {
+                color: #667eea !important;
+            }
+
+            .security-note {
+                background-color: #3d3d3d !important;
+                border-left-color: #ff9800 !important;
+                color: #e0e0e0 !important;
+            }
+
+            .button {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+                color: #ffffff !important;
+            }
+
+            .button:hover {
+                opacity: 0.9 !important;
+            }
+        }
+
+        /* ====== 容器样式 ====== */
+        .email-wrapper {
+            width: 100%;
+            background-color: #f5f5f5;
+            padding: 20px 0;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .email-wrapper {
+                background-color: #0a0a0a !important;
+            }
+        }
+
+        .email-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .email-container {
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5) !important;
+            }
+        }
+
+        /* ====== 响应式设计 ====== */
+        @media only screen and (max-width: 600px) {
+            .email-container {
+                max-width: 100% !important;
+                width: 100% !important;
+                border-radius: 0 !important;
+            }
+
+            .email-header {
+                padding: 20px 15px !important;
+            }
+
+            .email-content {
+                padding: 20px 15px !important;
+            }
+
+            .email-footer {
+                padding: 15px !important;
+                font-size: 12px !important;
+            }
+
+            h1 {
+                font-size: 24px !important;
+            }
+
+            h2 {
+                font-size: 20px !important;
+            }
+
+            .button {
+                width: 100% !important;
+                display: block !important;
+                box-sizing: border-box !important;
+            }
+
+            .button-link {
+                display: block !important;
+                width: 100% !important;
+            }
+
+            .footer-links {
+                display: block !important;
+            }
+
+            .footer-links a {
+                display: block !important;
+                margin: 5px 0 !important;
+            }
+        }
+
+        /* ====== 头部样式 ====== */
+        .email-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 30px;
+            text-align: center;
+            color: #ffffff;
+        }
+
+        .email-header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 600;
+            letter-spacing: -0.5px;
+        }
+
+        .logo {
+            max-width: 150px;
+            height: auto;
+            margin-bottom: 15px;
+        }
+
+        /* ====== 内容样式 ====== */
+        .email-content {
+            padding: 30px;
+            background-color: #ffffff;
+        }
+
+        .email-content h2 {
+            color: #333333;
+            font-size: 22px;
+            margin-bottom: 15px;
+            font-weight: 600;
+        }
+
+        .email-content p {
+            color: #666666;
+            margin-bottom: 15px;
+            line-height: 1.6;
+        }
+
+        .email-content a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .email-content a:hover {
+            text-decoration: underline;
+        }
+
+        /* ====== 按钮样式 ====== */
+        .button-container {
+            text-align: center;
+            margin: 30px 0;
+        }
+
+        .button {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #ffffff;
+            padding: 14px 32px;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 16px;
+            transition: opacity 0.2s ease;
+            border: none;
+            cursor: pointer;
+        }
+
+        .button:hover {
+            opacity: 0.9;
+            text-decoration: none;
+        }
+
+        .button:active {
+            opacity: 0.8;
+        }
+
+        /* ====== 安全提示样式 ====== */
+        .security-note {
+            background-color: #fff3cd;
+            border-left: 4px solid #ff9800;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+            font-size: 14px;
+            color: #856404;
+        }
+
+        .security-note strong {
+            display: block;
+            margin-bottom: 8px;
+            color: #ff9800;
+        }
+
+        /* ====== 页脚样式 ====== */
+        .email-footer {
+            background-color: #f9f9f9;
+            padding: 20px 30px;
+            border-top: 1px solid #e0e0e0;
+            font-size: 13px;
+            color: #999999;
+            text-align: center;
+        }
+
+        .footer-content {
+            margin-bottom: 15px;
+        }
+
+        .footer-links {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .footer-links a {
+            color: #667eea;
+            text-decoration: none;
+            margin: 0 10px;
+        }
+
+        .footer-links a:hover {
+            text-decoration: underline;
+        }
+
+        .footer-divider {
+            color: #e0e0e0;
+            margin: 0 5px;
+        }
+
+        .copyright {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #999999;
+        }
+
+        /* ====== 预览文本隐藏 ====== */
+        .preheader {
+            display: none;
+            font-size: 1px;
+            color: #fefefe;
+            line-height: 1px;
+            max-height: 0;
+            max-width: 0;
+            opacity: 0;
+            overflow: hidden;
+        }
+
+        /* ====== 表格兼容性 ====== */
+        table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+
+        td {
+            padding: 0;
+        }
+
+        img {
+            border: 0;
+            display: block;
+            outline: none;
+            text-decoration: none;
+            max-width: 100%;
+            height: auto;
+        }
+
+        /* ====== 链接样式 ====== */
+        a[x-apple-data-detectors] {
+            color: inherit !important;
+            text-decoration: none !important;
+            font-size: inherit !important;
+            font-family: inherit !important;
+            font-weight: inherit !important;
+            line-height: inherit !important;
+        }
+
+        /* ====== 打印样式 ====== */
+        @media print {
+            .email-wrapper {
+                background-color: #ffffff !important;
+            }
+
+            .email-container {
+                box-shadow: none !important;
+                border-radius: 0 !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="preheader">{{.PreheaderText}}</div>
+    <div class="email-wrapper">
+        <div class="email-container">
+            <div class="email-header">
+                {{if .LogoURL}}
+                <img src="{{.LogoURL}}" alt="{{.CompanyName}}" class="logo">
+                {{end}}
+                <h1>{{.CompanyName}}</h1>
+            </div>
+            <div class="email-content">
+                <h2>您好，{{.Username}}！</h2>
+                <p>感谢您注册我们的服务。请点击下面的按钮验证您的邮箱地址：</p>
+                
+                <div class="button-container">
+                    <a href="{{.ActionURL}}" class="button">{{.ActionText}}</a>
+                </div>
+                
+                <p style="color: #999999; font-size: 12px; margin-top: 15px;">
+                    如果按钮无法使用，请复制以下链接到浏览器：<br>
+                    <a href="{{.ActionURL}}" style="color: #667eea; word-break: break-all;">{{.ActionURL}}</a>
+                </p>
+
+                {{if .SecurityNote}}
+                <div class="security-note">
+                    <strong>⚠️ 安全提示</strong>
+                    {{.SecurityNote}}
+                </div>
+                {{else}}
+                <div class="security-note">
+                    <strong>⚠️ 安全提示</strong>
+                    此链接将在15分钟后失效。如果您没有注册此账户，请忽略此邮件。
+                </div>
+                {{end}}
+            </div>
+            <div class="email-footer">
+                <div class="footer-content">
+                    <p>© {{.Year}} {{.CompanyName}}。版权所有。</p>
+                    <p>
+                        {{if .SupportEmail}}
+                        <strong>支持：</strong><a href="mailto:{{.SupportEmail}}">{{.SupportEmail}}</a>
+                        {{end}}
+                    </p>
+                </div>
+                {{if .UnsubscribeURL}}
+                <div class="footer-links">
+                    <a href="{{.UnsubscribeURL}}">取消订阅</a>
+                </div>
+                {{end}}
+                {{if .FooterText}}
+                <div class="copyright">
+                    {{.FooterText}}
+                </div>
+                {{end}}
+            </div>
+        </div>
+    </div>
+</body>
+</html>

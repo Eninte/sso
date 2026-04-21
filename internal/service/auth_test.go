@@ -1111,3 +1111,436 @@ func TestAuthService_RefreshTokenWithAudit_VerifyLog(t *testing.T) {
 		assert.Equal(t, "192.168.2.1", logs[0].IPAddress)
 	})
 }
+
+// ============================================================================
+// revokeTokenWithRetry 集成测试
+// ============================================================================
+
+// MockCache 模拟缓存实现
+type MockCache struct {
+	data             map[string]interface{}
+	deleteErr        error
+	deleteCallCount  int
+	deletedKeys      []string
+	setErr           error
+	getErr           error
+	deletePatternErr error
+	closeErr         error
+}
+
+// NewMockCache 创建模拟缓存
+func NewMockCache() *MockCache {
+	return &MockCache{
+		data:        make(map[string]interface{}),
+		deletedKeys: make([]string, 0),
+	}
+}
+
+// Get 获取缓存值
+func (m *MockCache) Get(ctx context.Context, key string, dest interface{}) error {
+	if m.getErr != nil {
+		return m.getErr
+	}
+	value, ok := m.data[key]
+	if !ok {
+		return cache.ErrCacheMiss
+	}
+	// 简单的赋值（实际应该是JSON反序列化）
+	if v, ok := dest.(*interface{}); ok {
+		*v = value
+	}
+	return nil
+}
+
+// Set 设置缓存值
+func (m *MockCache) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+	if m.setErr != nil {
+		return m.setErr
+	}
+	m.data[key] = value
+	return nil
+}
+
+// SetWithNilProtection 设置缓存值（带空值保护）
+func (m *MockCache) SetWithNilProtection(ctx context.Context, key string, value interface{}, ttl time.Duration, nilTTL time.Duration) error {
+	if m.setErr != nil {
+		return m.setErr
+	}
+	m.data[key] = value
+	return nil
+}
+
+// Delete 删除缓存值
+func (m *MockCache) Delete(ctx context.Context, key string) error {
+	m.deleteCallCount++
+	m.deletedKeys = append(m.deletedKeys, key)
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
+	delete(m.data, key)
+	return nil
+}
+
+// DeletePattern 删除匹配模式的缓存值
+func (m *MockCache) DeletePattern(ctx context.Context, pattern string) error {
+	if m.deletePatternErr != nil {
+		return m.deletePatternErr
+	}
+	return nil
+}
+
+// Close 关闭缓存
+func (m *MockCache) Close() error {
+	return m.closeErr
+}
+
+// TestAuthService_RevokeTokenWithRetry_SuccessAfterRetry 测试重试成功场景
+// 验证: 需求 1.1, 1.6, 1.7
+func TestAuthService_RevokeTokenWithRetry_SuccessAfterRetry(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("数据库临时不可用-重试成功后Token被正确撤销", func(t *testing.T) {
+		storeInst := mock.New()
+		mockCache := NewMockCache()
+
+		// 创建Token
+		token := &model.Token{
+			ID:           "token-1",
+			UserID:       "user-1",
+			AccessToken:  "test-access-token-123",
+			RefreshToken: "test-refresh-token-456",
+			CreatedAt:    time.Now(),
+			ExpiresAt:    time.Now().Add(15 * time.Minute),
+		}
+		storeInst.AddToken(token)
+
+		// 在缓存中存储Token信息
+		mockCache.data[cache.TokenKey("test-access-token-123")] = token
+
+		// 创建认证服务（带缓存）
+		passwordSvc := crypto.NewPasswordService(4)
+		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+		jwtSvc := crypto.NewJWTService(
+			privateKey,
+			&privateKey.PublicKey,
+			"test-issuer",
+			15*time.Minute,
+			7*24*time.Hour,
+		)
+		authSvc := service.NewAuthServiceWithOptions(
+			storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute,
+			service.WithCache(mockCache),
+		)
+
+		// 执行撤销
+		err = authSvc.Logout(ctx, "test-access-token-123")
+
+		// 验证成功
+		require.NoError(t, err)
+
+		// 验证Token被撤销
+		revokedToken, err := storeInst.GetTokenByAccessToken(ctx, "test-access-token-123")
+		require.NoError(t, err)
+		assert.NotNil(t, revokedToken.RevokedAt)
+
+		// 验证缓存被清除
+		assert.Equal(t, 1, mockCache.deleteCallCount)
+		assert.Contains(t, mockCache.deletedKeys, cache.TokenKey("test-access-token-123"))
+		_, ok := mockCache.data[cache.TokenKey("test-access-token-123")]
+		assert.False(t, ok, "缓存应该被删除")
+	})
+
+	t.Run("缓存清除失败不影响主流程", func(t *testing.T) {
+		storeInst := mock.New()
+		mockCache := NewMockCache()
+		mockCache.deleteErr = fmt.Errorf("缓存服务暂时不可用")
+
+		// 创建Token
+		token := &model.Token{
+			ID:           "token-2",
+			UserID:       "user-2",
+			AccessToken:  "test-access-token-789",
+			RefreshToken: "test-refresh-token-012",
+			CreatedAt:    time.Now(),
+			ExpiresAt:    time.Now().Add(15 * time.Minute),
+		}
+		storeInst.AddToken(token)
+
+		// 创建认证服务（带缓存）
+		passwordSvc := crypto.NewPasswordService(4)
+		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+		jwtSvc := crypto.NewJWTService(
+			privateKey,
+			&privateKey.PublicKey,
+			"test-issuer",
+			15*time.Minute,
+			7*24*time.Hour,
+		)
+		authSvc := service.NewAuthServiceWithOptions(
+			storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute,
+			service.WithCache(mockCache),
+		)
+
+		// 执行撤销
+		err = authSvc.Logout(ctx, "test-access-token-789")
+
+		// 验证成功（缓存清除失败不影响主流程）
+		require.NoError(t, err)
+
+		// 验证Token被撤销
+		revokedToken, err := storeInst.GetTokenByAccessToken(ctx, "test-access-token-789")
+		require.NoError(t, err)
+		assert.NotNil(t, revokedToken.RevokedAt)
+
+		// 验证尝试清除缓存
+		assert.Equal(t, 1, mockCache.deleteCallCount)
+	})
+}
+
+// TestAuthService_RevokeTokenWithRetry_MaxRetriesExceeded 测试达到最大重试次数
+// 验证: 需求 1.1, 1.6, 1.7
+func TestAuthService_RevokeTokenWithRetry_MaxRetriesExceeded(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("达到最大重试次数后返回错误", func(t *testing.T) {
+		storeInst := mock.New()
+		mockCache := NewMockCache()
+
+		// 注入持续失败的错误
+		storeInst.RevokeTokenErr = fmt.Errorf("database lock timeout")
+
+		// 创建Token
+		token := &model.Token{
+			ID:           "token-3",
+			UserID:       "user-3",
+			AccessToken:  "test-access-token-fail",
+			RefreshToken: "test-refresh-token-fail",
+			CreatedAt:    time.Now(),
+			ExpiresAt:    time.Now().Add(15 * time.Minute),
+		}
+		storeInst.AddToken(token)
+
+		// 创建认证服务（带缓存）
+		passwordSvc := crypto.NewPasswordService(4)
+		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+		jwtSvc := crypto.NewJWTService(
+			privateKey,
+			&privateKey.PublicKey,
+			"test-issuer",
+			15*time.Minute,
+			7*24*time.Hour,
+		)
+		authSvc := service.NewAuthServiceWithOptions(
+			storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute,
+			service.WithCache(mockCache),
+		)
+
+		// 执行撤销
+		err = authSvc.Logout(ctx, "test-access-token-fail")
+
+		// 验证返回错误
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "登出失败")
+		assert.Contains(t, err.Error(), "after 3 retries")
+
+		// 验证Token未被撤销
+		revokedToken, err := storeInst.GetTokenByAccessToken(ctx, "test-access-token-fail")
+		require.NoError(t, err)
+		assert.Nil(t, revokedToken.RevokedAt)
+
+		// 验证缓存未被清除
+		assert.Equal(t, 0, mockCache.deleteCallCount)
+	})
+}
+
+// TestAuthService_RevokeTokenWithRetry_CacheCleared 测试缓存被正确清除
+// 验证: 需求 1.1, 1.6, 1.7
+func TestAuthService_RevokeTokenWithRetry_CacheCleared(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("验证缓存被正确清除", func(t *testing.T) {
+		storeInst := mock.New()
+		mockCache := NewMockCache()
+
+		// 创建多个Token
+		tokens := []string{
+			"token-cache-1",
+			"token-cache-2",
+			"token-cache-3",
+		}
+
+		for i, tokenStr := range tokens {
+			token := &model.Token{
+				ID:           fmt.Sprintf("token-%d", i),
+				UserID:       fmt.Sprintf("user-%d", i),
+				AccessToken:  tokenStr,
+				RefreshToken: fmt.Sprintf("refresh-%d", i),
+				CreatedAt:    time.Now(),
+				ExpiresAt:    time.Now().Add(15 * time.Minute),
+			}
+			storeInst.AddToken(token)
+			mockCache.data[cache.TokenKey(tokenStr)] = token
+		}
+
+		// 创建认证服务（带缓存）
+		passwordSvc := crypto.NewPasswordService(4)
+		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+		jwtSvc := crypto.NewJWTService(
+			privateKey,
+			&privateKey.PublicKey,
+			"test-issuer",
+			15*time.Minute,
+			7*24*time.Hour,
+		)
+		authSvc := service.NewAuthServiceWithOptions(
+			storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute,
+			service.WithCache(mockCache),
+		)
+
+		// 撤销第一个Token
+		err = authSvc.Logout(ctx, tokens[0])
+		require.NoError(t, err)
+
+		// 验证只有第一个Token的缓存被清除
+		assert.Equal(t, 1, mockCache.deleteCallCount)
+		assert.Contains(t, mockCache.deletedKeys, cache.TokenKey(tokens[0]))
+
+		// 验证其他Token的缓存仍然存在
+		_, ok := mockCache.data[cache.TokenKey(tokens[1])]
+		assert.True(t, ok, "第二个Token的缓存应该仍然存在")
+		_, ok = mockCache.data[cache.TokenKey(tokens[2])]
+		assert.True(t, ok, "第三个Token的缓存应该仍然存在")
+	})
+}
+
+// TestAuthService_RevokeTokenWithRetry_WithoutCache 测试没有缓存的场景
+// 验证: 需求 1.1, 1.6, 1.7
+func TestAuthService_RevokeTokenWithRetry_WithoutCache(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("没有缓存时Token仍被正确撤销", func(t *testing.T) {
+		storeInst := mock.New()
+
+		// 创建Token
+		token := &model.Token{
+			ID:           "token-no-cache",
+			UserID:       "user-no-cache",
+			AccessToken:  "test-access-token-no-cache",
+			RefreshToken: "test-refresh-token-no-cache",
+			CreatedAt:    time.Now(),
+			ExpiresAt:    time.Now().Add(15 * time.Minute),
+		}
+		storeInst.AddToken(token)
+
+		// 创建认证服务（不带缓存）
+		passwordSvc := crypto.NewPasswordService(4)
+		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+		jwtSvc := crypto.NewJWTService(
+			privateKey,
+			&privateKey.PublicKey,
+			"test-issuer",
+			15*time.Minute,
+			7*24*time.Hour,
+		)
+		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
+
+		// 执行撤销
+		err = authSvc.Logout(ctx, "test-access-token-no-cache")
+
+		// 验证成功
+		require.NoError(t, err)
+
+		// 验证Token被撤销
+		revokedToken, err := storeInst.GetTokenByAccessToken(ctx, "test-access-token-no-cache")
+		require.NoError(t, err)
+		assert.NotNil(t, revokedToken.RevokedAt)
+	})
+}
+
+// TestAuthService_RevokeTokenWithRetry_ContextCancellation 测试上下文取消
+// 验证: 需求 1.1, 1.6, 1.7
+func TestAuthService_RevokeTokenWithRetry_ContextCancellation(t *testing.T) {
+	t.Run("上下文取消时停止重试", func(t *testing.T) {
+		storeInst := mock.New()
+		mockCache := NewMockCache()
+
+		// 注入持续失败的错误
+		storeInst.RevokeTokenErr = fmt.Errorf("database lock timeout")
+
+		// 创建Token
+		token := &model.Token{
+			ID:           "token-cancel",
+			UserID:       "user-cancel",
+			AccessToken:  "test-access-token-cancel",
+			RefreshToken: "test-refresh-token-cancel",
+			CreatedAt:    time.Now(),
+			ExpiresAt:    time.Now().Add(15 * time.Minute),
+		}
+		storeInst.AddToken(token)
+
+		// 创建认证服务（带缓存）
+		passwordSvc := crypto.NewPasswordService(4)
+		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+		jwtSvc := crypto.NewJWTService(
+			privateKey,
+			&privateKey.PublicKey,
+			"test-issuer",
+			15*time.Minute,
+			7*24*time.Hour,
+		)
+		authSvc := service.NewAuthServiceWithOptions(
+			storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute,
+			service.WithCache(mockCache),
+		)
+
+		// 创建可取消的上下文
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // 立即取消
+
+		// 执行撤销
+		err = authSvc.Logout(ctx, "test-access-token-cancel")
+
+		// 验证返回错误
+		require.Error(t, err)
+	})
+}
+
+// TestAuthService_RevokeTokenWithRetry_TokenNotFound 测试Token不存在的场景
+// 验证: 需求 1.1, 1.6, 1.7
+func TestAuthService_RevokeTokenWithRetry_TokenNotFound(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("Token不存在时返回错误", func(t *testing.T) {
+		storeInst := mock.New()
+		mockCache := NewMockCache()
+
+		// 创建认证服务（带缓存）
+		passwordSvc := crypto.NewPasswordService(4)
+		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+		jwtSvc := crypto.NewJWTService(
+			privateKey,
+			&privateKey.PublicKey,
+			"test-issuer",
+			15*time.Minute,
+			7*24*time.Hour,
+		)
+		authSvc := service.NewAuthServiceWithOptions(
+			storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute,
+			service.WithCache(mockCache),
+		)
+
+		// 执行撤销（Token不存在）
+		err = authSvc.Logout(ctx, "nonexistent-token")
+
+		// 验证返回错误
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "登出失败")
+	})
+}

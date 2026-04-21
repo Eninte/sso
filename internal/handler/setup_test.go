@@ -207,7 +207,7 @@ func TestNewSetupHandler(t *testing.T) {
 		assert.NotNil(t, handler)
 		assert.Equal(t, ".env", handler.envPath)
 		assert.Equal(t, "1.0.0", handler.version)
-		
+
 		// 验证令牌已生成
 		token := handler.GetSetupToken()
 		assert.NotEmpty(t, token)

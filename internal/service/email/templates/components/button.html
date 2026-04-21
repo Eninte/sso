@@ -1,0 +1,14 @@
+{{define "button"}}
+<div class="button-container">
+    <a href="{{.ActionURL}}" class="button">{{.ActionText}}</a>
+</div>
+<p style="text-align: center; color: #999999; font-size: 12px; margin-top: 15px;">
+    {{if eq .Language "en"}}
+    If the button doesn't work, copy and paste this link in your browser:
+    {{else}}
+    如果按钮无法使用，请复制以下链接到浏览器：
+    {{end}}
+    <br>
+    <a href="{{.ActionURL}}" style="color: #667eea; word-break: break-all;">{{.ActionURL}}</a>
+</p>
+{{end}}

@@ -1,0 +1,8 @@
+{{define "header"}}
+<div class="email-header">
+    {{if .LogoURL}}
+    <img src="{{.LogoURL}}" alt="{{.CompanyName}}" class="logo">
+    {{end}}
+    <h1>{{.CompanyName}}</h1>
+</div>
+{{end}}

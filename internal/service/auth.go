@@ -4,7 +4,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -18,6 +17,7 @@ import (
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/store"
 	"github.com/your-org/sso/internal/util/auditutil"
+	"github.com/your-org/sso/internal/util/retryutil"
 	"github.com/your-org/sso/internal/util/serviceutil"
 	"github.com/your-org/sso/internal/validator"
 )
@@ -453,38 +453,27 @@ func (s *AuthService) Login(ctx context.Context, req *model.LoginRequest) (*mode
 // Token刷新功能
 // ============================================================================
 
-// maxRevokeRetries Token撤销最大重试次数
-const (
-	maxRevokeRetries     = 3
-	revokeRetryBaseDelay = 100 * time.Millisecond
-)
-
-// revokeTokenWithRetry 带重试的Token撤销
+// revokeTokenWithRetry 使用指数退避算法重试撤销Token
+// 使用retryutil.ExponentialBackoffRetry实现重试逻辑
+// 保持缓存清除逻辑不变，确保Token内容在日志中被掩码
 func (s *AuthService) revokeTokenWithRetry(ctx context.Context, accessToken string) error {
-	var lastErr error
-	for i := 0; i < maxRevokeRetries; i++ {
+	config := retryutil.DefaultRetryConfig()
+
+	return retryutil.ExponentialBackoffRetry(ctx, func(ctx context.Context) error {
 		if err := s.store.RevokeToken(ctx, accessToken); err != nil {
-			lastErr = err
-			slog.Warn("Token撤销失败，准备重试",
-				"error", err,
-				"attempt", i+1,
-				"max_retries", maxRevokeRetries,
-			)
-			time.Sleep(time.Duration(i+1) * revokeRetryBaseDelay)
-			continue
+			return err
 		}
 
 		// 清除缓存（失败不影响主流程）
 		if s.cache != nil {
 			cacheKey := cache.TokenKey(accessToken)
 			if err := s.cache.Delete(ctx, cacheKey); err != nil {
-				slog.Warn("清除Token缓存失败", "error", err, "token", accessToken)
+				slog.Warn("清除Token缓存失败", "error", err, "token", maskToken(accessToken))
 			}
 		}
 
 		return nil
-	}
-	return fmt.Errorf("token撤销失败，已重试%d次: %w", maxRevokeRetries, lastErr)
+	}, config)
 }
 
 // RefreshToken 刷新Token
