@@ -1,3 +1,4 @@
+{{define "base"}}
 <!DOCTYPE html>
 <html lang="{{.Language}}">
 <head>
@@ -38,7 +39,7 @@
             }
 
             .email-header {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+                background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%) !important;
             }
 
             .email-content {
@@ -61,22 +62,22 @@
             }
 
             a {
-                color: #667eea !important;
+                color: #42a5f5 !important;
             }
 
             .security-note {
                 background-color: #3d3d3d !important;
-                border-left-color: #ff9800 !important;
-                color: #e0e0e0 !important;
+                border-left-color: #ffa726 !important;
+                color: #ffcc80 !important;
             }
 
             .button {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+                background: #1e88e5 !important;
                 color: #ffffff !important;
             }
 
             .button:hover {
-                opacity: 0.9 !important;
+                background: #1565c0 !important;
             }
         }
 
@@ -160,7 +161,7 @@
 
         /* ====== 头部样式 ====== */
         .email-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%);
             padding: 30px;
             text-align: center;
             color: #ffffff;
@@ -171,6 +172,7 @@
             font-size: 28px;
             font-weight: 600;
             letter-spacing: -0.5px;
+            color: #ffffff;
         }
 
         .logo {
@@ -199,7 +201,7 @@
         }
 
         .email-content a {
-            color: #667eea;
+            color: #1e88e5;
             text-decoration: none;
         }
 
@@ -215,42 +217,44 @@
 
         .button {
             display: inline-block;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #ffffff;
+            background: #1e88e5;
+            color: #ffffff !important;
             padding: 14px 32px;
-            text-decoration: none;
+            text-decoration: none !important;
             border-radius: 6px;
             font-weight: 600;
             font-size: 16px;
-            transition: opacity 0.2s ease;
+            transition: background-color 0.2s ease;
             border: none;
             cursor: pointer;
         }
 
         .button:hover {
-            opacity: 0.9;
-            text-decoration: none;
+            background: #1565c0;
+            text-decoration: none !important;
+            color: #ffffff !important;
         }
 
         .button:active {
-            opacity: 0.8;
+            background: #0d47a1;
         }
 
         /* ====== 安全提示样式 ====== */
         .security-note {
-            background-color: #fff3cd;
-            border-left: 4px solid #ff9800;
+            background-color: #fff8e1;
+            border-left: 4px solid #ffa726;
             padding: 15px;
             margin: 20px 0;
             border-radius: 4px;
             font-size: 14px;
-            color: #856404;
+            color: #e65100;
         }
 
         .security-note strong {
             display: block;
             margin-bottom: 8px;
-            color: #ff9800;
+            color: #f57c00;
+            font-weight: 600;
         }
 
         /* ====== 页脚样式 ====== */
@@ -274,7 +278,7 @@
         }
 
         .footer-links a {
-            color: #667eea;
+            color: #1e88e5;
             text-decoration: none;
             margin: 0 10px;
         }
@@ -359,19 +363,19 @@
                 <h1>{{.CompanyName}}</h1>
             </div>
             <div class="email-content">
-                {{.Body}}
+                {{template "content" .}}
             </div>
             <div class="email-footer">
                 <div class="footer-content">
                     {{if eq .Language "en"}}
-                    <p>© {{.Year}} {{.CompanyName}}. All rights reserved.</p>
+                    <p>&copy; {{.Year}} {{.CompanyName}}. All rights reserved.</p>
                     <p>
                         {{if .SupportEmail}}
                         <strong>Support:</strong> <a href="mailto:{{.SupportEmail}}">{{.SupportEmail}}</a>
                         {{end}}
                     </p>
                     {{else}}
-                    <p>© {{.Year}} {{.CompanyName}}。版权所有。</p>
+                    <p>&copy; {{.Year}} {{.CompanyName}}。版权所有。</p>
                     <p>
                         {{if .SupportEmail}}
                         <strong>支持：</strong><a href="mailto:{{.SupportEmail}}">{{.SupportEmail}}</a>
@@ -398,3 +402,4 @@
     </div>
 </body>
 </html>
+{{end}}

@@ -17,116 +17,77 @@ import (
 func createTestTemplateDir(t *testing.T) string {
 	tmpDir := t.TempDir()
 
-	// 创建子目录
 	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "verification"), 0755))
 	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "password_reset"), 0755))
-	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "components"), 0755))
 
-	// 创建基础模板
-	baseTemplate := `<!DOCTYPE html>
+	baseTemplate := `{{define "base"}}
+<!DOCTYPE html>
 <html lang="{{.Language}}">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Subject}}</title>
 </head>
 <body>
-    <div class="container">
-        {{if .LogoURL}}<img src="{{.LogoURL}}" alt="Logo" class="logo">{{end}}
-        <h1>{{.Title}}</h1>
-        <p>{{.Body}}</p>
-        {{if .ActionURL}}<a href="{{.ActionURL}}" class="button">{{.ActionText}}</a>{{end}}
-        {{if .SecurityNote}}<p class="security-note">{{.SecurityNote}}</p>{{end}}
-        <footer>
-            {{if .CompanyName}}<p>{{.CompanyName}}</p>{{end}}
-            {{if .SupportEmail}}<p>Support: {{.SupportEmail}}</p>{{end}}
-            {{if .UnsubscribeURL}}<a href="{{.UnsubscribeURL}}">Unsubscribe</a>{{end}}
-        </footer>
+    <div class="email-header">
+        {{if .LogoURL}}<img src="{{.LogoURL}}" alt="{{.CompanyName}}" class="logo">{{end}}
+        <h1>{{.CompanyName}}</h1>
+    </div>
+    <div class="email-content">
+        {{template "content" .}}
+    </div>
+    <div class="email-footer">
+        <div class="footer-content">
+            {{if eq .Language "en"}}
+            <p>&copy; {{.Year}} {{.CompanyName}}. All rights reserved.</p>
+            {{if .SupportEmail}}<p><strong>Support:</strong> <a href="mailto:{{.SupportEmail}}">{{.SupportEmail}}</a></p>{{end}}
+            {{else}}
+            <p>&copy; {{.Year}} {{.CompanyName}}。版权所有。</p>
+            {{if .SupportEmail}}<p><strong>支持：</strong><a href="mailto:{{.SupportEmail}}">{{.SupportEmail}}</a></p>{{end}}
+            {{end}}
+        </div>
+        {{if .UnsubscribeURL}}
+        <div class="footer-links">
+            {{if eq .Language "en"}}<a href="{{.UnsubscribeURL}}">Unsubscribe</a>{{else}}<a href="{{.UnsubscribeURL}}">取消订阅</a>{{end}}
+        </div>
+        {{end}}
+        {{if .FooterText}}<div class="copyright">{{.FooterText}}</div>{{end}}
     </div>
 </body>
-</html>`
+</html>
+{{end}}`
 
-	// 创建验证邮件模板（中文）
-	verificationZhTemplate := `<!DOCTYPE html>
-<html lang="zh">
-<head>
-    <meta charset="UTF-8">
-    <title>{{.Subject}}</title>
-</head>
-<body>
-    <h1>验证您的邮箱</h1>
-    <p>亲爱的 {{.Username}}，</p>
-    <p>感谢您注册我们的服务。请点击下方按钮验证您的邮箱地址。</p>
-    <a href="{{.ActionURL}}">{{.ActionText}}</a>
-    <p class="security-note">{{.SecurityNote}}</p>
-    <footer>
-        <p>{{.CompanyName}}</p>
-        <p>联系我们: {{.SupportEmail}}</p>
-    </footer>
-</body>
-</html>`
+	verificationZhTemplate := `{{define "content"}}
+<h1>验证您的邮箱</h1>
+<p>亲爱的 {{.Username}}，</p>
+<p>感谢您注册我们的服务。请点击下方按钮验证您的邮箱地址。</p>
+<a href="{{.ActionURL}}">{{.ActionText}}</a>
+<p class="security-note">{{.SecurityNote}}</p>
+{{end}}`
 
-	// 创建验证邮件模板（英文）
-	verificationEnTemplate := `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>{{.Subject}}</title>
-</head>
-<body>
-    <h1>Verify Your Email</h1>
-    <p>Dear {{.Username}},</p>
-    <p>Thank you for registering with us. Please click the button below to verify your email address.</p>
-    <a href="{{.ActionURL}}">{{.ActionText}}</a>
-    <p class="security-note">{{.SecurityNote}}</p>
-    <footer>
-        <p>{{.CompanyName}}</p>
-        <p>Contact us: {{.SupportEmail}}</p>
-    </footer>
-</body>
-</html>`
+	verificationEnTemplate := `{{define "content"}}
+<h1>Verify Your Email</h1>
+<p>Dear {{.Username}},</p>
+<p>Thank you for registering with us. Please click the button below to verify your email address.</p>
+<a href="{{.ActionURL}}">{{.ActionText}}</a>
+<p class="security-note">{{.SecurityNote}}</p>
+{{end}}`
 
-	// 创建密码重置邮件模板（中文）
-	passwordResetZhTemplate := `<!DOCTYPE html>
-<html lang="zh">
-<head>
-    <meta charset="UTF-8">
-    <title>{{.Subject}}</title>
-</head>
-<body>
-    <h1>重置您的密码</h1>
-    <p>亲爱的 {{.Username}}，</p>
-    <p>我们收到了您的密码重置请求。请点击下方按钮重置您的密码。</p>
-    <a href="{{.ActionURL}}">{{.ActionText}}</a>
-    <p class="security-note">{{.SecurityNote}}</p>
-    <footer>
-        <p>{{.CompanyName}}</p>
-        <p>联系我们: {{.SupportEmail}}</p>
-    </footer>
-</body>
-</html>`
+	passwordResetZhTemplate := `{{define "content"}}
+<h1>重置您的密码</h1>
+<p>亲爱的 {{.Username}}，</p>
+<p>我们收到了您的密码重置请求。请点击下方按钮重置您的密码。</p>
+<a href="{{.ActionURL}}">{{.ActionText}}</a>
+<p class="security-note">{{.SecurityNote}}</p>
+{{end}}`
 
-	// 创建密码重置邮件模板（英文）
-	passwordResetEnTemplate := `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>{{.Subject}}</title>
-</head>
-<body>
-    <h1>Reset Your Password</h1>
-    <p>Dear {{.Username}},</p>
-    <p>We received a request to reset your password. Please click the button below to reset your password.</p>
-    <a href="{{.ActionURL}}">{{.ActionText}}</a>
-    <p class="security-note">{{.SecurityNote}}</p>
-    <footer>
-        <p>{{.CompanyName}}</p>
-        <p>Contact us: {{.SupportEmail}}</p>
-    </footer>
-</body>
-</html>`
+	passwordResetEnTemplate := `{{define "content"}}
+<h1>Reset Your Password</h1>
+<p>Dear {{.Username}},</p>
+<p>We received a request to reset your password. Please click the button below to reset your password.</p>
+<a href="{{.ActionURL}}">{{.ActionText}}</a>
+<p class="security-note">{{.SecurityNote}}</p>
+{{end}}`
 
-	// 写入模板文件
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "base.html"), []byte(baseTemplate), 0644))
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "verification", "verification_zh.html"), []byte(verificationZhTemplate), 0644))
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "verification", "verification_en.html"), []byte(verificationEnTemplate), 0644))

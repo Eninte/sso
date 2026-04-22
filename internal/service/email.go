@@ -54,10 +54,10 @@ func (d *defaultMailSender) Send(addr, from string, to []string, msg []byte, con
 
 // EmailService 邮件服务
 type EmailService struct {
-	config      *EmailConfig
-	sender      MailSender
-	logger      *slog.Logger
-	templateMgr *email.TemplateManager
+	config         *EmailConfig
+	sender         MailSender
+	logger         *slog.Logger
+	templateEngine *email.TemplateEngine
 }
 
 // NewEmailService 创建邮件服务
@@ -67,17 +67,24 @@ func NewEmailService(config *EmailConfig, sender ...MailSender) (*EmailService, 
 		s = sender[0]
 	}
 
-	// 初始化模板管理器
-	templateMgr, err := email.NewTemplateManager()
+	// 初始化模板引擎
+	templateConfig := email.TemplateConfig{
+		TemplateDir:  "internal/service/email/templates",
+		DefaultLang:  "zh",
+		CompanyName:  "SSO服务",
+		SupportEmail: config.From,
+	}
+
+	templateEngine, err := email.NewTemplateEngine(templateConfig)
 	if err != nil {
-		return nil, fmt.Errorf("初始化模板管理器失败: %w", err)
+		return nil, fmt.Errorf("初始化模板引擎失败: %w", err)
 	}
 
 	return &EmailService{
-		config:      config,
-		sender:      s,
-		logger:      slog.Default().With("component", "email"),
-		templateMgr: templateMgr,
+		config:         config,
+		sender:         s,
+		logger:         slog.Default().With("component", "email"),
+		templateEngine: templateEngine,
 	}, nil
 }
 
@@ -211,15 +218,20 @@ func sendEmailSTARTTLS(addr, from string, to []string, msg []byte, config *Email
 
 // SendVerificationEmail 发送验证邮件
 func (s *EmailService) SendVerificationEmail(ctx context.Context, to, username, verifyLink string) error {
-	body, err := s.templateMgr.Render("verification.html", map[string]string{
-		"Username":   username,
-		"VerifyLink": verifyLink,
-	})
+	// 准备模板数据
+	data := email.TemplateData{
+		Username:   username,
+		ActionURL:  verifyLink,
+		ActionText: "验证邮箱",
+	}
+
+	// 渲染模板（默认使用中文）
+	subject, body, err := s.templateEngine.RenderVerificationEmail("zh", data)
 	if err != nil {
 		return serviceutil.WrapServiceError("渲染验证邮件模板", err)
 	}
 
-	return s.SendEmail(ctx, to, "验证您的邮箱 - SSO服务", body)
+	return s.SendEmail(ctx, to, subject, body)
 }
 
 // ============================================================================
@@ -228,13 +240,18 @@ func (s *EmailService) SendVerificationEmail(ctx context.Context, to, username, 
 
 // SendPasswordResetEmail 发送密码重置邮件
 func (s *EmailService) SendPasswordResetEmail(ctx context.Context, to, username, resetLink string) error {
-	body, err := s.templateMgr.Render("reset.html", map[string]string{
-		"Username":  username,
-		"ResetLink": resetLink,
-	})
+	// 准备模板数据
+	data := email.TemplateData{
+		Username:   username,
+		ActionURL:  resetLink,
+		ActionText: "重置密码",
+	}
+
+	// 渲染模板（默认使用中文）
+	subject, body, err := s.templateEngine.RenderPasswordResetEmail("zh", data)
 	if err != nil {
 		return serviceutil.WrapServiceError("渲染密码重置邮件模板", err)
 	}
 
-	return s.SendEmail(ctx, to, "重置您的密码 - SSO服务", body)
+	return s.SendEmail(ctx, to, subject, body)
 }

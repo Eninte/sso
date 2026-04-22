@@ -116,34 +116,39 @@ func NewTemplateEngine(config TemplateConfig) (*TemplateEngine, error) {
 // ============================================================================
 
 // loadTemplates 加载模板目录下的所有HTML文件
-// 递归遍历模板目录，解析所有.html文件
+// 将 base.html 布局模板与各语言内容模板组合解析
 func (e *TemplateEngine) loadTemplates() error {
+	basePath := filepath.Join(e.config.TemplateDir, "base.html")
+
+	if _, err := os.Stat(basePath); err != nil {
+		return fmt.Errorf("base template not found: %w", err)
+	}
+
 	return filepath.Walk(e.config.TemplateDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
-		// 跳过目录
 		if info.IsDir() {
 			return nil
 		}
 
-		// 只处理HTML文件
 		if filepath.Ext(path) != ".html" {
 			return nil
 		}
 
-		// 获取相对路径作为模板名称
 		relPath, err := filepath.Rel(e.config.TemplateDir, path)
 		if err != nil {
 			return fmt.Errorf("failed to get relative path: %w", err)
 		}
 
-		// 规范化路径分隔符（Windows兼容性）
 		templateName := filepath.ToSlash(relPath)
 
-		// 解析模板
-		tmpl, err := template.ParseFiles(path)
+		if templateName == "base.html" {
+			return nil
+		}
+
+		tmpl, err := template.New("").ParseFiles(basePath, path)
 		if err != nil {
 			return fmt.Errorf("failed to parse template %s: %w", templateName, err)
 		}
@@ -235,7 +240,7 @@ func (e *TemplateEngine) renderEmailTemplate(
 
 	// 渲染模板
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
+	if err := tmpl.ExecuteTemplate(&buf, "base", data); err != nil {
 		return "", "", fmt.Errorf("failed to render %s template: %w", templateType, err)
 	}
 
