@@ -5,56 +5,185 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SSO 配置向导</title>
     <style nonce="{{.Nonce}}">
+        :root {
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --success: #10b981;
+            --success-hover: #059669;
+            --danger: #ef4444;
+            --danger-hover: #dc2626;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-300: #d1d5db;
+            --gray-600: #4b5563;
+            --gray-700: #374151;
+            --gray-800: #1f2937;
+            --bg: #f3f4f6;
+            --card-bg: #ffffff;
+            --text-main: #111827;
+            --text-muted: #6b7280;
+            --border: #e5e7eb;
+            --radius: 12px;
+            --radius-sm: 8px;
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+        }
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f7fa; color: #333; line-height: 1.6; }
-        .container { max-width: 720px; margin: 0 auto; padding: 24px 16px; }
-        h1 { text-align: center; margin-bottom: 8px; font-size: 24px; }
-        .subtitle { text-align: center; color: #666; margin-bottom: 32px; font-size: 14px; }
-        .card { background: #fff; border-radius: 8px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-        .card h2 { font-size: 18px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid #eee; }
-        .form-group { margin-bottom: 16px; }
-        .form-group label { display: block; font-size: 14px; font-weight: 500; margin-bottom: 4px; color: #555; }
-        .form-group input, .form-group select { width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
-        .form-group input:focus, .form-group select:focus { outline: none; border-color: #4a90d9; box-shadow: 0 0 0 2px rgba(74,144,217,0.2); }
-        .form-row { display: flex; gap: 12px; }
-        .form-row .form-group { flex: 1; }
-        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; }
-        .btn-primary { background: #4a90d9; color: #fff; }
-        .btn-primary:hover { background: #357abd; }
-        .btn-secondary { background: #6c757d; color: #fff; }
-        .btn-secondary:hover { background: #545b62; }
-        .btn-success { background: #28a745; color: #fff; }
-        .btn-success:hover { background: #218838; }
-        .btn-danger { background: #dc3545; color: #fff; }
-        .btn-block { width: 100%; padding: 12px; font-size: 16px; }
-        .btn-sm { padding: 4px 12px; font-size: 13px; }
-        .test-result { margin-top: 8px; padding: 8px 12px; border-radius: 4px; font-size: 13px; display: none; }
-        .test-result.success { display: block; background: #d4edda; color: #155724; }
-        .test-result.error { display: block; background: #f8d7da; color: #721c24; }
-        .hint { font-size: 12px; color: #888; margin-top: 4px; }
-        .step-indicator { display: flex; justify-content: center; gap: 8px; margin-bottom: 24px; }
-        .step-dot { width: 10px; height: 10px; border-radius: 50%; background: #ddd; }
-        .step-dot.active { background: #4a90d9; }
-        .step-dot.done { background: #28a745; }
-        .toggle-group { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
-        .toggle { position: relative; width: 40px; height: 22px; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; 
+            background: var(--bg); 
+            color: var(--text-main); 
+            line-height: 1.5; 
+            -webkit-font-smoothing: antialiased;
+        }
+        .container { max-width: 760px; margin: 0 auto; padding: 40px 20px; }
+        .header-section { text-align: center; margin-bottom: 40px; }
+        h1 { font-size: 28px; font-weight: 700; color: var(--gray-800); margin-bottom: 12px; letter-spacing: -0.025em; }
+        .subtitle { color: var(--text-muted); font-size: 15px; }
+        .card { 
+            background: var(--card-bg); 
+            border-radius: var(--radius); 
+            padding: 32px; 
+            margin-bottom: 24px; 
+            box-shadow: var(--shadow);
+            border: 1px solid rgba(0,0,0,0.05);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .card:hover {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        .card h2 { 
+            font-size: 18px; 
+            font-weight: 600; 
+            color: var(--gray-800); 
+            margin-bottom: 24px; 
+            padding-bottom: 12px; 
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { 
+            display: block; 
+            font-size: 14px; 
+            font-weight: 500; 
+            margin-bottom: 8px; 
+            color: var(--gray-700); 
+        }
+        .form-group input, .form-group select { 
+            width: 100%; 
+            padding: 10px 14px; 
+            border: 1px solid var(--border); 
+            border-radius: var(--radius-sm); 
+            font-size: 15px; 
+            background-color: var(--card-bg);
+            color: var(--text-main);
+            transition: all 0.2s ease;
+        }
+        .form-group input:focus, .form-group select:focus { 
+            outline: none; 
+            border-color: var(--primary); 
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15); 
+        }
+        .form-group input::placeholder { color: var(--gray-300); }
+        .form-row { display: flex; gap: 16px; }
+        .form-row .form-group { flex: 1; margin-bottom: 0; }
+        .form-row-mt { margin-top: 20px; }
+        .btn { 
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 20px; 
+            border: none; 
+            border-radius: var(--radius-sm); 
+            cursor: pointer; 
+            font-size: 15px; 
+            font-weight: 500; 
+            transition: all 0.2s;
+        }
+        .btn-primary { background: var(--primary); color: #fff; box-shadow: var(--shadow-sm); }
+        .btn-primary:hover { background: var(--primary-hover); transform: translateY(-1px); }
+        .btn-secondary { background: var(--gray-100); color: var(--gray-700); border: 1px solid var(--border); }
+        .btn-secondary:hover { background: var(--gray-200); }
+        .btn-success { background: var(--success); color: #fff; }
+        .btn-success:hover { background: var(--success-hover); }
+        .btn-danger { background: var(--danger); color: #fff; }
+        .btn-block { width: 100%; padding: 14px; font-size: 16px; font-weight: 600; margin-top: 8px; }
+        .btn-sm { padding: 8px 16px; font-size: 14px; }
+        .test-result { 
+            margin-top: 12px; 
+            padding: 12px 16px; 
+            border-radius: var(--radius-sm); 
+            font-size: 14px; 
+            display: none; 
+            animation: fadeIn 0.3s ease;
+        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+        .test-result.success { display: block; background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+        .test-result.error { display: block; background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+        .hint { font-size: 13px; color: var(--text-muted); margin-top: 6px; }
+        
+        /* Toggle Switch */
+        .toggle-group { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+        .toggle-group span { font-size: 15px; font-weight: 500; color: var(--gray-700); }
+        .toggle { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
         .toggle input { opacity: 0; width: 0; height: 0; }
-        .toggle .slider { position: absolute; inset: 0; background: #ccc; border-radius: 22px; cursor: pointer; transition: 0.2s; }
-        .toggle .slider:before { content: ""; position: absolute; width: 16px; height: 16px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: 0.2s; }
-        .toggle input:checked + .slider { background: #4a90d9; }
-        .toggle input:checked + .slider:before { transform: translateX(18px); }
-        #alert-area { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 100; }
-        .alert { padding: 12px 24px; border-radius: 6px; margin-bottom: 8px; font-size: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
-        .alert-success { background: #d4edda; color: #155724; }
-        .alert-error { background: #f8d7da; color: #721c24; }
-        .section-hidden { display: none; }
+        .toggle .slider { 
+            position: absolute; inset: 0; 
+            background: var(--gray-300); 
+            border-radius: 24px; 
+            cursor: pointer; 
+            transition: 0.3s ease; 
+        }
+        .toggle .slider:before { 
+            content: ""; 
+            position: absolute; 
+            width: 18px; height: 18px; 
+            left: 3px; bottom: 3px; 
+            background: #fff; 
+            border-radius: 50%; 
+            transition: 0.3s ease;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+        .toggle input:checked + .slider { background: var(--primary); }
+        .toggle input:checked + .slider:before { transform: translateX(20px); }
+        
+        /* Alert */
+        #alert-area { position: fixed; top: 24px; left: 50%; transform: translateX(-50%); z-index: 100; display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 400px; padding: 0 20px; }
+        .alert { 
+            padding: 16px 20px; 
+            border-radius: var(--radius-sm); 
+            font-size: 14px; 
+            font-weight: 500;
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); 
+            animation: slideDown 0.3s ease forwards;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        @keyframes slideDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+        .alert-success { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+        .alert-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+        .confirm-text { margin-bottom: 20px; color: var(--text-muted); font-size: 15px; text-align: center; }
+        
+        @media (max-width: 640px) {
+            .form-row { flex-direction: column; gap: 0; }
+            .form-row .form-group { margin-bottom: 20px; }
+            .form-row-mt { margin-top: 0; }
+            .card { padding: 20px; }
+            .container { padding: 20px 16px; }
+        }
     </style>
 </head>
 <body>
 <div id="alert-area"></div>
 <div class="container">
-    <h1>SSO 配置向导</h1>
-    <p class="subtitle">版本 {{.Version}} — 首次启动，请完成以下配置</p>
+    <div class="header-section">
+        <h1>SSO 配置向导</h1>
+        <p class="subtitle">版本 {{.Version}} — 首次启动，请完成以下配置</p>
+    </div>
 
     <form id="setupForm">
         <!-- 数据库配置 -->
@@ -97,7 +226,7 @@
                     </select>
                 </div>
             </div>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="testDB()">测试连接</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="testDBBtn">测试连接</button>
             <div id="db-result" class="test-result"></div>
         </div>
 
@@ -105,7 +234,7 @@
         <div class="card">
             <h2>2. 缓存配置 (Redis)</h2>
             <div class="toggle-group">
-                <label class="toggle"><input type="checkbox" id="redisEnable" name="REDIS_ENABLE" checked onchange="toggleRedis()"><span class="slider"></span></label>
+                <label class="toggle"><input type="checkbox" id="redisEnable" name="REDIS_ENABLE" checked><span class="slider"></span></label>
                 <span>启用 Redis</span>
             </div>
             <div id="redisFields">
@@ -129,7 +258,7 @@
                         <input name="REDIS_DB" type="number" value="0" min="0" max="15">
                     </div>
                 </div>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="testRedis()">测试连接</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="testRedisBtn">测试连接</button>
                 <div id="redis-result" class="test-result"></div>
             </div>
         </div>
@@ -166,16 +295,16 @@
             <div class="form-row">
                 <div class="form-group">
                     <label>私钥路径 *</label>
-                    <input name="JWT_PRIVATE_KEY_PATH" value="/app/keys/private.pem" required>
+                    <input name="JWT_PRIVATE_KEY_PATH" value="{{.DefaultPrivateKey}}" required>
                 </div>
                 <div class="form-group">
                     <label>公钥路径 *</label>
-                    <input name="JWT_PUBLIC_KEY_PATH" value="/app/keys/public.pem" required>
+                    <input name="JWT_PUBLIC_KEY_PATH" value="{{.DefaultPublicKey}}" required>
                 </div>
             </div>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="generateKeys()">生成 RSA 密钥对</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="generateKeysBtn">生成 RSA 密钥对</button>
             <div id="keys-result" class="test-result"></div>
-            <div class="form-row" style="margin-top: 16px;">
+            <div class="form-row form-row-mt">
                 <div class="form-group">
                     <label>Access Token 有效期</label>
                     <input name="JWT_ACCESS_TOKEN_TTL" value="15m">
@@ -290,13 +419,22 @@
         <!-- 提交 -->
         <div class="card">
             <h2>确认配置</h2>
-            <p style="margin-bottom: 16px; color: #666; font-size: 14px;">确认以上配置无误后，点击保存。服务将自动重启进入正常运行模式。</p>
+            <p class="confirm-text">确认以上配置无误后，点击保存。服务将自动重启进入正常运行模式。</p>
             <button type="submit" class="btn btn-primary btn-block" id="submitBtn">保存配置并重启</button>
         </div>
     </form>
 </div>
 
 <script nonce="{{.Nonce}}">
+// Setup Token
+const SETUP_TOKEN = '{{.SetupToken}}';
+
+// 事件监听器
+document.getElementById('redisEnable').addEventListener('change', toggleRedis);
+document.getElementById('testDBBtn').addEventListener('click', testDB);
+document.getElementById('testRedisBtn').addEventListener('click', testRedis);
+document.getElementById('generateKeysBtn').addEventListener('click', generateKeys);
+
 function toggleRedis() {
     const checked = document.getElementById('redisEnable').checked;
     document.getElementById('redisFields').style.display = checked ? 'block' : 'none';
@@ -393,15 +531,22 @@ document.getElementById('setupForm').addEventListener('submit', async function(e
     try {
         const res = await fetch('/api/v1/setup/save', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Setup-Token': SETUP_TOKEN
+            },
             body: JSON.stringify(data)
         });
         const json = await res.json();
         if (res.ok) {
             showAlert('配置保存成功，服务即将重启...', 'success');
-            btn.textContent = '配置已保存，等待重启...';
-            // 等待几秒后刷新（等待服务重启）
-            setTimeout(() => location.reload(), 5000);
+            btn.textContent = '配置已保存，正在重启...';
+            
+            // 等待3秒后开始检测服务是否重启完成
+            setTimeout(() => {
+                btn.textContent = '等待服务重启...';
+                checkServiceHealth();
+            }, 3000);
         } else {
             showAlert('保存失败: ' + json.message, 'error');
             btn.disabled = false;
@@ -413,6 +558,40 @@ document.getElementById('setupForm').addEventListener('submit', async function(e
         btn.textContent = '保存配置并重启';
     }
 });
+
+// 检测服务健康状态，重启完成后跳转到健康页面
+async function checkServiceHealth() {
+    const maxAttempts = 20; // 最多尝试20次
+    const interval = 1000; // 每秒检测一次
+    let attempts = 0;
+    
+    const check = async () => {
+        attempts++;
+        try {
+            const res = await fetch('/health', { method: 'GET' });
+            if (res.ok) {
+                // 服务已重启成功，跳转到健康页面
+                showAlert('服务重启成功！正在跳转...', 'success');
+                setTimeout(() => {
+                    window.location.href = '/health';
+                }, 1000);
+                return;
+            }
+        } catch(e) {
+            // 服务还未启动，继续等待
+        }
+        
+        if (attempts < maxAttempts) {
+            setTimeout(check, interval);
+        } else {
+            // 超时，提示用户手动刷新
+            showAlert('服务重启超时，请手动刷新页面或检查服务状态', 'error');
+            document.getElementById('submitBtn').textContent = '重启超时，请手动检查';
+        }
+    };
+    
+    check();
+}
 </script>
 </body>
 </html>

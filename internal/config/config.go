@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -540,7 +541,22 @@ func splitAndTrim(s string) []string {
 
 // GetEnvPath 返回.env文件路径
 func GetEnvPath() string {
-	return getEnv("ENV_FILE_PATH", "/app/.env")
+	// 优先使用环境变量指定的路径
+	if envPath := os.Getenv("ENV_FILE_PATH"); envPath != "" {
+		return envPath
+	}
+	
+	// 尝试当前工作目录的.env
+	if cwd, err := os.Getwd(); err == nil {
+		cwdEnv := filepath.Join(cwd, ".env")
+		// 如果当前目录的.env存在或可写，使用它
+		if _, err := os.Stat(cwdEnv); err == nil || os.IsNotExist(err) {
+			return cwdEnv
+		}
+	}
+	
+	// 默认使用/app/.env（Docker环境）
+	return "/app/.env"
 }
 
 // escapeEnvValue 转义.env文件值中的特殊字符

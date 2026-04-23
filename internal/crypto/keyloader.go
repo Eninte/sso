@@ -173,8 +173,23 @@ func validateKeyPath(path string) error {
 		_, err := os.Stat("/.dockerenv")
 		return err == nil
 	}()
-	if !isContainer && perm&0077 != 0 {
-		return fmt.Errorf("%w: %o", ErrKeyPermissionOpen, perm)
+	
+	// 检查权限：私钥必须是600或400，公钥可以是644或444
+	// 判断是否为私钥：文件名包含"private"或权限是600/400
+	isPrivateKey := strings.Contains(strings.ToLower(path), "private") || perm == 0600 || perm == 0400
+	
+	if !isContainer {
+		if isPrivateKey {
+			// 私钥：不允许组和其他用户有任何权限
+			if perm&0077 != 0 {
+				return fmt.Errorf("%w: %o", ErrKeyPermissionOpen, perm)
+			}
+		} else {
+			// 公钥：不允许写权限给组和其他用户
+			if perm&0022 != 0 {
+				return fmt.Errorf("%w: %o", ErrKeyPermissionOpen, perm)
+			}
+		}
 	}
 
 	absPath, err := filepath.Abs(path)

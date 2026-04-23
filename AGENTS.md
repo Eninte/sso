@@ -43,8 +43,12 @@ make migrate-create NAME=xxx  # 创建新迁移文件
 | `DB_SSL_MODE` | `disable` | `require` (必须) |
 | `MFA_RECOVERY_HMAC_KEY` | 可选 | **必须设置强密钥** |
 | `CORS_ALLOWED_ORIGINS` | `localhost` | 生产域名 (必须) |
+| `SMTP_HOST` | 测试SMTP服务器 | 生产SMTP服务器 (必须) |
+| `SMTP_PASSWORD` | 测试密码/授权码 | 生产密码/授权码 (必须) |
 
 **生产环境启动检查**：`SERVER_ENV=production` 且 `MFA_RECOVERY_HMAC_KEY` 为空时拒绝启动。
+
+**邮件服务配置**：详见 `docs/EMAIL_SERVICE.md`
 
 ## 架构设计
 
@@ -128,6 +132,7 @@ Model结构体必须有JSON标签，使用 `omitempty` 处理可选字段。
 | MFA | TOTP支持，恢复码HMAC-SHA256哈希（O(1)查找），使用后立即失效 |
 | 缓存 | UserInfo 5分钟TTL，密码/角色变更时失效，Singleflight防击穿 |
 | 传输 | 生产DB_SSL_MODE=require，生产必须配置CORS |
+| 邮件 | 支持验证邮件、密码重置邮件，响应式设计，多语言支持 |
 
 ## 工具模块使用指南
 
@@ -150,6 +155,59 @@ HTTP响应标准。用 `WriteJSONError(w, err)` / `WriteJSONSuccess(w, data)` / 
 - ❌ Service层直接处理Store错误（用 `HandleStoreError`）
 - ❌ Service层直接调用 `auditSvc.Log()`（用 `SafeAuditLog`）
 - ❌ Handler层直接写JSON错误响应（用 `WriteJSONError`）
+
+## 邮件服务开发指南
+
+### 邮件模板系统
+
+邮件模板采用模板继承机制，所有模板基于 `internal/service/email/templates/base.html`。
+
+**模板结构：**
+```
+templates/
+├── base.html (基础布局，包含所有样式)
+├── verification/ (验证邮件)
+│   ├── verification_zh.html (中文)
+│   └── verification_en.html (英文)
+└── password_reset/ (密码重置)
+    ├── password_reset_zh.html (中文)
+    └── password_reset_en.html (英文)
+```
+
+### 添加新邮件类型
+
+1. **创建模板文件**（在对应目录下创建中英文版本）
+2. **在 `engine.go` 添加渲染方法**
+3. **在 `email.go` 添加发送方法**
+
+详细步骤参考：`docs/EMAIL_SERVICE.md`
+
+### 邮件测试工具
+
+```bash
+# 发送测试邮件
+go run scripts/test_email.go -to user@example.com -type verification
+
+# 渲染模板预览
+go run scripts/render_email_template.go -type verification -lang zh -output /tmp/email.html
+```
+
+### 配色规范
+
+- **主色调**：蓝色 (#1e88e5)
+- **按钮**：蓝色背景 + 白色文字（高对比度）
+- **安全提示**：浅黄背景 + 橙色边框
+- **响应式设计**：支持移动端和桌面端
+- **深色模式**：自动适配系统主题
+
+### 邮件开发规范
+
+- ✅ 使用 `TemplateEngine` 渲染模板
+- ✅ 异步发送邮件，不阻塞主流程
+- ✅ 记录发送日志（成功/失败）
+- ✅ 使用内联样式确保兼容性
+- ❌ 禁止在邮件中包含敏感信息
+- ❌ 禁止硬编码SMTP凭据
 
 ## 开发工作流
 

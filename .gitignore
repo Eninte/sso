@@ -9,6 +9,8 @@
 .env.local
 .env.*.local
 .env.test
+.env.backup*
+.env.manual*
 
 # 密钥文件
 /keys/*.pem

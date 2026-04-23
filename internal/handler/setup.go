@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -18,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"text/template"
 	"time"
 
@@ -88,12 +90,28 @@ func (h *SetupHandler) HandleSetupPage(w http.ResponseWriter, r *http.Request) {
 		handlerutil.WriteJSONError(w, apperrors.ErrForbidden.WithDetails("配置向导仅允许本地访问"))
 		return
 	}
+	
+	// 如果token为空（首次访问或保存后失效），重新生成
+	if h.setupToken.Load() == nil {
+		h.generateSetupToken()
+	}
+	
 	nonce := middleware.GetCSPNonce(r.Context())
+	
+	// 获取默认密钥路径（优先使用当前工作目录）
+	defaultKeyPath := "/app/keys"
+	if cwd, err := os.Getwd(); err == nil {
+		defaultKeyPath = filepath.Join(cwd, "keys")
+	}
+	
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = setupTmpl.Execute(w, map[string]string{
-		"Nonce":      nonce,
-		"Version":    h.version,
-		"SetupToken": h.GetSetupToken(),
+		"Nonce":            nonce,
+		"Version":          h.version,
+		"SetupToken":       h.GetSetupToken(),
+		"DefaultKeyPath":   defaultKeyPath,
+		"DefaultPrivateKey": filepath.Join(defaultKeyPath, "private.pem"),
+		"DefaultPublicKey":  filepath.Join(defaultKeyPath, "public.pem"),
 	})
 }
 
@@ -149,9 +167,66 @@ func (h *SetupHandler) HandleSetupSave(w http.ResponseWriter, r *http.Request) {
 	h.setupToken.Store(nil)
 
 	handlerutil.WriteJSONSuccess(w, map[string]string{
-		"message": "配置已保存，请手动重启服务以加载新配置",
-		"note":    "如果使用 systemd/supervisor 等进程管理器，请执行相应的重启命令",
+		"message": "配置已保存，服务将在3秒后自动重启",
+		"note":    "服务将自动重新加载配置",
 	})
+
+	// 延迟3秒后重启服务，让响应有时间返回给客户端
+	go func() {
+		time.Sleep(3 * time.Second)
+		slog.Info("配置已保存，正在重启服务...")
+		
+		// 获取当前可执行文件路径
+		executable, err := os.Executable()
+		if err != nil {
+			slog.Error("无法获取可执行文件路径", "error", err)
+			// 降级方案：发送SIGTERM信号
+			if p, err := os.FindProcess(os.Getpid()); err == nil {
+				_ = p.Signal(syscall.SIGTERM)
+			}
+			return
+		}
+		
+		// 读取.env文件并合并到环境变量
+		envVars := os.Environ()
+		if envFile, err := os.ReadFile(h.envPath); err == nil {
+			// 解析.env文件
+			lines := strings.Split(string(envFile), "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if line == "" || strings.HasPrefix(line, "#") {
+					continue
+				}
+				if idx := strings.Index(line, "="); idx > 0 {
+					key := strings.TrimSpace(line[:idx])
+					value := strings.TrimSpace(line[idx+1:])
+					// 更新或添加环境变量
+					found := false
+					for i, env := range envVars {
+						if strings.HasPrefix(env, key+"=") {
+							envVars[i] = key + "=" + value
+							found = true
+							break
+						}
+					}
+					if !found {
+						envVars = append(envVars, key+"="+value)
+					}
+				}
+			}
+		}
+		
+		// 使用syscall.Exec重新执行当前进程
+		// 这会替换当前进程，实现无缝重启
+		err = syscall.Exec(executable, []string{executable}, envVars)
+		if err != nil {
+			slog.Error("重启服务失败", "error", err)
+			// 降级方案：发送SIGTERM信号
+			if p, err := os.FindProcess(os.Getpid()); err == nil {
+				_ = p.Signal(syscall.SIGTERM)
+			}
+		}
+	}()
 }
 
 // HandleSetupTestDB 测试数据库连接
@@ -203,7 +278,8 @@ func (h *SetupHandler) HandleSetupTestDB(w http.ResponseWriter, r *http.Request)
 
 	db, err := openDB(dsn)
 	if err != nil {
-		// 不暴露具体错误信息，避免泄露DSN中的密码
+		// 记录详细错误到日志，但不暴露给客户端
+		slog.Error("数据库连接失败", "error", err, "host", req.Host, "port", req.Port, "database", req.Name)
 		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("数据库连接失败，请检查配置"))
 		return
 	}
@@ -212,7 +288,8 @@ func (h *SetupHandler) HandleSetupTestDB(w http.ResponseWriter, r *http.Request)
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
-		// 不暴露具体错误信息，避免泄露连接详情
+		// 记录详细错误到日志，但不暴露给客户端
+		slog.Error("数据库Ping失败", "error", err, "host", req.Host, "port", req.Port, "database", req.Name)
 		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("数据库连接测试失败，请检查网络和凭据"))
 		return
 	}
@@ -278,12 +355,27 @@ func (h *SetupHandler) HandleSetupGenerateKeys(w http.ResponseWriter, r *http.Re
 
 	// 验证路径安全性（防止路径遍历攻击）
 	if err := ValidateKeyPath(req.PrivatePath); err != nil {
-		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails("私钥路径无效"))
+		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails("私钥路径无效: "+err.Error()))
 		return
 	}
 	if err := ValidateKeyPath(req.PublicPath); err != nil {
-		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails("公钥路径无效"))
+		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails("公钥路径无效: "+err.Error()))
 		return
+	}
+
+	// 确保目录存在（自动创建）
+	privDir := filepath.Dir(req.PrivatePath)
+	if err := os.MkdirAll(privDir, 0755); err != nil {
+		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("创建密钥目录失败: "+err.Error()))
+		return
+	}
+
+	pubDir := filepath.Dir(req.PublicPath)
+	if pubDir != privDir {
+		if err := os.MkdirAll(pubDir, 0755); err != nil {
+			handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("创建公钥目录失败: "+err.Error()))
+			return
+		}
 	}
 
 	// 生成RSA密钥对（3072位，符合当前安全最佳实践）
@@ -360,20 +452,28 @@ func ValidateKeyPath(path string) error {
 		return fmt.Errorf("必须使用绝对路径")
 	}
 
+	// 检查路径是否包含危险字符或模式
+	if strings.Contains(cleanPath, "..") {
+		return fmt.Errorf("路径不能包含 '..'")
+	}
+
+	// 获取目录路径
+	dir := filepath.Dir(cleanPath)
+
 	// 检查是否为符号链接，防止绕过白名单
-	fileInfo, err := os.Lstat(cleanPath)
+	fileInfo, err := os.Lstat(dir)
 	if err == nil && fileInfo.Mode()&os.ModeSymlink != 0 {
 		// 如果是符号链接，解析真实路径
-		realPath, err := filepath.EvalSymlinks(cleanPath)
+		realPath, err := filepath.EvalSymlinks(dir)
 		if err != nil {
 			return fmt.Errorf("无法解析符号链接: %w", err)
 		}
-		cleanPath = realPath
+		dir = realPath
 	}
 
 	allowedDirs := getKeyPathWhitelist()
-	for _, dir := range allowedDirs {
-		if strings.HasPrefix(cleanPath, dir+"/") || cleanPath == dir {
+	for _, allowedDir := range allowedDirs {
+		if strings.HasPrefix(dir, allowedDir) {
 			return nil
 		}
 	}
@@ -383,10 +483,16 @@ func ValidateKeyPath(path string) error {
 
 // getKeyPathWhitelist 获取密钥路径白名单
 // 支持通过环境变量 KEY_PATH_WHITELIST 自定义（逗号分隔）
-// 默认值：/app/keys, /keys, /etc/sso/keys
+// 默认值：/app/keys, /keys, /etc/sso/keys, 当前工作目录/keys
 func getKeyPathWhitelist() []string {
 	// 默认允许的目录
 	defaultDirs := []string{"/app/keys", "/keys", "/etc/sso/keys"}
+
+	// 添加当前工作目录的keys子目录（配置向导友好）
+	if cwd, err := os.Getwd(); err == nil {
+		cwdKeys := filepath.Join(cwd, "keys")
+		defaultDirs = append(defaultDirs, cwdKeys)
+	}
 
 	// 从环境变量读取自定义白名单
 	customDirs := os.Getenv("KEY_PATH_WHITELIST")

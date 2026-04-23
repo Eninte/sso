@@ -26,6 +26,7 @@
 - **健康检查**：服务状态监控
 - **优雅关闭**：支持信号优雅停止
 - **数据库迁移**：版本化数据库迁移管理
+- **邮件服务**：支持邮件验证、密码重置等通知功能
 
 ### 性能优化
 - **UserInfo缓存**：用户信息5分钟TTL缓存
@@ -325,10 +326,19 @@ sso/
 | MAX_LOGIN_ATTEMPTS | 最大登录尝试次数 | 5 | - |
 | METRICS_USERNAME | Metrics Basic Auth用户名 | - | 生产环境建议设置 |
 | METRICS_PASSWORD | Metrics Basic Auth密码 | - | 生产环境建议设置 |
+| SMTP_HOST | SMTP服务器地址 | - | **邮件功能必填** |
+| SMTP_PORT | SMTP端口 | 25/465/587 | **邮件功能必填** |
+| SMTP_USER | SMTP用户名 | - | **邮件功能必填** |
+| SMTP_PASSWORD | SMTP密码/授权码 | - | **邮件功能必填** |
+| SMTP_FROM | 发件人邮箱地址 | - | **邮件功能必填** |
 
 完整配置说明和环境差异对照请参考：[配置管理指南](docs/CONFIGURATION.md)
 
 ## 常见问题
+
+### 如何配置邮件服务？
+
+参考 [邮件服务文档](docs/EMAIL_SERVICE.md) 了解SMTP配置、模板开发和故障排查。
 
 ### 如何重置管理员密码？
 
