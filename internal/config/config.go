@@ -549,8 +549,8 @@ func GetEnvPath() string {
 	// 尝试当前工作目录的.env
 	if cwd, err := os.Getwd(); err == nil {
 		cwdEnv := filepath.Join(cwd, ".env")
-		// 如果当前目录的.env存在或可写，使用它
-		if _, err := os.Stat(cwdEnv); err == nil || os.IsNotExist(err) {
+		// 只有当前目录的.env存在时才使用它
+		if _, err := os.Stat(cwdEnv); err == nil {
 			return cwdEnv
 		}
 	}

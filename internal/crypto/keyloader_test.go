@@ -276,14 +276,22 @@ func TestLoadPublicKeyFromFile_PermissionTooOpen(t *testing.T) {
 		Bytes: publicKeyBytes,
 	})
 
-	// 写入文件，权限过于宽松 (0644)
+	// 写入文件，权限 0644 对公钥是合适的（所有者读写，组和其他用户只读）
 	keyPath := filepath.Join(tmpDir, "open_pub.pem")
 	err = os.WriteFile(keyPath, publicKeyPEM, 0644)
 	require.NoError(t, err)
 
+	// 公钥文件权限 0644 应该被接受（不允许组和其他用户写入即可）
 	_, err = crypto.LoadPublicKeyFromFile(keyPath)
+	assert.NoError(t, err, "Public key with 0644 permissions should be accepted")
 
-	assert.ErrorIs(t, err, crypto.ErrKeyPermissionOpen)
+	// 测试真正过于宽松的权限：0666（所有人可写）
+	keyPath2 := filepath.Join(tmpDir, "too_open_pub.pem")
+	err = os.WriteFile(keyPath2, publicKeyPEM, 0666)
+	require.NoError(t, err)
+
+	_, err = crypto.LoadPublicKeyFromFile(keyPath2)
+	assert.ErrorIs(t, err, crypto.ErrKeyPermissionOpen, "Public key with 0666 permissions should be rejected")
 }
 
 // ============================================================================

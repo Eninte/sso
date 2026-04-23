@@ -91,6 +91,13 @@ func (h *SetupHandler) HandleSetupPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
+	// 检查配置是否已完成（.env文件是否存在）
+	if _, err := os.Stat(h.envPath); err == nil {
+		// .env文件存在，配置已完成，拒绝访问
+		handlerutil.WriteJSONError(w, apperrors.ErrForbidden.WithDetails("配置已完成，无法再次访问设置向导"))
+		return
+	}
+	
 	// 如果token为空（首次访问或保存后失效），重新生成
 	if h.setupToken.Load() == nil {
 		h.generateSetupToken()
@@ -143,6 +150,12 @@ func (h *SetupHandler) HandleSetupSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 检查配置是否已完成（防止竞态条件）
+	if _, err := os.Stat(h.envPath); err == nil {
+		handlerutil.WriteJSONError(w, apperrors.ErrForbidden.WithDetails("配置已完成，无法重复保存"))
+		return
+	}
+
 	var values map[string]string
 	if err := json.NewDecoder(r.Body).Decode(&values); err != nil {
 		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails("无效的请求格式"))
@@ -167,64 +180,28 @@ func (h *SetupHandler) HandleSetupSave(w http.ResponseWriter, r *http.Request) {
 	h.setupToken.Store(nil)
 
 	handlerutil.WriteJSONSuccess(w, map[string]string{
-		"message": "配置已保存，服务将在3秒后自动重启",
-		"note":    "服务将自动重新加载配置",
+		"message": "配置已保存，服务将优雅关闭并重启",
+		"note":    "请确保进程管理器（systemd、Docker等）配置了自动重启",
 	})
 
-	// 延迟3秒后重启服务，让响应有时间返回给客户端
+	// 延迟3秒后触发优雅关闭，让响应有时间返回给客户端
 	go func() {
 		time.Sleep(3 * time.Second)
-		slog.Info("配置已保存，正在重启服务...")
+		slog.Info("配置已保存，触发优雅关闭...")
 		
-		// 获取当前可执行文件路径
-		executable, err := os.Executable()
-		if err != nil {
-			slog.Error("无法获取可执行文件路径", "error", err)
-			// 降级方案：发送SIGTERM信号
-			if p, err := os.FindProcess(os.Getpid()); err == nil {
-				_ = p.Signal(syscall.SIGTERM)
+		// 发送SIGTERM信号触发优雅关闭
+		// 这将触发main.go中的graceful shutdown逻辑：
+		// 1. 关闭数据库连接
+		// 2. 关闭Redis连接
+		// 3. 等待in-flight HTTP请求完成（带超时）
+		// 4. 进程退出
+		// 5. 进程管理器（systemd、Docker）自动重启服务
+		if p, err := os.FindProcess(os.Getpid()); err == nil {
+			if err := p.Signal(syscall.SIGTERM); err != nil {
+				slog.Error("发送SIGTERM信号失败", "error", err)
 			}
-			return
-		}
-		
-		// 读取.env文件并合并到环境变量
-		envVars := os.Environ()
-		if envFile, err := os.ReadFile(h.envPath); err == nil {
-			// 解析.env文件
-			lines := strings.Split(string(envFile), "\n")
-			for _, line := range lines {
-				line = strings.TrimSpace(line)
-				if line == "" || strings.HasPrefix(line, "#") {
-					continue
-				}
-				if idx := strings.Index(line, "="); idx > 0 {
-					key := strings.TrimSpace(line[:idx])
-					value := strings.TrimSpace(line[idx+1:])
-					// 更新或添加环境变量
-					found := false
-					for i, env := range envVars {
-						if strings.HasPrefix(env, key+"=") {
-							envVars[i] = key + "=" + value
-							found = true
-							break
-						}
-					}
-					if !found {
-						envVars = append(envVars, key+"="+value)
-					}
-				}
-			}
-		}
-		
-		// 使用syscall.Exec重新执行当前进程
-		// 这会替换当前进程，实现无缝重启
-		err = syscall.Exec(executable, []string{executable}, envVars)
-		if err != nil {
-			slog.Error("重启服务失败", "error", err)
-			// 降级方案：发送SIGTERM信号
-			if p, err := os.FindProcess(os.Getpid()); err == nil {
-				_ = p.Signal(syscall.SIGTERM)
-			}
+		} else {
+			slog.Error("无法获取当前进程", "error", err)
 		}
 	}()
 }
@@ -355,25 +332,29 @@ func (h *SetupHandler) HandleSetupGenerateKeys(w http.ResponseWriter, r *http.Re
 
 	// 验证路径安全性（防止路径遍历攻击）
 	if err := ValidateKeyPath(req.PrivatePath); err != nil {
-		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails("私钥路径无效: "+err.Error()))
+		slog.Error("私钥路径验证失败", "path", req.PrivatePath, "error", err)
+		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails("私钥路径无效"))
 		return
 	}
 	if err := ValidateKeyPath(req.PublicPath); err != nil {
-		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails("公钥路径无效: "+err.Error()))
+		slog.Error("公钥路径验证失败", "path", req.PublicPath, "error", err)
+		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails("公钥路径无效"))
 		return
 	}
 
 	// 确保目录存在（自动创建）
 	privDir := filepath.Dir(req.PrivatePath)
 	if err := os.MkdirAll(privDir, 0755); err != nil {
-		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("创建密钥目录失败: "+err.Error()))
+		slog.Error("创建私钥目录失败", "dir", privDir, "error", err)
+		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("创建密钥目录失败"))
 		return
 	}
 
 	pubDir := filepath.Dir(req.PublicPath)
 	if pubDir != privDir {
 		if err := os.MkdirAll(pubDir, 0755); err != nil {
-			handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("创建公钥目录失败: "+err.Error()))
+			slog.Error("创建公钥目录失败", "dir", pubDir, "error", err)
+			handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("创建公钥目录失败"))
 			return
 		}
 	}
@@ -458,7 +439,17 @@ func ValidateKeyPath(path string) error {
 	}
 
 	// 获取目录路径
-	dir := filepath.Dir(cleanPath)
+	// 如果路径本身是目录,使用路径本身;否则使用父目录
+	dir := cleanPath
+	if info, err := os.Stat(cleanPath); err == nil && !info.IsDir() {
+		dir = filepath.Dir(cleanPath)
+	} else if err != nil && !os.IsNotExist(err) {
+		// 如果是其他错误(非文件不存在),返回错误
+		return fmt.Errorf("无法访问路径: %w", err)
+	} else if os.IsNotExist(err) {
+		// 如果文件不存在,使用父目录进行检查
+		dir = filepath.Dir(cleanPath)
+	}
 
 	// 检查是否为符号链接，防止绕过白名单
 	fileInfo, err := os.Lstat(dir)
@@ -473,7 +464,10 @@ func ValidateKeyPath(path string) error {
 
 	allowedDirs := getKeyPathWhitelist()
 	for _, allowedDir := range allowedDirs {
-		if strings.HasPrefix(dir, allowedDir) {
+		// 检查路径是否完全匹配或在允许目录的子目录中
+		// 添加路径分隔符检查防止前缀匹配绕过
+		// 例如: /app/keys 不应匹配 /app/keys_malicious
+		if dir == allowedDir || strings.HasPrefix(dir, allowedDir+string(filepath.Separator)) {
 			return nil
 		}
 	}

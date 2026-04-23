@@ -174,9 +174,23 @@ func validateKeyPath(path string) error {
 		return err == nil
 	}()
 	
-	// 检查权限：私钥必须是600或400，公钥可以是644或444
-	// 判断是否为私钥：文件名包含"private"或权限是600/400
-	isPrivateKey := strings.Contains(strings.ToLower(path), "private") || perm == 0600 || perm == 0400
+	// 读取文件内容以确定密钥类型（基于PEM内容而非文件名）
+	data, err := os.ReadFile(path) // #nosec G304 -- 路径已通过前面的验证
+	if err != nil {
+		return fmt.Errorf("读取密钥文件失败: %w", err)
+	}
+
+	// 解析PEM块以确定密钥类型
+	block, _ := pem.Decode(data)
+	if block == nil {
+		// 如果无法解析PEM，返回解析错误而非权限错误
+		return ErrKeyParseFailed
+	}
+
+	// 根据PEM块类型确定是否为私钥
+	// "RSA PRIVATE KEY" (PKCS1) 或 "PRIVATE KEY" (PKCS8) 表示私钥
+	// "RSA PUBLIC KEY" (PKCS1) 或 "PUBLIC KEY" (PKIX) 表示公钥
+	isPrivateKey := block.Type == "RSA PRIVATE KEY" || block.Type == "PRIVATE KEY"
 	
 	if !isContainer {
 		if isPrivateKey {
