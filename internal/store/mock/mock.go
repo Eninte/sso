@@ -42,6 +42,7 @@ type Store struct {
 	UpdateUserErr                error
 	UpdateLoginAttemptsErr       error
 	DeleteUserErr                error
+	ListUsersErr                 error
 	GetClientByClientIDErr       error
 	CreateClientErr              error
 	StoreAuthorizationCodeErr    error
@@ -261,6 +262,10 @@ func (m *Store) Delete(ctx context.Context, id string) error {
 
 // ListUsers 列出用户（支持分页）
 func (m *Store) ListUsers(ctx context.Context, offset, limit int) ([]*model.User, int, error) {
+	if m.ListUsersErr != nil {
+		return nil, 0, m.ListUsersErr
+	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 

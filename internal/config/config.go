@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joho/godotenv"
 	apperrors "github.com/your-org/sso/internal/errors"
 )
 
@@ -105,6 +106,10 @@ type Config struct {
 // 如果环境变量不存在，使用预设的默认值
 // 注意：敏感配置（如密码）必须通过环境变量设置
 func Load() (*Config, error) {
+	// 首先尝试加载.env文件到环境变量
+	// 这样配置向导生成的.env文件才能被读取
+	loadEnvFile()
+
 	cfg := &Config{
 		// 服务器配置
 		ServerHost: getEnv("SERVER_HOST", "0.0.0.0"),
@@ -545,7 +550,7 @@ func GetEnvPath() string {
 	if envPath := os.Getenv("ENV_FILE_PATH"); envPath != "" {
 		return envPath
 	}
-	
+
 	// 尝试当前工作目录的.env
 	if cwd, err := os.Getwd(); err == nil {
 		cwdEnv := filepath.Join(cwd, ".env")
@@ -554,9 +559,48 @@ func GetEnvPath() string {
 			return cwdEnv
 		}
 	}
-	
+
 	// 默认使用/app/.env（Docker环境）
 	return "/app/.env"
+}
+
+// loadEnvFile 加载.env文件到环境变量
+// 使用 godotenv 库解析，支持标准 .env 格式（多行值、引号、export 前缀等）
+// 不会覆盖已设置的环境变量（12-Factor App 原则：环境变量优先级高于文件）
+// 如果文件不存在或读取失败，静默忽略
+// 加载后检查生产环境关键配置项是否缺失，提前发出警告
+func loadEnvFile() {
+	if os.Getenv("SKIP_ENV_FILE") != "" {
+		return
+	}
+
+	envPath := GetEnvPath()
+
+	if _, err := os.Stat(envPath); os.IsNotExist(err) {
+		return
+	}
+
+	if err := godotenv.Load(envPath); err != nil {
+		slog.Warn("加载 .env 文件失败", "path", envPath, "error", err)
+		return
+	}
+
+	if os.Getenv("SERVER_ENV") == "production" {
+		criticalKeys := []string{
+			"DB_PASSWORD",
+			"MFA_RECOVERY_HMAC_KEY",
+			"JWT_PRIVATE_KEY_PATH",
+			"SMTP_PASSWORD",
+		}
+		for _, key := range criticalKeys {
+			if os.Getenv(key) == "" {
+				slog.Warn("生产环境关键配置项为空", "key", key)
+			}
+		}
+		if os.Getenv("DB_SSL_MODE") == "disable" {
+			slog.Warn("生产环境数据库SSL未启用", "db_ssl_mode", "disable")
+		}
+	}
 }
 
 // escapeEnvValue 转义.env文件值中的特殊字符

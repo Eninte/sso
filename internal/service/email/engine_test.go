@@ -1,9 +1,11 @@
 package email
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/fstest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -13,7 +15,96 @@ import (
 // 测试辅助函数
 // ============================================================================
 
-// createTestTemplateDir 创建测试模板目录结构
+// createTestTemplateFS 创建测试模板文件系统（使用 fstest.MapFS）
+func createTestTemplateFS(t *testing.T) fs.FS {
+	baseTemplate := `{{define "base"}}
+<!DOCTYPE html>
+<html lang="{{.Language}}">
+<head>
+    <meta charset="UTF-8">
+    <title>{{.Subject}}</title>
+</head>
+<body>
+    <div class="email-header">
+        {{if .LogoURL}}<img src="{{.LogoURL}}" alt="{{.CompanyName}}" class="logo">{{end}}
+        <h1>{{.CompanyName}}</h1>
+    </div>
+    <div class="email-content">
+        {{template "content" .}}
+    </div>
+    <div class="email-footer">
+        <div class="footer-content">
+            {{if eq .Language "en"}}
+            <p>&copy; {{.Year}} {{.CompanyName}}. All rights reserved.</p>
+            {{if .SupportEmail}}<p><strong>Support:</strong> <a href="mailto:{{.SupportEmail}}">{{.SupportEmail}}</a></p>{{end}}
+            {{else}}
+            <p>&copy; {{.Year}} {{.CompanyName}}。版权所有。</p>
+            {{if .SupportEmail}}<p><strong>支持：</strong><a href="mailto:{{.SupportEmail}}">{{.SupportEmail}}</a></p>{{end}}
+            {{end}}
+        </div>
+        {{if .UnsubscribeURL}}
+        <div class="footer-links">
+            {{if eq .Language "en"}}<a href="{{.UnsubscribeURL}}">Unsubscribe</a>{{else}}<a href="{{.UnsubscribeURL}}">取消订阅</a>{{end}}
+        </div>
+        {{end}}
+        {{if .FooterText}}<div class="copyright">{{.FooterText}}</div>{{end}}
+    </div>
+</body>
+</html>
+{{end}}`
+
+	verificationZhTemplate := `{{define "content"}}
+<h1>验证您的邮箱</h1>
+<p>亲爱的 {{.Username}}，</p>
+<p>感谢您注册我们的服务。请点击下方按钮验证您的邮箱地址。</p>
+<a href="{{.ActionURL}}">{{.ActionText}}</a>
+<p class="security-note">{{.SecurityNote}}</p>
+{{end}}`
+
+	verificationEnTemplate := `{{define "content"}}
+<h1>Verify Your Email</h1>
+<p>Dear {{.Username}},</p>
+<p>Thank you for registering with us. Please click the button below to verify your email address.</p>
+<a href="{{.ActionURL}}">{{.ActionText}}</a>
+<p class="security-note">{{.SecurityNote}}</p>
+{{end}}`
+
+	passwordResetZhTemplate := `{{define "content"}}
+<h1>重置您的密码</h1>
+<p>亲爱的 {{.Username}}，</p>
+<p>我们收到了您的密码重置请求。请点击下方按钮重置您的密码。</p>
+<a href="{{.ActionURL}}">{{.ActionText}}</a>
+<p class="security-note">{{.SecurityNote}}</p>
+{{end}}`
+
+	passwordResetEnTemplate := `{{define "content"}}
+<h1>Reset Your Password</h1>
+<p>Dear {{.Username}},</p>
+<p>We received a request to reset your password. Please click the button below to reset your password.</p>
+<a href="{{.ActionURL}}">{{.ActionText}}</a>
+<p class="security-note">{{.SecurityNote}}</p>
+{{end}}`
+
+	return fstest.MapFS{
+		"templates/base.html": &fstest.MapFile{
+			Data: []byte(baseTemplate),
+		},
+		"templates/verification/verification_zh.html": &fstest.MapFile{
+			Data: []byte(verificationZhTemplate),
+		},
+		"templates/verification/verification_en.html": &fstest.MapFile{
+			Data: []byte(verificationEnTemplate),
+		},
+		"templates/password_reset/password_reset_zh.html": &fstest.MapFile{
+			Data: []byte(passwordResetZhTemplate),
+		},
+		"templates/password_reset/password_reset_en.html": &fstest.MapFile{
+			Data: []byte(passwordResetEnTemplate),
+		},
+	}
+}
+
+// createTestTemplateDir 创建测试模板目录结构（用于文件系统回退测试）
 func createTestTemplateDir(t *testing.T) string {
 	tmpDir := t.TempDir()
 
@@ -103,10 +194,11 @@ func createTestTemplateDir(t *testing.T) string {
 
 // TestNewTemplateEngine_Success 测试成功创建模板引擎
 func TestNewTemplateEngine_Success(t *testing.T) {
-	tmpDir := createTestTemplateDir(t)
+	testFS := createTestTemplateFS(t)
 
 	config := TemplateConfig{
-		TemplateDir:  tmpDir,
+		TemplateFS:   testFS,
+		TemplateDir:  "templates",
 		DefaultLang:  "zh",
 		LogoURL:      "https://example.com/logo.png",
 		CompanyName:  "Test Company",
@@ -122,7 +214,10 @@ func TestNewTemplateEngine_Success(t *testing.T) {
 
 // TestNewTemplateEngine_EmptyTemplateDir 测试空模板目录错误
 func TestNewTemplateEngine_EmptyTemplateDir(t *testing.T) {
+	testFS := createTestTemplateFS(t)
+
 	config := TemplateConfig{
+		TemplateFS:  testFS,
 		TemplateDir: "",
 		DefaultLang: "zh",
 	}
@@ -135,23 +230,27 @@ func TestNewTemplateEngine_EmptyTemplateDir(t *testing.T) {
 
 // TestNewTemplateEngine_NonexistentDir 测试不存在的模板目录
 func TestNewTemplateEngine_NonexistentDir(t *testing.T) {
+	testFS := createTestTemplateFS(t)
+
 	config := TemplateConfig{
-		TemplateDir: "/nonexistent/path/to/templates",
+		TemplateFS:  testFS,
+		TemplateDir: "nonexistent",
 		DefaultLang: "zh",
 	}
 
 	engine, err := NewTemplateEngine(config)
 	assert.Error(t, err)
 	assert.Nil(t, engine)
-	assert.Contains(t, err.Error(), "does not exist")
+	assert.Contains(t, err.Error(), "not found")
 }
 
 // TestNewTemplateEngine_DefaultLanguage 测试默认语言设置
 func TestNewTemplateEngine_DefaultLanguage(t *testing.T) {
-	tmpDir := createTestTemplateDir(t)
+	testFS := createTestTemplateFS(t)
 
 	config := TemplateConfig{
-		TemplateDir: tmpDir,
+		TemplateFS:  testFS,
+		TemplateDir: "templates",
 		DefaultLang: "", // 空值应该被设置为默认值
 	}
 
@@ -162,10 +261,11 @@ func TestNewTemplateEngine_DefaultLanguage(t *testing.T) {
 
 // TestRenderVerificationEmail_Chinese 测试渲染中文验证邮件
 func TestRenderVerificationEmail_Chinese(t *testing.T) {
-	tmpDir := createTestTemplateDir(t)
+	testFS := createTestTemplateFS(t)
 
 	config := TemplateConfig{
-		TemplateDir:  tmpDir,
+		TemplateFS:   testFS,
+		TemplateDir:  "templates",
 		DefaultLang:  "zh",
 		LogoURL:      "https://example.com/logo.png",
 		CompanyName:  "Test Company",
@@ -193,10 +293,11 @@ func TestRenderVerificationEmail_Chinese(t *testing.T) {
 
 // TestRenderVerificationEmail_English 测试渲染英文验证邮件
 func TestRenderVerificationEmail_English(t *testing.T) {
-	tmpDir := createTestTemplateDir(t)
+	testFS := createTestTemplateFS(t)
 
 	config := TemplateConfig{
-		TemplateDir:  tmpDir,
+		TemplateFS:   testFS,
+		TemplateDir:  "templates",
 		DefaultLang:  "zh",
 		LogoURL:      "https://example.com/logo.png",
 		CompanyName:  "Test Company",
@@ -223,10 +324,11 @@ func TestRenderVerificationEmail_English(t *testing.T) {
 
 // TestRenderVerificationEmail_DefaultLanguageFallback 测试语言回退机制
 func TestRenderVerificationEmail_DefaultLanguageFallback(t *testing.T) {
-	tmpDir := createTestTemplateDir(t)
+	testFS := createTestTemplateFS(t)
 
 	config := TemplateConfig{
-		TemplateDir:  tmpDir,
+		TemplateFS:   testFS,
+		TemplateDir:  "templates",
 		DefaultLang:  "zh",
 		LogoURL:      "https://example.com/logo.png",
 		CompanyName:  "Test Company",
@@ -252,10 +354,11 @@ func TestRenderVerificationEmail_DefaultLanguageFallback(t *testing.T) {
 
 // TestRenderVerificationEmail_DefaultData 测试默认数据填充
 func TestRenderVerificationEmail_DefaultData(t *testing.T) {
-	tmpDir := createTestTemplateDir(t)
+	testFS := createTestTemplateFS(t)
 
 	config := TemplateConfig{
-		TemplateDir:  tmpDir,
+		TemplateFS:   testFS,
+		TemplateDir:  "templates",
 		DefaultLang:  "zh",
 		LogoURL:      "https://example.com/logo.png",
 		CompanyName:  "Test Company",
@@ -284,10 +387,11 @@ func TestRenderVerificationEmail_DefaultData(t *testing.T) {
 
 // TestRenderPasswordResetEmail_Chinese 测试渲染中文密码重置邮件
 func TestRenderPasswordResetEmail_Chinese(t *testing.T) {
-	tmpDir := createTestTemplateDir(t)
+	testFS := createTestTemplateFS(t)
 
 	config := TemplateConfig{
-		TemplateDir:  tmpDir,
+		TemplateFS:   testFS,
+		TemplateDir:  "templates",
 		DefaultLang:  "zh",
 		LogoURL:      "https://example.com/logo.png",
 		CompanyName:  "Test Company",
@@ -315,10 +419,11 @@ func TestRenderPasswordResetEmail_Chinese(t *testing.T) {
 
 // TestRenderPasswordResetEmail_English 测试渲染英文密码重置邮件
 func TestRenderPasswordResetEmail_English(t *testing.T) {
-	tmpDir := createTestTemplateDir(t)
+	testFS := createTestTemplateFS(t)
 
 	config := TemplateConfig{
-		TemplateDir:  tmpDir,
+		TemplateFS:   testFS,
+		TemplateDir:  "templates",
 		DefaultLang:  "zh",
 		LogoURL:      "https://example.com/logo.png",
 		CompanyName:  "Test Company",
@@ -345,10 +450,11 @@ func TestRenderPasswordResetEmail_English(t *testing.T) {
 
 // TestRenderPasswordResetEmail_DefaultLanguageFallback 测试密码重置邮件语言回退
 func TestRenderPasswordResetEmail_DefaultLanguageFallback(t *testing.T) {
-	tmpDir := createTestTemplateDir(t)
+	testFS := createTestTemplateFS(t)
 
 	config := TemplateConfig{
-		TemplateDir:  tmpDir,
+		TemplateFS:   testFS,
+		TemplateDir:  "templates",
 		DefaultLang:  "zh",
 		LogoURL:      "https://example.com/logo.png",
 		CompanyName:  "Test Company",
@@ -374,10 +480,11 @@ func TestRenderPasswordResetEmail_DefaultLanguageFallback(t *testing.T) {
 
 // TestRenderPasswordResetEmail_DefaultData 测试密码重置邮件默认数据
 func TestRenderPasswordResetEmail_DefaultData(t *testing.T) {
-	tmpDir := createTestTemplateDir(t)
+	testFS := createTestTemplateFS(t)
 
 	config := TemplateConfig{
-		TemplateDir:  tmpDir,
+		TemplateFS:   testFS,
+		TemplateDir:  "templates",
 		DefaultLang:  "zh",
 		LogoURL:      "https://example.com/logo.png",
 		CompanyName:  "Test Company",
@@ -406,10 +513,11 @@ func TestRenderPasswordResetEmail_DefaultData(t *testing.T) {
 
 // TestTemplateData_XSSPrevention 测试XSS防护（html/template自动转义）
 func TestTemplateData_XSSPrevention(t *testing.T) {
-	tmpDir := createTestTemplateDir(t)
+	testFS := createTestTemplateFS(t)
 
 	config := TemplateConfig{
-		TemplateDir:  tmpDir,
+		TemplateFS:   testFS,
+		TemplateDir:  "templates",
 		DefaultLang:  "zh",
 		LogoURL:      "https://example.com/logo.png",
 		CompanyName:  "Test Company",
@@ -438,10 +546,11 @@ func TestTemplateData_XSSPrevention(t *testing.T) {
 
 // TestTemplateEngine_TemplateLoading 测试模板加载
 func TestTemplateEngine_TemplateLoading(t *testing.T) {
-	tmpDir := createTestTemplateDir(t)
+	testFS := createTestTemplateFS(t)
 
 	config := TemplateConfig{
-		TemplateDir:  tmpDir,
+		TemplateFS:   testFS,
+		TemplateDir:  "templates",
 		DefaultLang:  "zh",
 		LogoURL:      "https://example.com/logo.png",
 		CompanyName:  "Test Company",
@@ -458,10 +567,11 @@ func TestTemplateEngine_TemplateLoading(t *testing.T) {
 
 // TestTemplateEngine_ConcurrentAccess 测试并发访问
 func TestTemplateEngine_ConcurrentAccess(t *testing.T) {
-	tmpDir := createTestTemplateDir(t)
+	testFS := createTestTemplateFS(t)
 
 	config := TemplateConfig{
-		TemplateDir:  tmpDir,
+		TemplateFS:   testFS,
+		TemplateDir:  "templates",
 		DefaultLang:  "zh",
 		LogoURL:      "https://example.com/logo.png",
 		CompanyName:  "Test Company",
@@ -491,4 +601,38 @@ func TestTemplateEngine_ConcurrentAccess(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		assert.NoError(t, <-done)
 	}
+}
+
+// TestTemplateEngine_OSDirFSFallback 测试 os.DirFS 回退逻辑
+func TestTemplateEngine_OSDirFSFallback(t *testing.T) {
+	// 使用真实的文件系统目录（用于开发工具脚本场景）
+	tmpDir := createTestTemplateDir(t)
+
+	config := TemplateConfig{
+		// 不提供 TemplateFS，应该回退到 os.DirFS
+		TemplateFS:   nil,
+		TemplateDir:  tmpDir,
+		DefaultLang:  "zh",
+		LogoURL:      "https://example.com/logo.png",
+		CompanyName:  "Test Company",
+		SupportEmail: "support@example.com",
+	}
+
+	engine, err := NewTemplateEngine(config)
+	require.NoError(t, err)
+	assert.NotNil(t, engine)
+
+	// 验证可以正常渲染
+	data := TemplateData{
+		Username:     "testuser",
+		ActionURL:    "https://example.com/verify?token=abc123",
+		ActionText:   "验证邮箱",
+		SecurityNote: "如果您没有注册账户，请忽略此邮件。",
+	}
+
+	subject, htmlBody, err := engine.RenderVerificationEmail("zh", data)
+	require.NoError(t, err)
+	assert.NotEmpty(t, subject)
+	assert.NotEmpty(t, htmlBody)
+	assert.Contains(t, htmlBody, "testuser")
 }

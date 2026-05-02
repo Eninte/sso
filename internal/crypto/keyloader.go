@@ -173,7 +173,7 @@ func validateKeyPath(path string) error {
 		_, err := os.Stat("/.dockerenv")
 		return err == nil
 	}()
-	
+
 	// 读取文件内容以确定密钥类型（基于PEM内容而非文件名）
 	data, err := os.ReadFile(path) // #nosec G304 -- 路径已通过前面的验证
 	if err != nil {
@@ -191,7 +191,7 @@ func validateKeyPath(path string) error {
 	// "RSA PRIVATE KEY" (PKCS1) 或 "PRIVATE KEY" (PKCS8) 表示私钥
 	// "RSA PUBLIC KEY" (PKCS1) 或 "PUBLIC KEY" (PKIX) 表示公钥
 	isPrivateKey := block.Type == "RSA PRIVATE KEY" || block.Type == "PRIVATE KEY"
-	
+
 	if !isContainer {
 		if isPrivateKey {
 			// 私钥：不允许组和其他用户有任何权限

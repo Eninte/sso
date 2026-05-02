@@ -71,6 +71,17 @@ test-integration: ## 运行集成测试
 test-e2e: ## 运行端到端测试（需要服务运行中）
 	E2E_ADMIN_EMAIL="system@eninte.com" E2E_ADMIN_PASSWORD="Admin123!" RATE_LIMIT_REQUESTS=0 DATABASE_URL="$(TEST_DATABASE_URL)" gotestsum --format pkgname -- -race -tags=e2e ./test/e2e/...
 
+.PHONY: test-e2e-prepare
+test-e2e-prepare: ## 准备E2E测试数据（验证测试用户邮箱）
+	@DATABASE_URL="$(TEST_DATABASE_URL)" bash scripts/prepare-e2e-test.sh
+
+.PHONY: test-e2e-cleanup
+test-e2e-cleanup: ## 清理E2E测试数据（CI安全，非交互模式）
+	@DATABASE_URL="$(TEST_DATABASE_URL)" bash scripts/cleanup-e2e-test.sh --force
+
+.PHONY: test-e2e-full
+test-e2e-full: test-e2e-prepare test-e2e test-e2e-cleanup ## 完整E2E测试流程（准备数据 + 运行测试 + 清理）
+
 .PHONY: test-coverage
 test-coverage: ## 生成测试覆盖率报告（HTML）
 	DATABASE_URL="$(TEST_DATABASE_URL)" go test -coverprofile=coverage.out $(shell go list ./internal/... | grep -v '/store/mock')

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -73,7 +74,8 @@ func TestGetKeyPathWhitelist(t *testing.T) {
 
 		whitelist := getKeyPathWhitelist()
 
-		assert.Len(t, whitelist, 3)
+		// 默认包含3个固定路径 + 当前工作目录/keys
+		assert.GreaterOrEqual(t, len(whitelist), 3)
 		assert.Contains(t, whitelist, "/app/keys")
 		assert.Contains(t, whitelist, "/keys")
 		assert.Contains(t, whitelist, "/etc/sso/keys")
@@ -131,8 +133,8 @@ func TestGetKeyPathWhitelist(t *testing.T) {
 
 		whitelist := getKeyPathWhitelist()
 
-		// 应该回退到默认值
-		assert.Len(t, whitelist, 3)
+		// 应该回退到默认值（3个固定路径 + 当前工作目录/keys）
+		assert.GreaterOrEqual(t, len(whitelist), 3)
 		assert.Contains(t, whitelist, "/app/keys")
 		assert.Contains(t, whitelist, "/keys")
 		assert.Contains(t, whitelist, "/etc/sso/keys")
@@ -144,8 +146,8 @@ func TestGetKeyPathWhitelist(t *testing.T) {
 
 		whitelist := getKeyPathWhitelist()
 
-		// 应该使用默认值
-		assert.Len(t, whitelist, 3)
+		// 应该使用默认值（3个固定路径 + 当前工作目录/keys）
+		assert.GreaterOrEqual(t, len(whitelist), 3)
 		assert.Contains(t, whitelist, "/app/keys")
 	})
 
@@ -155,8 +157,8 @@ func TestGetKeyPathWhitelist(t *testing.T) {
 
 		whitelist := getKeyPathWhitelist()
 
-		// 应该回退到默认值
-		assert.Len(t, whitelist, 3)
+		// 应该回退到默认值（3个固定路径 + 当前工作目录/keys）
+		assert.GreaterOrEqual(t, len(whitelist), 3)
 		assert.Contains(t, whitelist, "/app/keys")
 	})
 }
@@ -406,9 +408,11 @@ func TestValidateKeyPath_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("非常长的路径", func(t *testing.T) {
-		longPath := "/app/keys/" + string(make([]byte, 1000))
+		// 创建一个长但不超过系统限制的路径（在白名单内）
+		// Linux文件名限制通常是255字节，路径限制是4096字节
+		longPath := "/app/keys/" + strings.Repeat("a", 200) + ".pem"
 		err := ValidateKeyPath(longPath)
-		// 应该仍然验证（只要在白名单内）
+		// 长路径只要在白名单内就应该有效
 		assert.NoError(t, err)
 	})
 }

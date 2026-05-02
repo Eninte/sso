@@ -1,3 +1,5 @@
+//go:build ignore
+
 // Package main 邮件模板渲染测试脚本
 // 用于测试邮件模板渲染功能（不实际发送邮件）
 package main
@@ -7,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/your-org/sso/internal/service/email"
@@ -27,11 +30,32 @@ func main() {
 	fmt.Printf("用户名: %s\n", *username)
 	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
 
-	// 初始化模板引擎
+	// 获取当前工作目录
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("❌ 获取工作目录失败: %v", err)
+	}
+
+	// 构建模板目录路径
+	// go run scripts/render_email_template.go 从项目根目录运行
+	templateDir := filepath.Join(wd, "internal/service/email/templates")
+
+	// 如果从 scripts/ 目录运行，向上查找项目根目录
+	if _, err := os.Stat(templateDir); os.IsNotExist(err) {
+		templateDir = filepath.Join(filepath.Dir(wd), "internal/service/email/templates")
+	}
+
+	// 验证模板目录存在
+	if _, err := os.Stat(templateDir); os.IsNotExist(err) {
+		log.Fatalf("❌ 模板目录不存在: %s", templateDir)
+	}
+
+	// 初始化模板引擎（使用操作系统文件系统）
 	templateConfig := email.TemplateConfig{
-		TemplateDir:  "internal/service/email/templates",
-		DefaultLang:  "zh",
-		CompanyName:  "SSO服务",
+		TemplateFS:  nil, // 使用操作系统文件系统
+		TemplateDir: templateDir,
+		DefaultLang: "zh",
+		CompanyName: "SSO服务",
 		SupportEmail: "support@example.com",
 		LogoURL:      "",
 	}
@@ -43,60 +67,48 @@ func main() {
 
 	// 准备模板数据
 	data := email.TemplateData{
-		Username: *username,
-		Year:     time.Now().Year(),
+		Username:  *username,
+		ActionURL: "https://example.com/verify?token=test123",
+		ActionText: "验证邮箱",
+		SecurityNote: "如果您没有注册账户，请忽略此邮件。",
+		Year:      time.Now().Year(),
+		Language:  *lang,
 	}
 
+	// 渲染邮件
 	var subject, htmlBody string
+	var renderErr error
 
-	// 根据类型渲染模板
 	switch *emailType {
 	case "verification":
-		data.ActionURL = "https://sso.example.com/verify?token=test-token-123456"
-		if *lang == "en" {
-			data.ActionText = "Verify Email"
-		} else {
-			data.ActionText = "验证邮箱"
-		}
-		subject, htmlBody, err = templateEngine.RenderVerificationEmail(*lang, data)
-		if err != nil {
-			log.Fatalf("❌ 渲染验证邮件模板失败: %v", err)
-		}
-
+		subject, htmlBody, renderErr = templateEngine.RenderVerificationEmail(*lang, data)
 	case "password_reset":
-		data.ActionURL = "https://sso.example.com/reset?token=test-reset-token-789"
-		if *lang == "en" {
-			data.ActionText = "Reset Password"
-		} else {
-			data.ActionText = "重置密码"
-		}
-		subject, htmlBody, err = templateEngine.RenderPasswordResetEmail(*lang, data)
-		if err != nil {
-			log.Fatalf("❌ 渲染密码重置邮件模板失败: %v", err)
-		}
-
+		subject, htmlBody, renderErr = templateEngine.RenderPasswordResetEmail(*lang, data)
 	default:
-		log.Fatalf("错误: 不支持的邮件类型 '%s'，支持的类型: verification, password_reset", *emailType)
+		log.Fatalf("❌ 未知的邮件类型: %s", *emailType)
 	}
 
-	fmt.Printf("✅ 模板渲染成功！\n\n")
-	fmt.Printf("主题: %s\n", subject)
-	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+	if renderErr != nil {
+		log.Fatalf("❌ 渲染邮件失败: %v", renderErr)
+	}
 
-	// 输出HTML
+	// 输出结果
+	fmt.Printf("📨 邮件主题: %s\n\n", subject)
+	fmt.Printf("📄 HTML内容:\n")
+	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	
 	if *output != "" {
 		// 写入文件
-		if err := os.WriteFile(*output, []byte(htmlBody), 0644); err != nil {
+		err := os.WriteFile(*output, []byte(htmlBody), 0644)
+		if err != nil {
 			log.Fatalf("❌ 写入文件失败: %v", err)
 		}
-		fmt.Printf("📄 HTML已保存到: %s\n", *output)
-		fmt.Printf("💡 在浏览器中打开该文件查看效果\n")
+		fmt.Printf("\n✅ 邮件已保存到: %s\n", *output)
 	} else {
 		// 输出到stdout
-		fmt.Println("HTML内容:")
-		fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 		fmt.Println(htmlBody)
 	}
-
-	fmt.Printf("\n🎉 渲染完成！\n")
+	
+	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	fmt.Printf("✅ 邮件渲染成功！\n")
 }

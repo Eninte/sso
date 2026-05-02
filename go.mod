@@ -7,13 +7,12 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
+	github.com/joho/godotenv v1.5.1
 	github.com/lib/pq v1.12.0
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/stretchr/testify v1.8.4
 	golang.org/x/crypto v0.49.0
 )
-
-require github.com/joho/godotenv v1.5.1 // indirect
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

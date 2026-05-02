@@ -1,3 +1,5 @@
+//go:build ignore
+
 // Package main 邮件测试脚本
 // 用于测试邮件模板渲染和发送功能
 package main

@@ -32,7 +32,7 @@ func TestBugCondition_GetEnvPathFallback(t *testing.T) {
 	originalEnvPath := os.Getenv("ENV_FILE_PATH")
 	originalCwd, err := os.Getwd()
 	require.NoError(t, err)
-	
+
 	defer func() {
 		// Restore original environment
 		if originalEnvPath != "" {
@@ -45,7 +45,7 @@ func TestBugCondition_GetEnvPathFallback(t *testing.T) {
 
 	// Create a temporary directory without .env file
 	tmpDir := t.TempDir()
-	
+
 	// Change to temporary directory
 	err = os.Chdir(tmpDir)
 	require.NoError(t, err)
@@ -78,7 +78,7 @@ func TestBugCondition_GetEnvPathWithExistingFile(t *testing.T) {
 	originalEnvPath := os.Getenv("ENV_FILE_PATH")
 	originalCwd, err := os.Getwd()
 	require.NoError(t, err)
-	
+
 	defer func() {
 		// Restore original environment
 		if originalEnvPath != "" {
@@ -91,12 +91,12 @@ func TestBugCondition_GetEnvPathWithExistingFile(t *testing.T) {
 
 	// Create a temporary directory with .env file
 	tmpDir := t.TempDir()
-	
+
 	// Create .env file
 	envPath := filepath.Join(tmpDir, ".env")
 	err = os.WriteFile(envPath, []byte("TEST=value"), 0600)
 	require.NoError(t, err)
-	
+
 	// Change to temporary directory
 	err = os.Chdir(tmpDir)
 	require.NoError(t, err)
@@ -119,7 +119,7 @@ func TestBugCondition_GetEnvPathWithExistingFile(t *testing.T) {
 func TestBugCondition_GetEnvPathPriority(t *testing.T) {
 	// Save original environment
 	originalEnvPath := os.Getenv("ENV_FILE_PATH")
-	
+
 	defer func() {
 		// Restore original environment
 		if originalEnvPath != "" {
@@ -139,12 +139,4 @@ func TestBugCondition_GetEnvPathPriority(t *testing.T) {
 	// Expected: Should return custom path (highest priority)
 	// This should pass on both unfixed and fixed code
 	assert.Equal(t, customPath, result, "GetEnvPath should return ENV_FILE_PATH when set")
-}
-
-// TestBugCondition_GetEnvPathInaccessibleCwd tests edge case where cwd is
-// inaccessible, should fall back to /app/.env.
-func TestBugCondition_GetEnvPathInaccessibleCwd(t *testing.T) {
-	// This test is difficult to implement reliably across platforms
-	// Skip for now, focus on main bug condition
-	t.Skip("Edge case test - difficult to implement reliably")
 }

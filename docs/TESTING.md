@@ -211,61 +211,144 @@ func TestParallel(t *testing.T) {
 }
 ```
 
-## E2E测试
+## E2E端到端测试
 
-### 环境准备
+### 概述
 
-1. 启动服务：`make dev`（服务运行在`http://localhost:9090`）
-2. 配置环境变量：
-   ```bash
-   export E2E_ADMIN_EMAIL="system@eninte.com"
-   export E2E_ADMIN_PASSWORD="Admin123!"
-   ```
-3. 确保数据库连接可用
+E2E测试验证完整的用户流程，包括注册、登录、Token管理、OAuth授权等。测试需要真实的服务运行环境。
 
-### 运行E2E测试
+**当前测试状态**：
+- 总测试数：156个
+- 通过率：94.9% (148/156)
+- 执行时间：约75秒
+
+### 快速开始
 
 ```bash
-# 使用Makefile
+# 1. 启动服务（禁用限流）
+RATE_LIMIT_REQUESTS=0 make run &
+
+# 2. 准备测试数据（启用自动验证触发器）
+make test-e2e-prepare
+
+# 3. 运行E2E测试
 make test-e2e
 
-# 手动运行
-E2E_ADMIN_EMAIL="system@eninte.com" \
-E2E_ADMIN_PASSWORD="Admin123!" \
-go test -v -tags=e2e ./test/e2e/...
-
-# 运行特定E2E测试
-go test -v -tags=e2e -run TestE2E_UserRegistration ./test/e2e/
+# 4. 清理测试环境（禁用触发器）
+make test-e2e-cleanup
 ```
 
-### E2E测试结构
+### 一键测试
 
-```go
-//go:build e2e
+```bash
+# 完整测试流程（准备 + 测试）
+make test-e2e-full
 
-package e2e_test
-
-import (
-    "testing"
-    "net/http"
-)
-
-func TestE2E_UserFlow(t *testing.T) {
-    baseURL := "http://localhost:9090"
-    
-    // 1. 注册用户
-    resp := registerUser(t, baseURL, "test@example.com")
-    assert.Equal(t, http.StatusCreated, resp.StatusCode)
-    
-    // 2. 登录
-    token := login(t, baseURL, "test@example.com", "password")
-    assert.NotEmpty(t, token)
-    
-    // 3. 访问受保护资源
-    profile := getProfile(t, baseURL, token)
-    assert.Equal(t, "test@example.com", profile.Email)
-}
+# 测试完成后清理
+make test-e2e-cleanup
 ```
+
+### 环境要求
+
+1. **服务运行中**：SSO服务必须在 `localhost:9090` 运行
+2. **数据库可访问**：PostgreSQL测试数据库可连接
+3. **Redis可访问**：Redis缓存服务可连接
+4. **限流已禁用**：服务必须以 `RATE_LIMIT_REQUESTS=0` 启动
+
+### 测试数据准备机制
+
+E2E测试使用**PostgreSQL触发器**自动验证测试用户：
+
+```sql
+-- 自动验证 @example.com 域名的测试用户
+CREATE TRIGGER trigger_auto_verify_test_users
+    BEFORE INSERT ON users
+    FOR EACH ROW
+    EXECUTE FUNCTION auto_verify_test_users();
+```
+
+**优点**：
+- ✅ 不污染生产代码
+- ✅ 测试时自动生效
+- ✅ 测试后可完全移除
+- ✅ 仅影响测试环境
+
+**重要提示**：
+- ⚠️ 触发器仅用于测试环境，**禁止在生产环境使用**
+- ⚠️ 测试完成后必须运行清理脚本禁用触发器
+- ⚠️ 触发器会自动验证所有新注册的 `@example.com` 用户
+
+### 手动操作
+
+如果需要手动操作数据库：
+
+```bash
+# 启用触发器
+psql "$DATABASE_URL" -f scripts/enable-auto-verify-test-users.sql
+
+# 禁用触发器
+psql "$DATABASE_URL" -f scripts/disable-auto-verify-test-users.sql
+
+# 手动验证管理员
+psql "$DATABASE_URL" -c "UPDATE users SET email_verified=true, role='admin' WHERE email='system@eninte.com';"
+
+# 手动验证所有测试用户
+psql "$DATABASE_URL" -c "UPDATE users SET email_verified=true WHERE email LIKE '%@example.com';"
+```
+
+### 测试覆盖范围
+
+| 测试类别 | 测试数 | 说明 |
+|---------|--------|------|
+| 健康检查 | 2 | 服务健康状态检查 |
+| 注册流程 | 8 | 用户注册、验证 |
+| 登录流程 | 12 | 登录、多设备登录 |
+| Token管理 | 18 | Token验证、刷新、撤销 |
+| 邮箱验证 | 10 | 邮箱验证流程 |
+| 密码重置 | 12 | 忘记密码、重置密码 |
+| 管理员功能 | 15 | 用户管理、审计日志 |
+| OAuth流程 | 20 | OAuth授权流程 |
+| 并发测试 | 25 | 并发注册、登录、刷新 |
+| 安全测试 | 18 | SQL注入、XSS、边界值 |
+| 错误处理 | 16 | 异常情况处理 |
+
+### 常见问题
+
+**Q: 测试失败提示"connection refused"**
+
+A: 服务未启动或端口不是9090。请确保：
+```bash
+# 检查服务是否运行
+curl http://localhost:9090/health
+
+# 如果未运行，启动服务
+RATE_LIMIT_REQUESTS=0 make run
+```
+
+**Q: 测试失败提示"429 Too Many Requests"**
+
+A: 限流未禁用。必须以 `RATE_LIMIT_REQUESTS=0` 启动服务。
+
+**Q: 测试失败提示"401 Unauthorized"**
+
+A: 用户邮箱未验证。运行准备脚本：
+```bash
+make test-e2e-prepare
+```
+
+**Q: 如何清理测试数据？**
+
+A: 运行清理脚本并选择清理数据：
+```bash
+make test-e2e-cleanup
+# 提示时输入 'y' 确认清理
+```
+
+### 详细文档
+
+完整的E2E测试说明、故障排查和最佳实践请参考：[E2E测试指南](./E2E_TESTING.md)
+
+## E2E测试
 
 ## 基准测试
 

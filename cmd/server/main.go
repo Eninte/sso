@@ -77,6 +77,8 @@ func main() {
 	}
 
 	// 1. 加载配置
+	// 注意：配置向导仅在 initConfig() 失败时启动，
+	// 配置加载成功时不会进入 startSetupWizard，因此不存在配置正常时暴露向导的风险
 	cfg, err := initConfig()
 	if err != nil {
 		slog.Warn("配置加载失败，启动配置向导", "error", err)

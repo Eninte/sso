@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -50,7 +51,8 @@ type TemplateData struct {
 // TemplateConfig 模板引擎配置
 // 定义模板引擎的运行参数
 type TemplateConfig struct {
-	TemplateDir  string // 模板文件目录路径
+	TemplateFS   fs.FS  // 模板文件系统（支持embed.FS）
+	TemplateDir  string // 模板文件目录路径（在TemplateFS中的相对路径）
 	DefaultLang  string // 默认语言代码（zh或en）
 	LogoURL      string // 默认Logo URL
 	CompanyName  string // 默认公司名称
@@ -64,6 +66,7 @@ type TemplateEngine struct {
 	templates map[string]*template.Template
 	mu        sync.RWMutex
 	logger    *slog.Logger
+	fsys      fs.FS // 文件系统接口
 }
 
 // ============================================================================
@@ -89,19 +92,33 @@ func NewTemplateEngine(config TemplateConfig) (*TemplateEngine, error) {
 		config.DefaultLang = "zh"
 	}
 
-	// 检查模板目录是否存在
-	if _, err := os.Stat(config.TemplateDir); err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("template directory does not exist: %s", config.TemplateDir)
+	// 使用提供的文件系统，如果未提供则使用操作系统文件系统
+	var fsys fs.FS
+	var templateDir string
+	if config.TemplateFS != nil {
+		fsys = config.TemplateFS
+		templateDir = config.TemplateDir
+	} else {
+		// 回退到操作系统文件系统（用于开发工具脚本）
+		// 注意：绝对路径处理仅适用于 Unix 系统（Linux/macOS），
+		// Windows 路径格式不同（如 C:\path），本项目部署目标为 Linux
+		if filepath.IsAbs(config.TemplateDir) {
+			fsys = os.DirFS("/")
+			templateDir = filepath.Clean(config.TemplateDir[1:])
+		} else {
+			fsys = os.DirFS(".")
+			templateDir = config.TemplateDir
 		}
-		return nil, fmt.Errorf("cannot access template directory: %w", err)
 	}
 
 	engine := &TemplateEngine{
 		config:    config,
 		templates: make(map[string]*template.Template),
 		logger:    slog.Default().With("component", "email_engine"),
+		fsys:      fsys,
 	}
+	// 覆盖 TemplateDir 为处理后的路径
+	engine.config.TemplateDir = templateDir
 
 	// 加载所有模板
 	if err := engine.loadTemplates(); err != nil {
@@ -120,16 +137,19 @@ func NewTemplateEngine(config TemplateConfig) (*TemplateEngine, error) {
 func (e *TemplateEngine) loadTemplates() error {
 	basePath := filepath.Join(e.config.TemplateDir, "base.html")
 
-	if _, err := os.Stat(basePath); err != nil {
+	// 读取 base.html 内容
+	baseContent, err := fs.ReadFile(e.fsys, basePath)
+	if err != nil {
 		return fmt.Errorf("base template not found: %w", err)
 	}
 
-	return filepath.Walk(e.config.TemplateDir, func(path string, info os.FileInfo, err error) error {
+	// 遍历模板目录
+	return fs.WalkDir(e.fsys, e.config.TemplateDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
-		if info.IsDir() {
+		if d.IsDir() {
 			return nil
 		}
 
@@ -144,11 +164,24 @@ func (e *TemplateEngine) loadTemplates() error {
 
 		templateName := filepath.ToSlash(relPath)
 
+		// 跳过 base.html
 		if templateName == "base.html" {
 			return nil
 		}
 
-		tmpl, err := template.New("").ParseFiles(basePath, path)
+		// 读取模板内容
+		content, err := fs.ReadFile(e.fsys, path)
+		if err != nil {
+			return fmt.Errorf("failed to read template %s: %w", templateName, err)
+		}
+
+		// 解析模板（base + 当前模板）
+		tmpl, err := template.New("").Parse(string(baseContent))
+		if err != nil {
+			return fmt.Errorf("failed to parse base template: %w", err)
+		}
+
+		tmpl, err = tmpl.Parse(string(content))
 		if err != nil {
 			return fmt.Errorf("failed to parse template %s: %w", templateName, err)
 		}

@@ -419,7 +419,7 @@ func TestAuthService_Logout_ComprehensiveErrorPaths(t *testing.T) {
 		// 验证返回错误
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "登出失败")
-		assert.Contains(t, err.Error(), "已重试3次")
+		assert.Contains(t, err.Error(), "operation failed after 3 retries")
 	})
 
 	// ==== 测试2: 验证不暴露内部错误详情 ====

@@ -90,36 +90,36 @@ func (h *SetupHandler) HandleSetupPage(w http.ResponseWriter, r *http.Request) {
 		handlerutil.WriteJSONError(w, apperrors.ErrForbidden.WithDetails("配置向导仅允许本地访问"))
 		return
 	}
-	
-	// 检查配置是否已完成（.env文件是否存在）
-	if _, err := os.Stat(h.envPath); err == nil {
-		// .env文件存在，配置已完成，拒绝访问
-		handlerutil.WriteJSONError(w, apperrors.ErrForbidden.WithDetails("配置已完成，无法再次访问设置向导"))
-		return
-	}
-	
+
+	// 注意：配置向导只有在配置加载失败时才会启动（见cmd/server/main.go的startSetupWizard）
+	// 因此不需要检查.env文件是否存在，因为：
+	// 1. .env可能存在但内容无效（如DB_PASSWORD为空）
+	// 2. 配置向导启动本身就说明配置有问题，应该允许访问和修复
+
 	// 如果token为空（首次访问或保存后失效），重新生成
 	if h.setupToken.Load() == nil {
 		h.generateSetupToken()
 	}
-	
+
 	nonce := middleware.GetCSPNonce(r.Context())
-	
+
 	// 获取默认密钥路径（优先使用当前工作目录）
 	defaultKeyPath := "/app/keys"
 	if cwd, err := os.Getwd(); err == nil {
 		defaultKeyPath = filepath.Join(cwd, "keys")
 	}
-	
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = setupTmpl.Execute(w, map[string]string{
-		"Nonce":            nonce,
-		"Version":          h.version,
-		"SetupToken":       h.GetSetupToken(),
-		"DefaultKeyPath":   defaultKeyPath,
+	if err := setupTmpl.Execute(w, map[string]string{
+		"Nonce":             nonce,
+		"Version":           h.version,
+		"SetupToken":        h.GetSetupToken(),
+		"DefaultKeyPath":    defaultKeyPath,
 		"DefaultPrivateKey": filepath.Join(defaultKeyPath, "private.pem"),
 		"DefaultPublicKey":  filepath.Join(defaultKeyPath, "public.pem"),
-	})
+	}); err != nil {
+		slog.Error("setup template render failed", "error", err)
+	}
 }
 
 // HandleSetupSave 接收配置并写入.env文件
@@ -188,7 +188,13 @@ func (h *SetupHandler) HandleSetupSave(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		time.Sleep(3 * time.Second)
 		slog.Info("配置已保存，触发优雅关闭...")
-		
+
+		// 检查是否跳过重启（测试环境使用 SETUP_SKIP_RESTART 环境变量）
+		if os.Getenv("SETUP_SKIP_RESTART") != "" {
+			slog.Info("跳过重启（SETUP_SKIP_RESTART 已设置）")
+			return
+		}
+
 		// 发送SIGTERM信号触发优雅关闭
 		// 这将触发main.go中的graceful shutdown逻辑：
 		// 1. 关闭数据库连接

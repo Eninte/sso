@@ -68,6 +68,7 @@ func TestInitHandler_HandleInitPage_Integration(t *testing.T) {
 	h := handler.NewInitHandler(store, nil, nil, auditSvc, "1.0.0", "2024-01-01")
 
 	req := httptest.NewRequest("GET", "/init", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
 	w := httptest.NewRecorder()
 
 	h.HandleInitPage(w, req)
@@ -89,6 +90,7 @@ func TestInitHandler_HandleSystemStatus_Integration(t *testing.T) {
 	h := handler.NewInitHandler(store, nil, nil, auditSvc, "1.0.0", "2024-01-01")
 
 	req := httptest.NewRequest("GET", "/api/v1/init/status", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
 	w := httptest.NewRecorder()
 
 	h.HandleSystemStatus(w, req)
@@ -127,6 +129,7 @@ func TestInitHandler_HandleCreateAdmin_Integration(t *testing.T) {
 	json.NewEncoder(&body).Encode(requestBody)
 
 	req := httptest.NewRequest("POST", "/api/v1/init/admin", &body)
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -191,6 +194,7 @@ func TestInitHandler_HandleCreateAdmin_DuplicateEmail_Integration(t *testing.T) 
 	json.NewEncoder(&body).Encode(requestBody)
 
 	req := httptest.NewRequest("POST", "/api/v1/init/admin", &body)
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -213,6 +217,23 @@ func TestInitHandler_HandleCreateClient_Integration(t *testing.T) {
 	auditSvc := &mockAuditService{}
 	h := handler.NewInitHandler(store, passwordSvc, nil, auditSvc, "1.0.0", "2024-01-01")
 
+	// 先创建管理员（创建客户端需要先有管理员）
+	createAdminBody := map[string]string{
+		"email":    "test-init-admin-for-client@example.com",
+		"password": "AdminPassword123!",
+	}
+	var adminBody bytes.Buffer
+	json.NewEncoder(&adminBody).Encode(createAdminBody)
+	adminReq := httptest.NewRequest("POST", "/api/v1/init/admin", &adminBody)
+	adminReq.RemoteAddr = "127.0.0.1:12345"
+	adminReq.Header.Set("Content-Type", "application/json")
+	adminW := httptest.NewRecorder()
+	h.HandleCreateAdmin(adminW, adminReq)
+	if adminW.Code != http.StatusOK {
+		t.Fatalf("Failed to create admin: %d, body: %s", adminW.Code, adminW.Body.String())
+	}
+
+	// 现在创建客户端
 	requestBody := map[string]string{
 		"name":         "Test Init Client",
 		"redirect_uri": "http://localhost:3000/callback",
@@ -222,6 +243,7 @@ func TestInitHandler_HandleCreateClient_Integration(t *testing.T) {
 	json.NewEncoder(&body).Encode(requestBody)
 
 	req := httptest.NewRequest("POST", "/api/v1/init/client", &body)
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -237,9 +259,9 @@ func TestInitHandler_HandleCreateClient_Integration(t *testing.T) {
 	assert.NotEmpty(t, data["client_id"])
 	assert.NotEmpty(t, data["client_secret"])
 
-	// 验证审计日志
-	assert.Len(t, auditSvc.logs, 1)
-	assert.Equal(t, "oauth_client_created", auditSvc.logs[0].EventType)
+	// 验证审计日志（先有admin_created，再有oauth_client_created）
+	assert.Len(t, auditSvc.logs, 2)
+	assert.Equal(t, "oauth_client_created", auditSvc.logs[1].EventType)
 
 	// 验证客户端已创建（使用正确的表名 oauth_clients）
 	var count int
@@ -270,16 +292,19 @@ func TestInitHandler_AdminExists_ReturnsNotFound_Integration(t *testing.T) {
 	require.NoError(t, err)
 
 	auditSvc := &mockAuditService{}
-	h := handler.NewInitHandler(store, nil, nil, auditSvc, "1.0.0", "2024-01-01")
+	passwordSvc := crypto.NewPasswordService(4)
+	h := handler.NewInitHandler(store, passwordSvc, nil, auditSvc, "1.0.0", "2024-01-01")
 
 	// 测试 HandleInitPage
 	req := httptest.NewRequest("GET", "/init", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
 	w := httptest.NewRecorder()
 	h.HandleInitPage(w, req)
-	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, http.StatusForbidden, w.Code)
 
 	// 测试 HandleSystemStatus
 	req = httptest.NewRequest("GET", "/api/v1/init/status", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
 	w = httptest.NewRecorder()
 	h.HandleSystemStatus(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
@@ -292,6 +317,7 @@ func TestInitHandler_AdminExists_ReturnsNotFound_Integration(t *testing.T) {
 	var body bytes.Buffer
 	json.NewEncoder(&body).Encode(requestBody)
 	req = httptest.NewRequest("POST", "/api/v1/init/admin", &body)
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/json")
 	w = httptest.NewRecorder()
 	h.HandleCreateAdmin(w, req)
@@ -305,8 +331,17 @@ func TestInitHandler_AdminExists_ReturnsNotFound_Integration(t *testing.T) {
 	body.Reset()
 	json.NewEncoder(&body).Encode(requestBody)
 	req = httptest.NewRequest("POST", "/api/v1/init/client", &body)
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/json")
 	w = httptest.NewRecorder()
 	h.HandleCreateClient(w, req)
-	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// 验证客户端创建成功
+	var clientResp map[string]interface{}
+	err = json.NewDecoder(w.Body).Decode(&clientResp)
+	require.NoError(t, err)
+	clientData := clientResp["data"].(map[string]interface{})
+	assert.NotEmpty(t, clientData["client_id"])
+	assert.NotEmpty(t, clientData["client_secret"])
 }

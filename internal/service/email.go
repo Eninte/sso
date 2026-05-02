@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"crypto/tls"
+	"embed"
 	"fmt"
 	"log/slog"
 	"net"
@@ -14,6 +15,9 @@ import (
 	"github.com/your-org/sso/internal/service/email"
 	"github.com/your-org/sso/internal/util/serviceutil"
 )
+
+//go:embed email/templates email/templates/* email/templates/*/*
+var templateFS embed.FS
 
 // ============================================================================
 // 邮件配置
@@ -67,9 +71,10 @@ func NewEmailService(config *EmailConfig, sender ...MailSender) (*EmailService, 
 		s = sender[0]
 	}
 
-	// 初始化模板引擎
+	// 初始化模板引擎（使用嵌入的文件系统）
 	templateConfig := email.TemplateConfig{
-		TemplateDir:  "internal/service/email/templates",
+		TemplateFS:   templateFS,
+		TemplateDir:  "email/templates",
 		DefaultLang:  "zh",
 		CompanyName:  "SSO服务",
 		SupportEmail: config.From,

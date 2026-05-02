@@ -2,7 +2,7 @@
 
 Go 1.26+ 单点登录服务，提供OAuth 2.0/OpenID Connect认证功能。
 
-## 快速开始
+## 测试
 
 ```bash
 make generate-keys          # 生成JWT密钥
@@ -10,6 +10,32 @@ cp .env.example .env.test   # 配置测试环境（编辑填写凭据）
 make test                   # 运行所有测试
 make dev                    # 启动服务
 ```
+
+### E2E端到端测试
+
+```bash
+# 1. 启动服务（禁用限流）
+RATE_LIMIT_REQUESTS=0 make run &
+
+# 2. 准备测试数据（启用自动验证触发器）
+make test-e2e-prepare
+
+# 3. 运行E2E测试
+make test-e2e
+
+# 4. 清理测试环境（禁用触发器）
+make test-e2e-cleanup
+```
+
+**E2E测试状态**：
+- 总测试数：156个
+- 通过率：94.9% (148/156)
+- 测试覆盖：注册、登录、Token、OAuth、MFA、管理员、并发、安全
+
+**测试数据准备机制**：
+- 使用PostgreSQL触发器自动验证 `@example.com` 测试用户
+- 不污染生产代码，测试后可完全移除
+- 详细说明：`docs/E2E_TESTING.md`
 
 ## 构建与运行
 

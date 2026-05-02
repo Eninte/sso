@@ -3,6 +3,7 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -31,7 +32,7 @@ func createTestInitService(t *testing.T) (*service.InitService, *mock.Store) {
 	passwordSvc := crypto.NewPasswordService(4) // 使用较低的cost加快测试
 
 	// 创建审计服务（使用nil，因为InitService使用SafeAuditLog）
-	var auditSvc service.AuditServiceInterface = nil
+	var auditSvc service.AuditServiceInterface
 
 	// 创建初始化服务
 	initSvc := service.NewInitService(mockStore, passwordSvc, auditSvc)
@@ -104,13 +105,22 @@ func TestInitService_AdminExists(t *testing.T) {
 	})
 
 	t.Run("存储错误", func(t *testing.T) {
-		_, mockStore := createTestInitService(t)
+		initSvc, mockStore := createTestInitService(t)
 		mockStore.Reset()
+		ctx := context.Background()
 
-		// AdminExists 调用 ListUsers，但 mock 没有 ListUsersErr 字段
-		// 我们可以通过创建一个会导致错误的场景来测试
-		// 实际上 ListUsers 在 mock 中不会返回错误，所以跳过这个测试
-		t.Skip("Mock Store 的 ListUsers 不支持错误注入")
+		// 注入 ListUsers 错误
+		mockStore.ListUsersErr = errors.New("database error")
+
+		exists, err := initSvc.AdminExists(ctx)
+
+		// 验证错误被正确处理
+		assert.Error(t, err)
+		assert.False(t, exists)
+		assert.Contains(t, err.Error(), "database error")
+
+		// 清理
+		mockStore.ListUsersErr = nil
 	})
 }
 
@@ -456,7 +466,7 @@ func TestNewInitService(t *testing.T) {
 	t.Run("成功创建服务", func(t *testing.T) {
 		mockStore := mock.New()
 		passwordSvc := crypto.NewPasswordService(4)
-		var auditSvc service.AuditServiceInterface = nil
+		var auditSvc service.AuditServiceInterface
 
 		initSvc := service.NewInitService(mockStore, passwordSvc, auditSvc)
 

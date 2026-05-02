@@ -143,12 +143,32 @@ make test-unit
 # 运行集成测试
 make test-integration
 
+# 运行E2E端到端测试（需要服务运行中）
+make test-e2e-full
+
 # 运行单个测试
 go test -v -run TestAuthService_Login ./internal/service/
 
 # 生成测试覆盖率报告
 make test-coverage
 ```
+
+**E2E测试流程**：
+```bash
+# 1. 启动服务（禁用限流）
+RATE_LIMIT_REQUESTS=0 make run &
+
+# 2. 准备测试数据（启用自动验证触发器）
+make test-e2e-prepare
+
+# 3. 运行E2E测试
+make test-e2e
+
+# 4. 清理测试环境（禁用触发器）
+make test-e2e-cleanup
+```
+
+详细的E2E测试说明请参考：[E2E测试指南](docs/E2E_TESTING.md)
 
 ### Docker部署
 
