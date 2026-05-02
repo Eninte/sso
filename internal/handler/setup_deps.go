@@ -3,7 +3,9 @@
 package handler
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
 	_ "github.com/lib/pq" // PostgreSQL驱动
@@ -29,4 +31,27 @@ func newRedisClient(addr, password string, db int) *redis.Client {
 		Password: password,
 		DB:       db,
 	})
+}
+
+func testDBConnection(ctx context.Context, dsn string) error {
+	db, err := openDB(dsn)
+	if err != nil {
+		return fmt.Errorf("数据库连接失败，请检查主机、端口、用户名和密码")
+	}
+	defer db.Close()
+
+	if err := db.PingContext(ctx); err != nil {
+		return fmt.Errorf("数据库连接测试失败，请检查网络和凭据")
+	}
+	return nil
+}
+
+func testRedisConnection(ctx context.Context, addr, password string, db int) error {
+	client := newRedisClient(addr, password, db)
+	defer client.Close()
+
+	if err := client.Ping(ctx).Err(); err != nil {
+		return fmt.Errorf("Redis连接失败，请检查主机和端口")
+	}
+	return nil
 }

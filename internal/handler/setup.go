@@ -37,12 +37,12 @@ var setupTmpl = template.Must(template.New("setup").Parse(setupHTMLTemplate))
 // SetupHandler 配置向导handler
 // 在服务配置不完整时启动，接收表单写入.env文件，触发重启
 type SetupHandler struct {
-	envPath    string
-	version    string
-	setupToken atomic.Pointer[string]
+	envPath       string
+	version       string
+	setupToken    atomic.Pointer[string]
+	validateConns func(dbDSN, redisAddr, redisPassword string, redisDB int) error
 }
 
-// NewSetupHandler 创建配置向导handler
 func NewSetupHandler(envPath string, version string) *SetupHandler {
 	h := &SetupHandler{
 		envPath: envPath,
@@ -50,6 +50,10 @@ func NewSetupHandler(envPath string, version string) *SetupHandler {
 	}
 	h.generateSetupToken()
 	return h
+}
+
+func (h *SetupHandler) SetValidateConns(fn func(dbDSN, redisAddr, redisPassword string, redisDB int) error) {
+	h.validateConns = fn
 }
 
 // generateSetupToken 生成一次性配置令牌
@@ -150,12 +154,6 @@ func (h *SetupHandler) HandleSetupSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 检查配置是否已完成（防止竞态条件）
-	if _, err := os.Stat(h.envPath); err == nil {
-		handlerutil.WriteJSONError(w, apperrors.ErrForbidden.WithDetails("配置已完成，无法重复保存"))
-		return
-	}
-
 	var values map[string]string
 	if err := json.NewDecoder(r.Body).Decode(&values); err != nil {
 		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails("无效的请求格式"))
@@ -171,12 +169,27 @@ func (h *SetupHandler) HandleSetupSave(w http.ResponseWriter, r *http.Request) {
 		filtered[k] = v
 	}
 
+	if err := validateSetupConfig(filtered); err != nil {
+		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails(err.Error()))
+		return
+	}
+
+	dbDSN, redisAddr, redisPassword, redisDB, err := buildDSNs(filtered)
+	if err != nil {
+		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails(err.Error()))
+		return
+	}
+
+	if err := h.testConnections(r, dbDSN, redisAddr, redisPassword, redisDB, filtered); err != nil {
+		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails(err.Error()))
+		return
+	}
+
 	if err := config.WriteEnvFile(h.envPath, filtered); err != nil {
 		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("写入配置文件失败"))
 		return
 	}
 
-	// 令牌失效，防止重复写入
 	h.setupToken.Store(nil)
 
 	handlerutil.WriteJSONSuccess(w, map[string]string{
@@ -184,24 +197,15 @@ func (h *SetupHandler) HandleSetupSave(w http.ResponseWriter, r *http.Request) {
 		"note":    "请确保进程管理器（systemd、Docker等）配置了自动重启",
 	})
 
-	// 延迟3秒后触发优雅关闭，让响应有时间返回给客户端
 	go func() {
 		time.Sleep(3 * time.Second)
 		slog.Info("配置已保存，触发优雅关闭...")
 
-		// 检查是否跳过重启（测试环境使用 SETUP_SKIP_RESTART 环境变量）
 		if os.Getenv("SETUP_SKIP_RESTART") != "" {
 			slog.Info("跳过重启（SETUP_SKIP_RESTART 已设置）")
 			return
 		}
 
-		// 发送SIGTERM信号触发优雅关闭
-		// 这将触发main.go中的graceful shutdown逻辑：
-		// 1. 关闭数据库连接
-		// 2. 关闭Redis连接
-		// 3. 等待in-flight HTTP请求完成（带超时）
-		// 4. 进程退出
-		// 5. 进程管理器（systemd、Docker）自动重启服务
 		if p, err := os.FindProcess(os.Getpid()); err == nil {
 			if err := p.Signal(syscall.SIGTERM); err != nil {
 				slog.Error("发送SIGTERM信号失败", "error", err)
@@ -210,6 +214,110 @@ func (h *SetupHandler) HandleSetupSave(w http.ResponseWriter, r *http.Request) {
 			slog.Error("无法获取当前进程", "error", err)
 		}
 	}()
+}
+
+func validateSetupConfig(filtered map[string]string) error {
+	requiredKeys := []struct {
+		key string
+		msg string
+	}{
+		{"DB_PASSWORD", "数据库密码不能为空"},
+		{"DB_HOST", "数据库主机不能为空"},
+		{"DB_PORT", "数据库端口不能为空"},
+		{"DB_NAME", "数据库名称不能为空"},
+		{"DB_USER", "数据库用户不能为空"},
+	}
+	for _, r := range requiredKeys {
+		if filtered[r.key] == "" {
+			return fmt.Errorf("%s", r.msg)
+		}
+	}
+
+	if sslMode := filtered["DB_SSL_MODE"]; sslMode != "" {
+		validSSLModes := map[string]bool{
+			"disable": true, "prefer": true, "require": true, "verify-ca": true, "verify-full": true,
+		}
+		if !validSSLModes[sslMode] {
+			return fmt.Errorf("无效的 DB_SSL_MODE")
+		}
+	}
+
+	if costStr := filtered["BCRYPT_COST"]; costStr != "" {
+		if cost, err := strconv.Atoi(costStr); err != nil || cost < 4 || cost > 31 {
+			return fmt.Errorf("BCRYPT_COST 必须为 4-31 之间的整数")
+		}
+	}
+
+	if portStr := filtered["SERVER_PORT"]; portStr != "" {
+		if port, err := strconv.Atoi(portStr); err != nil || port < 1 || port > 65535 {
+			return fmt.Errorf("SERVER_PORT 必须为 1-65535 之间的整数")
+		}
+	}
+
+	if env := filtered["SERVER_ENV"]; env != "" && env != "development" && env != "production" {
+		return fmt.Errorf("SERVER_ENV 必须为 development 或 production")
+	}
+
+	return nil
+}
+
+func buildDSNs(filtered map[string]string) (dbDSN, redisAddr, redisPassword string, redisDB int, err error) {
+	dbHost := filtered["DB_HOST"]
+	dbPort := filtered["DB_PORT"]
+	dbName := filtered["DB_NAME"]
+	dbUser := filtered["DB_USER"]
+	dbPassword := filtered["DB_PASSWORD"]
+	dbSSLMode := filtered["DB_SSL_MODE"]
+	if dbSSLMode == "" {
+		dbSSLMode = "disable"
+	}
+
+	hostPort := net.JoinHostPort(dbHost, dbPort)
+	dbDSN = fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=%s",
+		url.PathEscape(dbUser), url.PathEscape(dbPassword), hostPort, url.PathEscape(dbName), dbSSLMode)
+
+	if redisHost := filtered["REDIS_HOST"]; redisHost != "" && filtered["REDIS_ENABLE"] != "false" {
+		redisPort := filtered["REDIS_PORT"]
+		if redisPort == "" {
+			redisPort = "6379"
+		} else {
+			if p, err := strconv.Atoi(redisPort); err != nil || p < 1 || p > 65535 {
+				return "", "", "", 0, fmt.Errorf("REDIS_PORT 必须为 1-65535 之间的整数")
+			}
+		}
+		redisPassword = filtered["REDIS_PASSWORD"]
+		if v := filtered["REDIS_DB"]; v != "" {
+			if n, e := strconv.Atoi(v); e == nil {
+				redisDB = n
+			}
+		}
+		redisAddr = redisHost + ":" + redisPort
+	}
+	return dbDSN, redisAddr, redisPassword, redisDB, nil
+}
+
+func (h *SetupHandler) testConnections(r *http.Request, dbDSN, redisAddr, redisPassword string, redisDB int, filtered map[string]string) error {
+	if h.validateConns != nil {
+		return h.validateConns(dbDSN, redisAddr, redisPassword, redisDB)
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	if err := testDBConnection(ctx, dbDSN); err != nil {
+		slog.Error("数据库连接失败", "error", err, "host", filtered["DB_HOST"], "port", filtered["DB_PORT"], "database", filtered["DB_NAME"])
+		return err
+	}
+
+	if redisAddr != "" {
+		redisCtx, redisCancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer redisCancel()
+		if err := testRedisConnection(redisCtx, redisAddr, redisPassword, redisDB); err != nil {
+			slog.Error("Redis连接失败", "error", err, "host", filtered["REDIS_HOST"], "port", filtered["REDIS_PORT"])
+			return err
+		}
+	}
+	return nil
 }
 
 // HandleSetupTestDB 测试数据库连接
@@ -242,7 +350,10 @@ func (h *SetupHandler) HandleSetupTestDB(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 验证 ssl_mode 白名单，防止 DSN 注入
+	if req.SSLMode == "" {
+		req.SSLMode = "disable"
+	}
+
 	validSSLModes := map[string]bool{
 		"disable":     true,
 		"require":     true,
@@ -259,21 +370,11 @@ func (h *SetupHandler) HandleSetupTestDB(w http.ResponseWriter, r *http.Request)
 	dsn := fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=%s",
 		url.PathEscape(req.User), url.PathEscape(req.Password), hostPort, url.PathEscape(req.Name), req.SSLMode)
 
-	db, err := openDB(dsn)
-	if err != nil {
-		// 记录详细错误到日志，但不暴露给客户端
-		slog.Error("数据库连接失败", "error", err, "host", req.Host, "port", req.Port, "database", req.Name)
-		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("数据库连接失败，请检查配置"))
-		return
-	}
-	defer db.Close()
-
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	if err := db.PingContext(ctx); err != nil {
-		// 记录详细错误到日志，但不暴露给客户端
-		slog.Error("数据库Ping失败", "error", err, "host", req.Host, "port", req.Port, "database", req.Name)
-		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("数据库连接测试失败，请检查网络和凭据"))
+	if err := testDBConnection(ctx, dsn); err != nil {
+		slog.Error("数据库连接失败", "error", err, "host", req.Host, "port", req.Port, "database", req.Name)
+		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails(err.Error()))
 		return
 	}
 
@@ -300,14 +401,12 @@ func (h *SetupHandler) HandleSetupTestRedis(w http.ResponseWriter, r *http.Reque
 	}
 
 	addr := req.Host + ":" + req.Port
-	client := newRedisClient(addr, req.Password, req.DB)
-	defer client.Close()
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	if err := client.Ping(ctx).Err(); err != nil {
-		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("Redis连接失败"))
+	if err := testRedisConnection(ctx, addr, req.Password, req.DB); err != nil {
+		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails(err.Error()))
 		return
 	}
 

@@ -16,10 +16,16 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	// 在测试环境中跳过重启信号，避免测试进程被 SIGTERM 终止
 	os.Setenv("SETUP_SKIP_RESTART", "1")
-
 	os.Exit(m.Run())
+}
+
+func newTestSetupHandler(envPath string) *SetupHandler {
+	h := NewSetupHandler(envPath, "1.0.0")
+	h.SetValidateConns(func(dbDSN, redisAddr, redisPassword string, redisDB int) error {
+		return nil
+	})
+	return h
 }
 
 // ============================================================================
@@ -45,7 +51,7 @@ func TestBugCondition_SetupPageAccessibleAfterConfigSaved(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create setup handler
-	handler := NewSetupHandler(envPath, "1.0.0")
+	handler := newTestSetupHandler(envPath)
 
 	// Make request to setup page from localhost
 	req := httptest.NewRequest(http.MethodGet, "/setup", nil)
@@ -76,7 +82,7 @@ func TestBugCondition_SetupPageTokenRegenerationAfterSave(t *testing.T) {
 	envPath := filepath.Join(tmpDir, ".env")
 
 	// Create setup handler
-	handler := NewSetupHandler(envPath, "1.0.0")
+	handler := newTestSetupHandler(envPath)
 
 	// Get initial token
 	initialToken := handler.GetSetupToken()
@@ -108,24 +114,27 @@ func TestBugCondition_SetupPageTokenRegenerationAfterSave(t *testing.T) {
 // TestBugCondition_SetupSaveWhenConfigExists tests that HandleSetupSave
 // allows saving configuration even when .env file already exists.
 //
-// Bug Condition: .env exists, valid token, localhost → config save allowed
-// Expected Behavior: Should reject with error (race condition prevention)
+// 修复后行为：配置向导启动本身就说明配置有问题，允许保存修复配置
+// 场景：.env 存在但内容无效（如 DB_PASSWORD 为空），initConfig() 失败进入向导
+// 保护链：main.go 保证 initConfig() 成功时不启动向导 + isLocalRequest + setupToken
 func TestBugCondition_SetupSaveWhenConfigExists(t *testing.T) {
 	tmpDir := t.TempDir()
 	envPath := filepath.Join(tmpDir, ".env")
 
-	// Create .env file (simulating completed setup)
 	err := os.WriteFile(envPath, []byte("SERVER_HOST=0.0.0.0\n"), 0600)
 	require.NoError(t, err)
 
-	// Create setup handler
-	handler := NewSetupHandler(envPath, "1.0.0")
+	handler := newTestSetupHandler(envPath)
 	token := handler.GetSetupToken()
 
-	// Prepare save request
 	reqBody := map[string]string{
 		"SERVER_HOST": "0.0.0.0",
 		"SERVER_PORT": "9090",
+		"DB_HOST":     "localhost",
+		"DB_PORT":     "5432",
+		"DB_NAME":     "sso",
+		"DB_USER":     "sso",
+		"DB_PASSWORD": "test123",
 	}
 	body, _ := json.Marshal(reqBody)
 
@@ -137,13 +146,7 @@ func TestBugCondition_SetupSaveWhenConfigExists(t *testing.T) {
 
 	handler.HandleSetupSave(w, req)
 
-	// Expected: Should reject (config already exists)
-	// Unfixed code: Allows save and overwrites existing config
-	// Note: This test may pass on unfixed code if no check exists
-	// The main bug is in HandleSetupPage, but this tests race condition prevention
-	if w.Code == http.StatusOK {
-		t.Log("Warning: Setup save allowed when config exists (potential race condition)")
-	}
+	assert.Equal(t, http.StatusOK, w.Code, "配置向导运行时应允许保存修复配置")
 }
 
 // ============================================================================
@@ -163,7 +166,7 @@ func TestPreservation_FirstTimeSetupAccess(t *testing.T) {
 	require.True(t, os.IsNotExist(err), ".env should not exist for first-time setup")
 
 	// Create setup handler
-	handler := NewSetupHandler(envPath, "1.0.0")
+	handler := newTestSetupHandler(envPath)
 
 	// Make request to setup page from localhost
 	req := httptest.NewRequest(http.MethodGet, "/setup", nil)
@@ -189,7 +192,7 @@ func TestPreservation_NonLocalhostRejected(t *testing.T) {
 	tmpDir := t.TempDir()
 	envPath := filepath.Join(tmpDir, ".env")
 
-	handler := NewSetupHandler(envPath, "1.0.0")
+	handler := newTestSetupHandler(envPath)
 
 	// Make request from non-localhost
 	req := httptest.NewRequest(http.MethodGet, "/setup", nil)
@@ -215,13 +218,17 @@ func TestPreservation_ValidTokenAllowsOperations(t *testing.T) {
 	_, err := os.Stat(envPath)
 	require.True(t, os.IsNotExist(err))
 
-	handler := NewSetupHandler(envPath, "1.0.0")
+	handler := newTestSetupHandler(envPath)
 	token := handler.GetSetupToken()
 
 	// Prepare save request with valid token
 	reqBody := map[string]string{
 		"SERVER_HOST": "0.0.0.0",
 		"SERVER_PORT": "9090",
+		"DB_HOST":     "localhost",
+		"DB_PORT":     "5432",
+		"DB_NAME":     "sso",
+		"DB_USER":     "sso",
 		"DB_PASSWORD": "test123",
 	}
 	body, _ := json.Marshal(reqBody)
@@ -295,12 +302,16 @@ func TestPreservation_ConfigSaveCreatesEnvFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	envPath := filepath.Join(tmpDir, ".env")
 
-	handler := NewSetupHandler(envPath, "1.0.0")
+	handler := newTestSetupHandler(envPath)
 	token := handler.GetSetupToken()
 
 	reqBody := map[string]string{
 		"SERVER_HOST": "0.0.0.0",
 		"SERVER_PORT": "9090",
+		"DB_HOST":     "localhost",
+		"DB_PORT":     "5432",
+		"DB_NAME":     "sso",
+		"DB_USER":     "sso",
 		"DB_PASSWORD": "test123",
 	}
 	body, _ := json.Marshal(reqBody)
@@ -328,12 +339,16 @@ func TestPreservation_ConfigSaveInvalidatesToken(t *testing.T) {
 	tmpDir := t.TempDir()
 	envPath := filepath.Join(tmpDir, ".env")
 
-	handler := NewSetupHandler(envPath, "1.0.0")
+	handler := newTestSetupHandler(envPath)
 	token := handler.GetSetupToken()
 	assert.NotEmpty(t, token)
 
 	reqBody := map[string]string{
 		"SERVER_HOST": "0.0.0.0",
+		"DB_HOST":     "localhost",
+		"DB_PORT":     "5432",
+		"DB_NAME":     "sso",
+		"DB_USER":     "sso",
 		"DB_PASSWORD": "test123",
 	}
 	body, _ := json.Marshal(reqBody)
@@ -360,11 +375,15 @@ func TestPreservation_ConfigSaveReturnsSuccessResponse(t *testing.T) {
 	tmpDir := t.TempDir()
 	envPath := filepath.Join(tmpDir, ".env")
 
-	handler := NewSetupHandler(envPath, "1.0.0")
+	handler := newTestSetupHandler(envPath)
 	token := handler.GetSetupToken()
 
 	reqBody := map[string]string{
 		"SERVER_HOST": "0.0.0.0",
+		"DB_HOST":     "localhost",
+		"DB_PORT":     "5432",
+		"DB_NAME":     "sso",
+		"DB_USER":     "sso",
 		"DB_PASSWORD": "test123",
 	}
 	body, _ := json.Marshal(reqBody)
@@ -397,12 +416,16 @@ func TestPreservation_ConfigSaveReturnsSuccessResponse(t *testing.T) {
 //
 // This should PASS on both unfixed and fixed code.
 func TestPreservation_ConfigSaveFailureNoRestart(t *testing.T) {
-	// Use invalid path to cause write failure
-	handler := NewSetupHandler("/invalid/path/.env", "1.0.0")
+	handler := newTestSetupHandler("/invalid/path/.env")
 	token := handler.GetSetupToken()
 
 	reqBody := map[string]string{
 		"SERVER_HOST": "0.0.0.0",
+		"DB_HOST":     "localhost",
+		"DB_PORT":     "5432",
+		"DB_NAME":     "sso",
+		"DB_USER":     "sso",
+		"DB_PASSWORD": "test123",
 	}
 	body, _ := json.Marshal(reqBody)
 
@@ -414,9 +437,5 @@ func TestPreservation_ConfigSaveFailureNoRestart(t *testing.T) {
 
 	handler.HandleSetupSave(w, req)
 
-	// Expected: Error response (no restart triggered)
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-
-	// 即使失败也等待一小段时间，确保没有goroutine启动
-	// 此注释保留作为提醒，但不再需要 Sleep
 }

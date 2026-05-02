@@ -97,7 +97,7 @@ if $do_cleanup; then
 
     psql "${PSQL_ARGS[@]}" -c "DELETE FROM verification_tokens WHERE expires_at < NOW();" > /dev/null
     psql "${PSQL_ARGS[@]}" -c "DELETE FROM reset_tokens WHERE expires_at < NOW();" > /dev/null
-    psql "${PSQL_ARGS[@]}" -c "DELETE FROM refresh_tokens WHERE expires_at < NOW();" > /dev/null
+    psql "${PSQL_ARGS[@]}" -c "DELETE FROM tokens WHERE expires_at < NOW();" > /dev/null
     echo -e "${GREEN}✓ 已清理过期令牌${NC}"
     echo ""
 fi
