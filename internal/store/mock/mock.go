@@ -7,8 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
-
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/store"
 )
@@ -828,12 +826,12 @@ func (m *Store) DeleteKey(ctx context.Context, keyID string) error {
 var mfaRecoveryCodes = make(map[string][]string)
 
 // StoreMFARecoveryCodes 存储MFA恢复码
-// Mock实现：存储明文代码（不哈希），用于测试
+// Mock实现：直接存储哈希值（与真实实现一致）
 func (m *Store) StoreMFARecoveryCodes(ctx context.Context, userID string, codeHashes []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// 复制切片（mock存储明文，实际生产环境应存储哈希）
+	// 复制切片
 	codes := make([]string, len(codeHashes))
 	copy(codes, codeHashes)
 	mfaRecoveryCodes[userID] = codes
@@ -856,7 +854,8 @@ func (m *Store) GetUnusedMFARecoveryCodes(ctx context.Context, userID string) ([
 }
 
 // VerifyAndUseMFARecoveryCode 验证并使用恢复码
-// Mock实现：使用bcrypt比较明文和存储的哈希值
+// Mock实现：简化版，直接比较哈希值（service层已经哈希）
+// 注意：真实实现会在store层再次哈希，但mock为了简化测试，假设service层传入的已经是哈希值
 func (m *Store) VerifyAndUseMFARecoveryCode(ctx context.Context, userID, code string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -866,9 +865,10 @@ func (m *Store) VerifyAndUseMFARecoveryCode(ctx context.Context, userID, code st
 		return false, nil
 	}
 
-	// 使用 bcrypt 比较明文和存储的哈希值
+	// Mock简化：直接比较（假设code已经是哈希值）
+	// 真实实现会对code进行HMAC哈希后再比较
 	for i, hash := range codes {
-		if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(code)); err == nil {
+		if hash == code {
 			// 标记为已使用（从列表中移除）
 			mfaRecoveryCodes[userID] = append(codes[:i], codes[i+1:]...)
 			return true, nil

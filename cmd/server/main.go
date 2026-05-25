@@ -524,6 +524,10 @@ func initServices(cfg *config.Config) (*Services, *sql.DB, error) {
 	oauthSvc := service.NewOAuthServiceWithCache(store, cacheSvc, tokenSvc)
 	auditSvc := service.NewAuditService(store)
 	mfaSvc := service.NewMFAService(store)
+	// 设置MFA恢复码HMAC密钥（与数据库层使用相同密钥）
+	if cfg.MFARecoveryHMACKey != "" {
+		mfaSvc.SetHMACKey([]byte(cfg.MFARecoveryHMACKey))
+	}
 	adminSvc := service.NewAdminServiceWithVersion(store, cacheSvc, Version, BuildTime)
 
 	// ==== 初始化第三方登录服务 ====

@@ -14,14 +14,10 @@ import (
 func TestMFAService_GenerateRecoveryCodes(t *testing.T) {
 	t.Cleanup(mock.ClearMFARecoveryCodes)
 
-	// 降低bcrypt cost加速测试
-	oldCost := bcryptCost
-	bcryptCost = 4
-	t.Cleanup(func() { bcryptCost = oldCost })
-
 	t.Run("默认生成8个恢复码", func(t *testing.T) {
 		m := mock.New()
 		svc := NewMFAService(m)
+		svc.SetHMACKey([]byte("test-hmac-key-32-bytes-long-xxxx"))
 
 		codes, err := svc.GenerateRecoveryCodes(context.Background(), "user-1", 0)
 		require.NoError(t, err)
@@ -35,6 +31,7 @@ func TestMFAService_GenerateRecoveryCodes(t *testing.T) {
 	t.Run("指定数量", func(t *testing.T) {
 		m := mock.New()
 		svc := NewMFAService(m)
+		svc.SetHMACKey([]byte("test-hmac-key-32-bytes-long-xxxx"))
 
 		codes, err := svc.GenerateRecoveryCodes(context.Background(), "user-1", 5)
 		require.NoError(t, err)
@@ -44,6 +41,7 @@ func TestMFAService_GenerateRecoveryCodes(t *testing.T) {
 	t.Run("超过20使用默认", func(t *testing.T) {
 		m := mock.New()
 		svc := NewMFAService(m)
+		svc.SetHMACKey([]byte("test-hmac-key-32-bytes-long-xxxx"))
 
 		codes, err := svc.GenerateRecoveryCodes(context.Background(), "user-1", 100)
 		require.NoError(t, err)
@@ -53,6 +51,7 @@ func TestMFAService_GenerateRecoveryCodes(t *testing.T) {
 	t.Run("负数使用默认", func(t *testing.T) {
 		m := mock.New()
 		svc := NewMFAService(m)
+		svc.SetHMACKey([]byte("test-hmac-key-32-bytes-long-xxxx"))
 
 		codes, err := svc.GenerateRecoveryCodes(context.Background(), "user-1", -1)
 		require.NoError(t, err)
@@ -63,14 +62,10 @@ func TestMFAService_GenerateRecoveryCodes(t *testing.T) {
 func TestMFAService_VerifyRecoveryCode(t *testing.T) {
 	t.Cleanup(mock.ClearMFARecoveryCodes)
 
-	// 降低bcrypt cost加速测试（默认cost=10在-race下~300ms/次）
-	oldCost := bcryptCost
-	bcryptCost = 4
-	t.Cleanup(func() { bcryptCost = oldCost })
-
 	t.Run("验证成功", func(t *testing.T) {
 		m := mock.New()
 		svc := NewMFAService(m)
+		svc.SetHMACKey([]byte("test-hmac-key-32-bytes-long-xxxx"))
 
 		codes, err := svc.GenerateRecoveryCodes(context.Background(), "user-1", 8)
 		require.NoError(t, err)
@@ -83,6 +78,7 @@ func TestMFAService_VerifyRecoveryCode(t *testing.T) {
 	t.Run("无效码", func(t *testing.T) {
 		m := mock.New()
 		svc := NewMFAService(m)
+		svc.SetHMACKey([]byte("test-hmac-key-32-bytes-long-xxxx"))
 
 		_, err := svc.GenerateRecoveryCodes(context.Background(), "user-1", 8)
 		require.NoError(t, err)
@@ -95,6 +91,7 @@ func TestMFAService_VerifyRecoveryCode(t *testing.T) {
 	t.Run("已使用的码", func(t *testing.T) {
 		m := mock.New()
 		svc := NewMFAService(m)
+		svc.SetHMACKey([]byte("test-hmac-key-32-bytes-long-xxxx"))
 
 		codes, err := svc.GenerateRecoveryCodes(context.Background(), "user-1", 8)
 		require.NoError(t, err)
@@ -110,6 +107,7 @@ func TestMFAService_VerifyRecoveryCode(t *testing.T) {
 	t.Run("限流触发", func(t *testing.T) {
 		m := mock.New()
 		svc := NewMFAService(m)
+		svc.SetHMACKey([]byte("test-hmac-key-32-bytes-long-xxxx"))
 
 		for i := 0; i < 5; i++ {
 			_, _ = svc.VerifyRecoveryCode(context.Background(), "user-1", "bad")
@@ -123,6 +121,7 @@ func TestMFAService_VerifyRecoveryCode(t *testing.T) {
 	t.Run("成功后清除尝试记录", func(t *testing.T) {
 		m := mock.New()
 		svc := NewMFAService(m)
+		svc.SetHMACKey([]byte("test-hmac-key-32-bytes-long-xxxx"))
 
 		codes, err := svc.GenerateRecoveryCodes(context.Background(), "user-1", 8)
 		require.NoError(t, err)
@@ -143,14 +142,10 @@ func TestMFAService_GetRecoveryCodeStatus(t *testing.T) {
 	mock.ClearMFARecoveryCodes()
 	t.Cleanup(mock.ClearMFARecoveryCodes)
 
-	// 降低bcrypt cost加速测试
-	oldCost := bcryptCost
-	bcryptCost = 4
-	t.Cleanup(func() { bcryptCost = oldCost })
-
 	t.Run("返回剩余数量", func(t *testing.T) {
 		m := mock.New()
 		svc := NewMFAService(m)
+		svc.SetHMACKey([]byte("test-hmac-key-32-bytes-long-xxxx"))
 
 		codes, err := svc.GenerateRecoveryCodes(context.Background(), "user-1", 8)
 		require.NoError(t, err)
@@ -170,6 +165,7 @@ func TestMFAService_GetRecoveryCodeStatus(t *testing.T) {
 	t.Run("无恢复码返回0", func(t *testing.T) {
 		m := mock.New()
 		svc := NewMFAService(m)
+		svc.SetHMACKey([]byte("test-hmac-key-32-bytes-long-xxxx"))
 
 		count, err := svc.GetRecoveryCodeStatus(context.Background(), "user-2")
 		require.NoError(t, err)
@@ -229,33 +225,6 @@ func TestMFAService_generateRecoveryCode(t *testing.T) {
 			require.NoError(t, err)
 			assert.Regexp(t, "^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$", code)
 		}
-	})
-}
-
-func TestMFAService_bcryptHash(t *testing.T) {
-	// 降低bcrypt cost加速测试
-	oldCost := bcryptCost
-	bcryptCost = 4
-	t.Cleanup(func() { bcryptCost = oldCost })
-
-	t.Run("哈希值可以验证", func(t *testing.T) {
-		code, err := generateRecoveryCode()
-		require.NoError(t, err)
-
-		hash, err := bcryptHash(code)
-		require.NoError(t, err)
-		assert.NotEqual(t, code, hash)
-		assert.NotEmpty(t, hash)
-	})
-
-	t.Run("相同输入不同哈希", func(t *testing.T) {
-		hash1, err := bcryptHash("same-code")
-		require.NoError(t, err)
-
-		hash2, err := bcryptHash("same-code")
-		require.NoError(t, err)
-
-		assert.NotEqual(t, hash1, hash2)
 	})
 }
 

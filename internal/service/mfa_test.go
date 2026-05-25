@@ -28,6 +28,8 @@ import (
 func createTestMFAService() (*service.MFAService, *mock.Store) {
 	store := mock.New()
 	mfaSvc := service.NewMFAService(store)
+	// 设置测试用HMAC密钥
+	mfaSvc.SetHMACKey([]byte("test-hmac-key-for-recovery-codes-32bytes"))
 	return mfaSvc, store
 }
 
