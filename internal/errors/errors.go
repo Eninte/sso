@@ -87,6 +87,7 @@ const (
 	ErrCodePrivateKeyNil  ErrorCode = "PRIVATE_KEY_NIL"  // 私钥为空
 	ErrCodePublicKeyNil   ErrorCode = "PUBLIC_KEY_NIL"   // 公钥为空
 	ErrCodeNoActiveKey    ErrorCode = "NO_ACTIVE_KEY"    // 无活跃密钥
+	ErrCodeKeyExpired     ErrorCode = "KEY_EXPIRED"      // 密钥已过期
 
 	// 缓存相关错误
 	ErrCodeCacheMiss ErrorCode = "CACHE_MISS" // 缓存未命中
@@ -238,6 +239,7 @@ var (
 	ErrPrivateKeyNil  = New(ErrCodePrivateKeyNil, "私钥不能为空", 400)
 	ErrPublicKeyNil   = New(ErrCodePublicKeyNil, "公钥不能为空", 400)
 	ErrNoActiveKey    = New(ErrCodeNoActiveKey, "无活跃密钥可用", 500)
+	ErrKeyExpired     = New(ErrCodeKeyExpired, "密钥已过期", 401)
 
 	// 缓存错误
 	ErrCacheMiss = New(ErrCodeCacheMiss, "缓存未命中", 404)

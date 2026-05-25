@@ -241,9 +241,10 @@ func (s *JWTService) GenerateRefreshToken() (string, error) {
 }
 
 // ValidateAccessToken 验证访问令牌并返回Claims
-// 验证签名、过期时间和算法
+// 验证签名、过期时间、算法和密钥过期状态
 // 返回解析后的Claims或错误
 func (s *JWTService) ValidateAccessToken(tokenString string) (*AccessTokenClaims, error) {
+	var usedKeyID string
 	token, err := jwt.ParseWithClaims(tokenString, &AccessTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
 		if token.Method.Alg() != jwt.SigningMethodRS256.Alg() {
 			return nil, ErrInvalidToken
@@ -255,11 +256,13 @@ func (s *JWTService) ValidateAccessToken(tokenString string) (*AccessTokenClaims
 		kid, _ := token.Header["kid"].(string)
 		if kid != "" {
 			if pubKey, ok := s.publicKeys[kid]; ok {
+				usedKeyID = kid
 				return pubKey, nil
 			}
 		}
 
 		if s.publicKey != nil {
+			usedKeyID = s.activeKeyID
 			return s.publicKey, nil
 		}
 
@@ -276,6 +279,22 @@ func (s *JWTService) ValidateAccessToken(tokenString string) (*AccessTokenClaims
 	claims, ok := token.Claims.(*AccessTokenClaims)
 	if !ok || !token.Valid {
 		return nil, ErrInvalidToken
+	}
+
+	// 检查密钥是否已过期（如果配置了keyStore）
+	if s.keyStore != nil && usedKeyID != "" {
+		ctx := context.Background()
+		keyVersion, err := s.keyStore.GetKeyByID(ctx, usedKeyID)
+		if err != nil {
+			// 如果无法获取密钥信息，为了安全起见拒绝token
+			return nil, ErrInvalidToken
+		}
+
+		// 使用KeyVersion的CanVerify方法检查密钥是否可用
+		// 该方法会检查密钥状态和过期时间
+		if !keyVersion.CanVerify() {
+			return nil, apperrors.ErrKeyExpired
+		}
 	}
 
 	return claims, nil
