@@ -61,6 +61,10 @@ type MFAService struct {
 	// 恢复码验证限流
 	recoveryMu       sync.Mutex
 	recoveryAttempts map[string]*recoveryAttempt // userID -> 尝试记录
+
+	// TOTP使用记录（防止重放攻击）
+	totpMu    sync.Mutex
+	totpUsage map[string]*totpUsageRecord // userID -> 使用记录
 }
 
 // recoveryAttempt 恢复码验证尝试记录
@@ -70,11 +74,19 @@ type recoveryAttempt struct {
 	lockUntil time.Time // 锁定直到
 }
 
+// totpUsageRecord TOTP使用记录（防止重放攻击）
+type totpUsageRecord struct {
+	code      string    // TOTP代码
+	timeStep  uint64    // 时间步
+	usedAt    time.Time // 使用时间
+}
+
 func NewMFAService(store store.Store) *MFAService {
 	return &MFAService{
 		store:            store,
 		auditSvc:         NewAuditService(store),
 		recoveryAttempts: make(map[string]*recoveryAttempt),
+		totpUsage:        make(map[string]*totpUsageRecord),
 	}
 }
 
@@ -83,6 +95,7 @@ func NewMFAServiceWithAudit(store store.Store, auditSvc *AuditService) *MFAServi
 		store:            store,
 		auditSvc:         auditSvc,
 		recoveryAttempts: make(map[string]*recoveryAttempt),
+		totpUsage:        make(map[string]*totpUsageRecord),
 	}
 }
 
@@ -147,6 +160,60 @@ func (s *MFAService) clearRecoveryAttempts(userID string) {
 	delete(s.recoveryAttempts, userID)
 }
 
+// isTOTPUsed 检查TOTP代码是否已被使用（防止重放攻击）
+func (s *MFAService) isTOTPUsed(userID, code string, timeStep uint64) bool {
+	s.totpMu.Lock()
+	defer s.totpMu.Unlock()
+
+	record, exists := s.totpUsage[userID]
+	if !exists {
+		return false
+	}
+
+	// 检查是否是同一个代码和时间步
+	if record.code == code && record.timeStep == timeStep {
+		// 检查是否在有效期内（90秒窗口）
+		if time.Since(record.usedAt) < 90*time.Second {
+			return true
+		}
+	}
+
+	return false
+}
+
+// recordTOTPUsage 记录TOTP使用（防止重放攻击）
+func (s *MFAService) recordTOTPUsage(userID, code string, timeStep uint64) {
+	s.totpMu.Lock()
+	defer s.totpMu.Unlock()
+
+	s.totpUsage[userID] = &totpUsageRecord{
+		code:     code,
+		timeStep: timeStep,
+		usedAt:   time.Now(),
+	}
+}
+
+// cleanupTOTPUsage 清理过期的TOTP使用记录（定期调用）
+func (s *MFAService) cleanupTOTPUsage() {
+	s.totpMu.Lock()
+	defer s.totpMu.Unlock()
+
+	now := time.Now()
+	for userID, record := range s.totpUsage {
+		// 清理超过90秒的记录
+		if now.Sub(record.usedAt) > 90*time.Second {
+			delete(s.totpUsage, userID)
+		}
+	}
+}
+
+// ClearTOTPUsageForTesting 清除TOTP使用记录（仅用于测试）
+func (s *MFAService) ClearTOTPUsageForTesting(userID string) {
+	s.totpMu.Lock()
+	defer s.totpMu.Unlock()
+	delete(s.totpUsage, userID)
+}
+
 // ============================================================================
 // MFA操作
 // ============================================================================
@@ -204,7 +271,7 @@ func (s *MFAService) VerifyAndEnableMFAWithAudit(ctx context.Context, userID, co
 		return ErrInvalidMFASecret
 	}
 
-	if !validateTOTP(user.MFASecret, code) {
+	if !s.validateTOTPWithReplayProtection(userID, user.MFASecret, code) {
 		return ErrInvalidTOTPCode
 	}
 
@@ -237,7 +304,7 @@ func (s *MFAService) DisableMFAWithAudit(ctx context.Context, userID, code strin
 		return ErrMFANotEnabled
 	}
 
-	if !validateTOTP(user.MFASecret, code) {
+	if !s.validateTOTPWithReplayProtection(userID, user.MFASecret, code) {
 		return ErrInvalidTOTPCode
 	}
 
@@ -288,6 +355,53 @@ func generateTOTPURL(secret, email string) string {
 	return fmt.Sprintf("otpauth://totp/SSO:%s?secret=%s&issuer=SSO", email, secret)
 }
 
+// validateTOTPWithReplayProtection 验证TOTP并防止重放攻击
+// 允许±1时间步（90秒窗口）但记录使用防止重放
+func (s *MFAService) validateTOTPWithReplayProtection(userID, secret, code string) bool {
+	secret = strings.ToUpper(strings.TrimSpace(secret))
+	secretBytes, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(secret)
+	if err != nil {
+		return false
+	}
+
+	now := time.Now()
+	baseTimeStep := now.Unix() / 30
+
+	// 检查时间窗口: -1, 0, +1 (90秒窗口)
+	for i := -1; i <= 1; i++ {
+		var timeStep uint64
+
+		if i < 0 {
+			// 安全处理负偏移，防止整数下溢
+			offset := uint64(-i)
+			if baseTimeStep < int64(offset) { // #nosec G115 -- 安全的比较，baseTimeStep已验证为非负
+				// 会发生下溢，跳过该时间窗口
+				continue
+			}
+			timeStep = uint64(baseTimeStep) - offset // #nosec G115 -- 安全的减法，已验证baseTimeStep >= offset
+		} else {
+			// 正偏移总是安全的
+			timeStep = uint64(baseTimeStep) + uint64(i) // #nosec G115 -- 安全的加法，i总是非负的
+		}
+
+		expectedCode := generateHOTP(secretBytes, timeStep)
+		if expectedCode == code {
+			// 检查是否已使用（防止重放攻击）
+			if s.isTOTPUsed(userID, code, timeStep) {
+				return false
+			}
+
+			// 记录使用
+			s.recordTOTPUsage(userID, code, timeStep)
+			return true
+		}
+	}
+
+	return false
+}
+
+// validateTOTP 验证TOTP（向后兼容，不带重放保护）
+// 新代码应使用validateTOTPWithReplayProtection
 func validateTOTP(secret, code string) bool {
 	secret = strings.ToUpper(strings.TrimSpace(secret))
 	secretBytes, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(secret)

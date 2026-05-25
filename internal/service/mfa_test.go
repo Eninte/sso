@@ -280,6 +280,9 @@ func TestMFAService_VerifyAndEnableMFA_FullFlow(t *testing.T) {
 		err = mfaSvc.VerifyAndEnableMFA(ctx, "test-user-id", validCode)
 		require.NoError(t, err)
 
+		// 清除TOTP使用记录（模拟时间流逝）
+		mfaSvc.ClearTOTPUsageForTesting("test-user-id")
+
 		// 禁用MFA
 		disableCode := generateTestTOTP(setupResp.Secret)
 		err = mfaSvc.DisableMFA(ctx, "test-user-id", disableCode)
@@ -299,5 +302,114 @@ func TestMFAService_VerifyAndEnableMFA_FullFlow(t *testing.T) {
 		err := mfaSvc.DisableMFA(ctx, "test-user-id", "999999")
 
 		assert.ErrorIs(t, err, service.ErrInvalidTOTPCode)
+	})
+}
+
+// ============================================================================
+// TOTP重放攻击防护测试
+// ============================================================================
+
+func TestTOTPReplayProtection(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("防止TOTP重放攻击", func(t *testing.T) {
+		mfaSvc, store := createTestMFAService()
+		store.Reset()
+
+		// 创建用户并设置MFA
+		user := createTestUserWithMFA(false, "")
+		store.AddUser(user)
+
+		setupResp, err := mfaSvc.SetupMFA(ctx, "test-user-id")
+		require.NoError(t, err)
+
+		// 生成TOTP代码
+		code := generateTestTOTP(setupResp.Secret)
+
+		// 第一次使用应该成功
+		err = mfaSvc.VerifyAndEnableMFA(ctx, "test-user-id", code)
+		require.NoError(t, err)
+
+		// 清除MFA状态以便再次测试
+		user.MFAEnabled = false
+		store.Update(ctx, user)
+
+		// 第二次使用相同代码应该失败（重放攻击）
+		err = mfaSvc.VerifyAndEnableMFA(ctx, "test-user-id", code)
+		assert.ErrorIs(t, err, service.ErrInvalidTOTPCode, "应该拒绝重放的TOTP代码")
+	})
+
+	t.Run("不同用户可以使用相同的TOTP代码", func(t *testing.T) {
+		mfaSvc, store := createTestMFAService()
+		store.Reset()
+
+		// 创建两个用户
+		user1 := &model.User{
+			ID:           "user-1",
+			Email:        "user1@example.com",
+			PasswordHash: "hashed",
+			Status:       model.UserStatusActive,
+			MFAEnabled:   false,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}
+		user2 := &model.User{
+			ID:           "user-2",
+			Email:        "user2@example.com",
+			PasswordHash: "hashed",
+			Status:       model.UserStatusActive,
+			MFAEnabled:   false,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}
+
+		store.AddUser(user1)
+		store.AddUser(user2)
+
+		// 为两个用户设置相同的MFA secret（仅用于测试）
+		setupResp, err := mfaSvc.SetupMFA(ctx, "user-1")
+		require.NoError(t, err)
+
+		user2.MFASecret = setupResp.Secret
+		store.Update(ctx, user2)
+
+		// 生成TOTP代码
+		code := generateTestTOTP(setupResp.Secret)
+
+		// 用户1使用代码
+		err = mfaSvc.VerifyAndEnableMFA(ctx, "user-1", code)
+		require.NoError(t, err)
+
+		// 用户2应该也能使用相同代码（不同用户）
+		err = mfaSvc.VerifyAndEnableMFA(ctx, "user-2", code)
+		assert.NoError(t, err, "不同用户应该可以使用相同的TOTP代码")
+	})
+
+	t.Run("TOTP使用记录清理", func(t *testing.T) {
+		mfaSvc, store := createTestMFAService()
+		store.Reset()
+
+		// 创建用户并设置MFA
+		user := createTestUserWithMFA(false, "")
+		store.AddUser(user)
+
+		setupResp, err := mfaSvc.SetupMFA(ctx, "test-user-id")
+		require.NoError(t, err)
+
+		// 生成并使用TOTP代码
+		code := generateTestTOTP(setupResp.Secret)
+		err = mfaSvc.VerifyAndEnableMFA(ctx, "test-user-id", code)
+		require.NoError(t, err)
+
+		// 清除使用记录（模拟时间流逝）
+		mfaSvc.ClearTOTPUsageForTesting("test-user-id")
+
+		// 清除MFA状态
+		user.MFAEnabled = false
+		store.Update(ctx, user)
+
+		// 清除后应该可以再次使用相同代码
+		err = mfaSvc.VerifyAndEnableMFA(ctx, "test-user-id", code)
+		assert.NoError(t, err, "清除记录后应该可以再次使用相同代码")
 	})
 }
