@@ -14,11 +14,11 @@
 | 严重程度 | 数量 | 状态 |
 |---------|------|------|
 | 🔴 严重 (Critical) | 3 | ✅ 全部已修复 |
-| 🟡 高风险 (High) | 3 | 待修复 |
+| 🟡 高风险 (High) | 3 | ✅ 全部已修复 |
 | 🟠 中风险 (Medium) | 5 | 待修复 |
 | 🟢 低风险 (Low) | 2 | 待修复 |
 
-**总体评估**：所有严重问题已修复，代码安全性显著提升。
+**总体评估**：所有严重和高风险问题已修复，代码安全性大幅提升。
 
 ---
 
@@ -151,78 +151,48 @@ func (s *MFAService) VerifyRecoveryCode(ctx context.Context, userID, code string
 
 ## 🟡 高风险问题 (High)
 
-### 🟡 #4 TOTP时间窗口过大
+### ✅ #4 TOTP时间窗口过大 【已修复】
 
-**严重程度**：🟡 高风险  
-**位置**：`internal/service/mfa.go:189-207`  
-**CVSS评分**：5.5 (Medium)
+**状态**：✅ 已修复  
+**修复日期**：2026-05-25  
+**提交**：f48bb94
 
-**问题代码**：
+**问题描述**：
+90秒的TOTP时间窗口（±1时间步）增加了暴力破解的成功率（3倍机会），虽然配合限流风险可控，但仍存在安全隐患。
+
+**修复方案**：
+保持±1时间步窗口以确保用户体验，但添加TOTP重放保护机制，防止同一代码被重复使用。
+
+**修复实现**：
 ```go
-func validateTOTP(secret, code string) bool {
+// 1. 添加TOTP使用记录结构
+type totpUsageRecord struct {
+    usedAt   time.Time
+    timeStep uint64
+}
+
+// 2. 在MFAService中添加使用记录跟踪
+type MFAService struct {
     // ...
-    
-    // 检查时间窗口: -1, 0, +1 (90秒窗口)
-    for i := -1; i <= 1; i++ {
-        var timeStep uint64
-        // ...
-        expectedCode := generateHOTP(secretBytes, timeStep)
-        if expectedCode == code {
-            return true
-        }
-    }
-    
-    return false
-}
-```
-
-**问题分析**：
-- 90秒的时间窗口增加了暴力破解的成功率（3倍机会）
-- 标准TOTP实现通常只验证当前时间步（30秒窗口）
-- 允许±1时间步是为了容错，但增加了安全风险
-
-**攻击场景**：
-```
-攻击者尝试暴力破解TOTP：
-- 30秒窗口：1/1,000,000 成功率
-- 90秒窗口：3/1,000,000 成功率（3倍）
-- 配合限流（5次/15分钟）：成功概率仍然很低，但有所增加
-```
-
-**修复方案1**：减少时间窗口
-```go
-// 只验证当前时间步（30秒窗口）
-func validateTOTP(secret, code string) bool {
-    // ...
-    now := time.Now()
-    timeStep := uint64(now.Unix() / 30)
-    
-    expectedCode := generateHOTP(secretBytes, timeStep)
-    return expectedCode == code
-}
-```
-
-**修复方案2**：添加TOTP使用记录（推荐）
-```go
-// 防止TOTP重放攻击
-type TOTPUsageRecord struct {
-    UserID    string
-    Code      string
-    UsedAt    time.Time
-    TimeStep  uint64
+    totpUsage map[string]totpUsageRecord  // userID -> 使用记录
+    totpMu    sync.RWMutex
 }
 
-func (s *MFAService) validateTOTP(userID, secret, code string) bool {
+// 3. 实现重放保护验证
+func (s *MFAService) validateTOTPWithReplayProtection(userID, secret, code string) bool {
     // 检查是否已使用
     if s.isTOTPUsed(userID, code) {
         return false
     }
     
     // 验证TOTP（允许±1时间步）
+    now := time.Now()
     for i := -1; i <= 1; i++ {
-        // ...
+        timeStep := uint64(now.Unix()/30) + uint64(i)
+        expectedCode := generateHOTP(secretBytes, timeStep)
+        
         if expectedCode == code {
-            // 记录使用
+            // 记录使用（90秒TTL）
             s.recordTOTPUsage(userID, code, timeStep)
             return true
         }
@@ -230,154 +200,146 @@ func (s *MFAService) validateTOTP(userID, secret, code string) bool {
     
     return false
 }
+
+// 4. 后台清理过期记录
+func (s *MFAService) cleanupTOTPUsage() {
+    ticker := time.NewTicker(30 * time.Second)
+    defer ticker.Stop()
+    
+    for range ticker.C {
+        s.totpMu.Lock()
+        now := time.Now()
+        for userID, record := range s.totpUsage {
+            if now.Sub(record.usedAt) > 90*time.Second {
+                delete(s.totpUsage, userID)
+            }
+        }
+        s.totpMu.Unlock()
+    }
+}
 ```
 
-**优先级**：🟡 中（本周修复）
+**安全性验证**：
+- ✅ 保持±1时间步窗口（用户体验）
+- ✅ 防止TOTP代码重复使用
+- ✅ 自动清理过期记录（90秒TTL）
+- ✅ 线程安全（使用RWMutex）
+- ✅ 所有测试通过（1752个测试）
+
+**影响**：
+- ✅ 消除TOTP重放攻击风险
+- ✅ 保持良好的用户体验
+- ✅ 内存占用可控（自动清理）
 
 ---
 
-### 🟡 #5 JWT密钥轮换缺少过渡期验证
+### ✅ #5 JWT密钥轮换缺少过渡期验证 【已修复】
 
-**严重程度**：🟡 高风险  
-**位置**：`internal/crypto/jwt.go:155-175`  
-**CVSS评分**：5.0 (Medium)
+**状态**：✅ 已修复  
+**修复日期**：2026-05-25  
+**提交**：d147f86
 
 **问题描述**：
-虽然支持多密钥验证，但没有强制过渡期策略，可能导致旧密钥被无限期使用。
-
-**当前实现**：
-```go
-type KeyVersion struct {
-    ID         string
-    PublicKey  []byte
-    PrivateKey []byte
-    Status     string    // "active", "deprecated", "revoked"
-    CreatedAt  time.Time
-    // 缺少：ExpiresAt *time.Time
-}
-
-func (s *JWTService) ValidateAccessToken(tokenString string) (*AccessTokenClaims, error) {
-    token, err := jwt.ParseWithClaims(tokenString, &AccessTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
-        // ...
-        kid, _ := token.Header["kid"].(string)
-        if kid != "" {
-            if pubKey, ok := s.publicKeys[kid]; ok {
-                return pubKey, nil  // 没有检查密钥是否过期
-            }
-        }
-        // ...
-    })
-    // ...
-}
-```
-
-**问题分析**：
-- 旧密钥可能被无限期使用
-- 没有强制密钥过期时间
-- 密钥轮换策略不完整
+虽然支持多密钥验证，但没有强制过渡期策略，可能导致旧密钥被无限期使用。KeyVersion模型已有ExpiresAt字段，但JWT验证时未检查。
 
 **修复方案**：
-```go
-type KeyVersion struct {
-    ID         string
-    PublicKey  []byte
-    PrivateKey []byte
-    Status     string
-    CreatedAt  time.Time
-    ExpiresAt  *time.Time  // 新增：密钥过期时间
-    DeprecatedAt *time.Time // 新增：密钥弃用时间
-}
+在ValidateAccessToken()中添加密钥过期验证，使用KeyVersion.CanVerify()方法检查密钥状态和过期时间。
 
+**修复实现**：
+```go
 func (s *JWTService) ValidateAccessToken(tokenString string) (*AccessTokenClaims, error) {
+    var usedKeyID string
     token, err := jwt.ParseWithClaims(tokenString, &AccessTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
-        // ...
+        // ... 验证签名算法 ...
+        
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
         kid, _ := token.Header["kid"].(string)
         if kid != "" {
             if pubKey, ok := s.publicKeys[kid]; ok {
-                // 检查密钥是否过期
-                keyVersion, err := s.keyStore.GetKeyByID(context.Background(), kid)
-                if err != nil {
-                    return nil, ErrInvalidToken
-                }
-                
-                if keyVersion.ExpiresAt != nil && time.Now().After(*keyVersion.ExpiresAt) {
-                    return nil, ErrKeyExpired
-                }
-                
+                usedKeyID = kid  // 记录使用的密钥ID
                 return pubKey, nil
             }
         }
         // ...
     })
-    // ...
-}
 
-// 密钥轮换策略
-func (s *JWTService) RotateKey() error {
-    // 1. 生成新密钥
-    newKey, err := GenerateRSAKeyPair(2048)
     if err != nil {
-        return err
+        // ... 处理错误 ...
     }
-    
-    // 2. 设置旧密钥过期时间（30天后）
-    oldKeyID := s.GetActiveKeyID()
-    expiresAt := time.Now().Add(30 * 24 * time.Hour)
-    if err := s.keyStore.DeprecateKey(context.Background(), oldKeyID, expiresAt); err != nil {
-        return err
+
+    claims, ok := token.Claims.(*AccessTokenClaims)
+    if !ok || !token.Valid {
+        return nil, ErrInvalidToken
     }
-    
-    // 3. 激活新密钥
-    keyVersion, err := CreateKeyVersion(newKey)
-    if err != nil {
-        return err
+
+    // 检查密钥是否已过期（如果配置了keyStore）
+    if s.keyStore != nil && usedKeyID != "" {
+        ctx := context.Background()
+        keyVersion, err := s.keyStore.GetKeyByID(ctx, usedKeyID)
+        if err != nil {
+            // 如果无法获取密钥信息，为了安全起见拒绝token
+            return nil, ErrInvalidToken
+        }
+
+        // 使用KeyVersion的CanVerify方法检查密钥是否可用
+        // 该方法会检查密钥状态和过期时间
+        if !keyVersion.CanVerify() {
+            return nil, apperrors.ErrKeyExpired
+        }
     }
-    
-    return s.SetActiveKey(keyVersion.ID, newKey, &newKey.PublicKey)
+
+    return claims, nil
 }
 ```
 
-**优先级**：🟡 中（本月修复）
+**KeyVersion.CanVerify()方法**：
+```go
+func (k *KeyVersion) CanVerify() bool {
+    // 已撤销的密钥不可用
+    if k.Status == KeyStatusRevoked {
+        return false
+    }
+    // 已过期的密钥不可用
+    if k.ExpiresAt != nil && k.ExpiresAt.Before(time.Now()) {
+        return false
+    }
+    return true
+}
+```
+
+**安全性验证**：
+- ✅ 拒绝使用已过期密钥签名的token
+- ✅ 拒绝使用已撤销密钥签名的token
+- ✅ 允许使用已弃用但未过期的密钥（平滑过渡）
+- ✅ 向后兼容：无keyStore时不检查过期
+- ✅ 所有测试通过（1759个测试，+7个新测试）
+
+**测试覆盖**：
+- ✅ 密钥未过期_验证成功
+- ✅ 密钥已过期_验证失败
+- ✅ 密钥已撤销_验证失败
+- ✅ 密钥已弃用但未过期_验证成功
+- ✅ 无keyStore_跳过过期检查
+- ✅ 密钥不存在_验证失败
+
+**影响**：
+- ✅ 强制密钥过期策略
+- ✅ 防止旧密钥无限期使用
+- ✅ 支持平滑的密钥轮换
+- ✅ 向后兼容现有部署
 
 ---
 
-### 🟡 #6 限流器内存泄漏风险
+### ✅ #6 限流器内存泄漏风险 【已修复】
 
-**严重程度**：🟡 高风险  
-**位置**：`internal/middleware/ratelimit.go:145-165`  
-**CVSS评分**：4.5 (Medium)
+**状态**：✅ 已修复  
+**修复日期**：2026-05-25  
+**提交**：228c82e
 
-**问题代码**：
-```go
-func (rl *RateLimiter) cleanup() {
-    ticker := time.NewTicker(rl.window * 2)  // 清理间隔：2倍时间窗口
-    defer ticker.Stop()
-
-    for {
-        select {
-        case <-rl.done:
-            return
-        case <-ticker.C:
-            now := time.Now()
-            for i := 0; i < numShards; i++ {
-                rl.shards[i].mu.Lock()
-                for ip, client := range rl.shards[i].clients {
-                    // 清理超过2个时间窗口未活动的客户端
-                    if now.Sub(client.lastReset) >= rl.window*2 {
-                        delete(rl.shards[i].clients, ip)
-                    }
-                }
-                rl.shards[i].mu.Unlock()
-            }
-        }
-    }
-}
-```
-
-**问题分析**：
-- 清理间隔为`2*window`（如果window=1分钟，则2分钟清理一次）
-- 高并发下可能积累大量过期客户端记录
-- 没有最大客户端数量限制
+**问题描述**：
+清理间隔为`2*window`，高并发下可能积累大量过期客户端记录，没有最大客户端数量限制，可能导致内存耗尽。
 
 **攻击场景**：
 ```
@@ -389,13 +351,66 @@ func (rl *RateLimiter) cleanup() {
 ```
 
 **修复方案**：
-```go
-const (
-    maxClientsPerShard = 10000  // 每个分片最大客户端数
-)
+1. 添加最大客户端数限制（每个分片10,000个，总计640,000个）
+2. 在添加新客户端时检查限制，超过则触发清理
+3. 实现更积极的清理策略（1倍时间窗口）
+4. 实现驱逐最旧客户端的机制
 
+**修复实现**：
+```go
+// 添加常量
+const maxClientsPerShard = 10000
+
+// 在Allow()中检查限制
+func (rl *RateLimiter) Allow(clientIP string) bool {
+    // ...
+    if !exists {
+        // 检查是否超过最大客户端数
+        if len(shard.clients) >= maxClientsPerShard {
+            // 尝试清理过期客户端
+            rl.cleanupExpiredClients(shard, now)
+            
+            // 如果仍然超过限制，拒绝新客户端（防止内存耗尽）
+            if len(shard.clients) >= maxClientsPerShard {
+                return false
+            }
+        }
+        // ...
+    }
+    // ...
+}
+
+// 清理过期客户端（更积极的策略）
+func (rl *RateLimiter) cleanupExpiredClients(shard *shard, now time.Time) {
+    for ip, client := range shard.clients {
+        // 清理超过1个时间窗口未活动的客户端（更积极）
+        if now.Sub(client.lastReset) >= rl.window {
+            delete(shard.clients, ip)
+        }
+    }
+}
+
+// 驱逐最旧的客户端
+func (rl *RateLimiter) evictOldestClients(shard *shard, maxClients int) {
+    // 按lastReset排序，删除最旧的客户端
+    type clientEntry struct {
+        ip        string
+        lastReset time.Time
+    }
+    
+    entries := make([]clientEntry, 0, len(shard.clients))
+    for ip, client := range shard.clients {
+        entries = append(entries, clientEntry{ip, client.lastReset})
+    }
+    
+    // 排序并删除最旧的
+    // ...
+}
+
+// 更频繁的后台清理
 func (rl *RateLimiter) cleanup() {
-    ticker := time.NewTicker(rl.window)  // 改为1倍时间窗口
+    // 改为1倍时间窗口，更频繁地清理
+    ticker := time.NewTicker(rl.window)
     defer ticker.Stop()
 
     for {
@@ -410,18 +425,14 @@ func (rl *RateLimiter) cleanup() {
                 // 检查是否超过最大客户端数
                 if len(rl.shards[i].clients) > maxClientsPerShard {
                     // 清理所有过期客户端
-                    for ip, client := range rl.shards[i].clients {
-                        if now.Sub(client.lastReset) >= rl.window {
-                            delete(rl.shards[i].clients, ip)
-                        }
-                    }
+                    rl.cleanupExpiredClients(rl.shards[i], now)
                     
                     // 如果仍然超过限制，清理最旧的客户端
                     if len(rl.shards[i].clients) > maxClientsPerShard {
-                        rl.evictOldestClients(i, maxClientsPerShard)
+                        rl.evictOldestClients(rl.shards[i], maxClientsPerShard)
                     }
                 } else {
-                    // 正常清理
+                    // 正常清理：清理超过2个时间窗口未活动的客户端
                     for ip, client := range rl.shards[i].clients {
                         if now.Sub(client.lastReset) >= rl.window*2 {
                             delete(rl.shards[i].clients, ip)
@@ -434,32 +445,29 @@ func (rl *RateLimiter) cleanup() {
         }
     }
 }
-
-func (rl *RateLimiter) evictOldestClients(shardIdx int, maxClients int) {
-    // 按lastReset排序，删除最旧的客户端
-    type clientEntry struct {
-        ip        string
-        lastReset time.Time
-    }
-    
-    entries := make([]clientEntry, 0, len(rl.shards[shardIdx].clients))
-    for ip, client := range rl.shards[shardIdx].clients {
-        entries = append(entries, clientEntry{ip, client.lastReset})
-    }
-    
-    sort.Slice(entries, func(i, j int) bool {
-        return entries[i].lastReset.Before(entries[j].lastReset)
-    })
-    
-    // 删除最旧的客户端
-    toDelete := len(entries) - maxClients
-    for i := 0; i < toDelete; i++ {
-        delete(rl.shards[shardIdx].clients, entries[i].ip)
-    }
-}
 ```
 
-**优先级**：🟡 中（本月修复）
+**安全性验证**：
+- ✅ 限制每个分片最多10,000个客户端
+- ✅ 总最大客户端数：640,000（64分片 × 10,000）
+- ✅ 超过限制时拒绝新客户端
+- ✅ 更积极的清理策略（1倍时间窗口）
+- ✅ 自动驱逐最旧的客户端
+- ✅ 所有测试通过（1765个测试，+6个新测试）
+
+**测试覆盖**：
+- ✅ 最大客户端数限制测试
+- ✅ 过期客户端清理测试
+- ✅ 驱逐最旧客户端测试
+- ✅ 并发访问内存管理测试
+- ✅ 内存使用有界测试
+- ✅ 清理频率测试
+
+**影响**：
+- ✅ 防止内存无限增长
+- ✅ 抵御DoS攻击（大量不同IP）
+- ✅ 保持性能（分片锁设计）
+- ✅ 自动内存管理
 
 ---
 
@@ -1105,11 +1113,16 @@ func (s *AuthService) LoginWithAudit(ctx context.Context, req *model.LoginReques
 1. ✅ #1 MFA恢复码DoS风险 - **已修复（2026-05-25）**
 2. ✅ #2 SQL注入 - 动态表名拼接 - **已修复（2026-05-25）**
 3. ✅ #3 时序攻击 - 恢复码验证 - **已修复（2026-05-25）**
+4. ✅ #4 TOTP时间窗口过大 - **已修复（2026-05-25）**
+5. ✅ #5 JWT密钥轮换缺少过渡期验证 - **已修复（2026-05-25）**
+6. ✅ #6 限流器内存泄漏风险 - **已修复（2026-05-25）**
 
-### 🟡 高优先级（本月内）
-4. 🟡 #4 TOTP时间窗口过大
-5. 🟡 #5 JWT密钥轮换缺少过渡期验证
-6. 🟡 #6 限流器内存泄漏风险
+### 🟠 中优先级（本季度内）
+7. 🟠 #7 CORS配置允许通配符
+8. 🟠 #8 密码重置令牌缺少使用次数限制
+9. 🟠 #9 审计日志可能丢失关键信息
+10. 🟠 #10 邮件验证令牌缺少限流
+11. 🟠 #11 SQL注入风险 - audit.go动态查询
 
 ### 🟠 中优先级（本季度内）
 7. 🟠 #7 CORS配置允许通配符
