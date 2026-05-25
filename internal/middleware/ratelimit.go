@@ -17,6 +17,10 @@ import (
 // numShards 分片数量（2的幂，便于位运算）
 const numShards = 64
 
+// maxClientsPerShard 每个分片的最大客户端数
+// 总最大客户端数 = maxClientsPerShard * numShards = 10000 * 64 = 640,000
+const maxClientsPerShard = 10000
+
 // RateLimiter 限流器
 // 使用令牌桶算法限制每个客户端的请求频率
 // 优化：使用分片锁减少高并发下的锁竞争
@@ -154,6 +158,17 @@ func (rl *RateLimiter) Allow(clientIP string) bool {
 	client, exists := shard.clients[clientIP]
 
 	if !exists {
+		// 检查是否超过最大客户端数
+		if len(shard.clients) >= maxClientsPerShard {
+			// 尝试清理过期客户端
+			rl.cleanupExpiredClients(shard, now)
+			
+			// 如果仍然超过限制，拒绝新客户端（防止内存耗尽）
+			if len(shard.clients) >= maxClientsPerShard {
+				return false
+			}
+		}
+		
 		// 新客户端，创建记录
 		shard.clients[clientIP] = &clientInfo{
 			tokens:    rl.limit - 1,
@@ -179,10 +194,21 @@ func (rl *RateLimiter) Allow(clientIP string) bool {
 	return false
 }
 
+// cleanupExpiredClients 清理过期的客户端记录（内部方法，调用者需持有锁）
+func (rl *RateLimiter) cleanupExpiredClients(shard *shard, now time.Time) {
+	for ip, client := range shard.clients {
+		// 清理超过1个时间窗口未活动的客户端（更积极的清理策略）
+		if now.Sub(client.lastReset) >= rl.window {
+			delete(shard.clients, ip)
+		}
+	}
+}
+
 // cleanup 定期清理过期的客户端记录
 // 防止内存泄漏
 func (rl *RateLimiter) cleanup() {
-	ticker := time.NewTicker(rl.window * 2)
+	// 改为1倍时间窗口，更频繁地清理
+	ticker := time.NewTicker(rl.window)
 	defer ticker.Stop()
 
 	for {
@@ -193,14 +219,56 @@ func (rl *RateLimiter) cleanup() {
 			now := time.Now()
 			for i := 0; i < numShards; i++ {
 				rl.shards[i].mu.Lock()
-				for ip, client := range rl.shards[i].clients {
-					// 清理超过2个时间窗口未活动的客户端
-					if now.Sub(client.lastReset) >= rl.window*2 {
-						delete(rl.shards[i].clients, ip)
+				
+				// 检查是否超过最大客户端数
+				if len(rl.shards[i].clients) > maxClientsPerShard {
+					// 清理所有过期客户端（1个时间窗口）
+					rl.cleanupExpiredClients(rl.shards[i], now)
+					
+					// 如果仍然超过限制，清理最旧的客户端
+					if len(rl.shards[i].clients) > maxClientsPerShard {
+						rl.evictOldestClients(rl.shards[i], maxClientsPerShard)
+					}
+				} else {
+					// 正常清理：清理超过2个时间窗口未活动的客户端
+					for ip, client := range rl.shards[i].clients {
+						if now.Sub(client.lastReset) >= rl.window*2 {
+							delete(rl.shards[i].clients, ip)
+						}
 					}
 				}
+				
 				rl.shards[i].mu.Unlock()
 			}
 		}
+	}
+}
+
+// evictOldestClients 驱逐最旧的客户端（内部方法，调用者需持有锁）
+func (rl *RateLimiter) evictOldestClients(shard *shard, maxClients int) {
+	// 按lastReset排序，删除最旧的客户端
+	type clientEntry struct {
+		ip        string
+		lastReset time.Time
+	}
+	
+	entries := make([]clientEntry, 0, len(shard.clients))
+	for ip, client := range shard.clients {
+		entries = append(entries, clientEntry{ip, client.lastReset})
+	}
+	
+	// 按时间排序（最旧的在前）
+	for i := 0; i < len(entries)-1; i++ {
+		for j := i + 1; j < len(entries); j++ {
+			if entries[i].lastReset.After(entries[j].lastReset) {
+				entries[i], entries[j] = entries[j], entries[i]
+			}
+		}
+	}
+	
+	// 删除最旧的客户端
+	toDelete := len(entries) - maxClients
+	for i := 0; i < toDelete; i++ {
+		delete(shard.clients, entries[i].ip)
 	}
 }
