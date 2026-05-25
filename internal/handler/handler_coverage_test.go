@@ -20,7 +20,10 @@ import (
 
 func createTestMFAHandlerForCoverage() (*handler.MFAHandler, *mock.Store) {
 	m := mock.New()
+	hmacKey := []byte("test-hmac-key-32-bytes-long-xxxx")
+	mock.SetMockHMACKey(hmacKey)
 	mfaSvc := service.NewMFAService(m)
+	mfaSvc.SetHMACKey(hmacKey)
 	return handler.NewMFAHandler(mfaSvc), m
 }
 

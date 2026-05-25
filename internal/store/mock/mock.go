@@ -4,6 +4,9 @@ package mock
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"fmt"
 	"sync"
 	"time"
 
@@ -854,8 +857,7 @@ func (m *Store) GetUnusedMFARecoveryCodes(ctx context.Context, userID string) ([
 }
 
 // VerifyAndUseMFARecoveryCode 验证并使用恢复码
-// Mock实现：简化版，直接比较哈希值（service层已经哈希）
-// 注意：真实实现会在store层再次哈希，但mock为了简化测试，假设service层传入的已经是哈希值
+// Mock实现：与真实实现一致，接收原始code并进行HMAC哈希
 func (m *Store) VerifyAndUseMFARecoveryCode(ctx context.Context, userID, code string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -865,16 +867,37 @@ func (m *Store) VerifyAndUseMFARecoveryCode(ctx context.Context, userID, code st
 		return false, nil
 	}
 
-	// Mock简化：直接比较（假设code已经是哈希值）
-	// 真实实现会对code进行HMAC哈希后再比较
+	// 对输入的code进行HMAC哈希（与真实实现一致）
+	codeHash, err := hashRecoveryCodeForMock(code)
+	if err != nil {
+		return false, err
+	}
+
+	// 比较哈希值
 	for i, hash := range codes {
-		if hash == code {
+		if hash == codeHash {
 			// 标记为已使用（从列表中移除）
 			mfaRecoveryCodes[userID] = append(codes[:i], codes[i+1:]...)
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// hashRecoveryCodeForMock Mock实现的恢复码哈希函数
+// 使用与真实实现相同的HMAC-SHA256算法
+// 注意：这里使用固定密钥，测试时service层也必须使用相同密钥
+var mockHMACKey = []byte("test-hmac-key-32-bytes-long!!!!!")
+
+func hashRecoveryCodeForMock(code string) (string, error) {
+	mac := hmac.New(sha256.New, mockHMACKey)
+	mac.Write([]byte(code))
+	return fmt.Sprintf("%x", mac.Sum(nil)), nil
+}
+
+// SetMockHMACKey 设置Mock的HMAC密钥（用于测试）
+func SetMockHMACKey(key []byte) {
+	mockHMACKey = key
 }
 
 // DeleteUsedMFARecoveryCodes 删除已使用的恢复码

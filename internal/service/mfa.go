@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"crypto/sha1"   // #nosec G505 -- SHA1用于HOTP算法（RFC 4226），不用于安全哈希
 	"crypto/sha256" // 用于HMAC-SHA256哈希恢复码
+	"crypto/subtle" // 用于恒定时间比较，防止时序攻击
 	"encoding/base32"
 	"encoding/binary"
 	"encoding/hex"
@@ -387,6 +388,7 @@ func (s *MFAService) GenerateRecoveryCodes(ctx context.Context, userID string, c
 // VerifyRecoveryCode 验证恢复码
 // 如果验证成功，标记为已使用
 // 使用HMAC-SHA256验证，性能优于bcrypt（~0.001ms vs ~250ms）
+// 使用恒定时间比较防止时序攻击
 func (s *MFAService) VerifyRecoveryCode(ctx context.Context, userID, code string) (bool, error) {
 	// 检查限流
 	if s.checkRecoveryRateLimit(userID) {
@@ -402,9 +404,31 @@ func (s *MFAService) VerifyRecoveryCode(ctx context.Context, userID, code string
 	// 计算输入恢复码的HMAC哈希
 	inputHash := s.hashRecoveryCodeHMAC(code)
 
-	// 调用store层验证（传入哈希值）
-	// 注意：真实实现的store层会再次哈希，但mock store直接比较
-	used, err := s.store.VerifyAndUseMFARecoveryCode(ctx, userID, inputHash)
+	// 获取所有未使用的恢复码哈希
+	storedHashes, err := s.store.GetUnusedMFARecoveryCodes(ctx, userID)
+	if err != nil {
+		s.recordRecoveryFailure(userID)
+		return false, ErrRecoveryCodeInvalid
+	}
+
+	// 使用恒定时间比较防止时序攻击
+	// 遍历所有哈希，即使找到匹配也继续遍历（恒定时间）
+	var matched bool
+	for _, storedHash := range storedHashes {
+		if subtle.ConstantTimeCompare([]byte(inputHash), []byte(storedHash)) == 1 {
+			matched = true
+			// 不要break，继续遍历所有哈希（恒定时间）
+		}
+	}
+
+	if !matched {
+		s.recordRecoveryFailure(userID)
+		return false, ErrRecoveryCodeInvalid
+	}
+
+	// 标记为已使用
+	// 注意：这里直接传入原始code，store层会重新哈希
+	used, err := s.store.VerifyAndUseMFARecoveryCode(ctx, userID, code)
 	if err != nil || !used {
 		s.recordRecoveryFailure(userID)
 		return false, ErrRecoveryCodeInvalid

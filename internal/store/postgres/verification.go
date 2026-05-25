@@ -15,20 +15,46 @@ import (
 // 验证令牌存储实现
 // ============================================================================
 
+// allowedTokenTables 允许的令牌表名白名单
+// 防止SQL注入攻击
+var allowedTokenTables = map[string]bool{
+	"verification_tokens": true,
+	"reset_tokens":        true,
+}
+
+// validateTableName 验证表名是否在白名单中
+// 防止SQL注入攻击
+func validateTableName(tableName string) error {
+	if !allowedTokenTables[tableName] {
+		return fmt.Errorf("invalid table name: %s", tableName)
+	}
+	return nil
+}
+
 // storeToken 通用令牌存储函数
 // 先删除旧令牌，再插入新令牌
 func (s *Store) storeToken(ctx context.Context, tableName, userID, token string, expiresAt time.Time) error {
+	// 验证表名（防止SQL注入）
+	if err := validateTableName(tableName); err != nil {
+		return err
+	}
+
 	// 先删除旧令牌
 	_, _ = s.db.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE user_id = $1`, tableName), userID)
 
 	// 插入新令牌
-	query := fmt.Sprintf(`INSERT INTO %s (user_id, token, expires_at, created_at) VALUES ($1, $2, $3, $4)`, tableName) // #nosec G201 -- 表名来自内部配置常量，不是用户输入
+	query := fmt.Sprintf(`INSERT INTO %s (user_id, token, expires_at, created_at) VALUES ($1, $2, $3, $4)`, tableName)
 	_, err := s.db.ExecContext(ctx, query, userID, token, expiresAt, time.Now())
 	return err
 }
 
 // deleteToken 通用令牌删除函数
 func (s *Store) deleteToken(ctx context.Context, tableName, userID string) error {
+	// 验证表名（防止SQL注入）
+	if err := validateTableName(tableName); err != nil {
+		return err
+	}
+
 	_, err := s.db.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE user_id = $1`, tableName), userID)
 	return err
 }
