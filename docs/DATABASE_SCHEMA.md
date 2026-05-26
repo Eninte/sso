@@ -160,6 +160,7 @@ OAuth 授权码的一次性存储。
 | `user_id` | UUID | PK, FK → users(id) ON DELETE CASCADE | — | 用户 ID（一对一） |
 | `token` | VARCHAR(255) | NOT NULL | — | 重置令牌 |
 | `expires_at` | TIMESTAMP | NOT NULL | — | 过期时间 |
+| `used_at` | TIMESTAMP | NULLABLE | NULL | 使用时间；NULL 表示未使用 |
 | `created_at` | TIMESTAMP | NOT NULL | `CURRENT_TIMESTAMP` | 创建时间 |
 
 ### 索引
@@ -168,6 +169,13 @@ OAuth 授权码的一次性存储。
 |--------|-----|------|------|
 | `idx_reset_tokens_expires_at` | `expires_at` | BTREE | 过期清理查询 |
 | `idx_reset_token` | `token` | UNIQUE | 按令牌查找 |
+| `idx_reset_tokens_unused` | `user_id` WHERE `used_at IS NULL` | PARTIAL | 未使用令牌查询 |
+
+### 安全设计
+
+- 令牌只能使用一次，使用后立即标记 `used_at`
+- 防止令牌在有效期内被重复使用
+- 使用部分索引加速未使用令牌查询
 
 ## 7. audit_logs — 审计日志
 
