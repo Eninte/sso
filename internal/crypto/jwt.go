@@ -25,7 +25,18 @@ var (
 	ErrInvalidToken = apperrors.ErrInvalidToken
 	ErrTokenExpired = apperrors.ErrTokenExpired
 	ErrNoActiveKey  = apperrors.ErrNoActiveKey
+	ErrTokenReplayed = apperrors.New("ERR_TOKEN_REPLAYED", "Token已被使用，可能是重放攻击", 401)
 )
+
+// JTITracker JTI跟踪接口
+// 用于防止JWT重放攻击
+type JTITracker interface {
+	// IsJTIUsed 检查JTI是否已被使用
+	IsJTIUsed(ctx context.Context, jti string) (bool, error)
+	// MarkJTIUsed 标记JTI为已使用
+	// ttl: JTI的有效期，应该与token的有效期一致
+	MarkJTIUsed(ctx context.Context, jti string, ttl time.Duration) error
+}
 
 type JWTService struct {
 	mu              sync.RWMutex
@@ -35,6 +46,7 @@ type JWTService struct {
 	publicKeys      map[string]*rsa.PublicKey
 	activeKeyID     string
 	keyStore        store.KeyStore
+	jtiTracker      JTITracker // JTI跟踪器（可选）
 	issuer          string
 	accessTokenTTL  time.Duration
 	refreshTokenTTL time.Duration
@@ -72,6 +84,14 @@ func NewJWTServiceWithKeyStore(
 		accessTokenTTL:  accessTokenTTL,
 		refreshTokenTTL: refreshTokenTTL,
 	}
+}
+
+// SetJTITracker 设置JTI跟踪器
+// 用于防止JWT重放攻击
+func (s *JWTService) SetJTITracker(tracker JTITracker) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.jtiTracker = tracker
 }
 
 func (s *JWTService) SetActiveKey(keyID string, privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey) error {
@@ -241,7 +261,7 @@ func (s *JWTService) GenerateRefreshToken() (string, error) {
 }
 
 // ValidateAccessToken 验证访问令牌并返回Claims
-// 验证签名、过期时间、算法和密钥过期状态
+// 验证签名、过期时间、算法、密钥过期状态和JTI重放
 // 返回解析后的Claims或错误
 func (s *JWTService) ValidateAccessToken(tokenString string) (*AccessTokenClaims, error) {
 	var usedKeyID string
@@ -294,6 +314,31 @@ func (s *JWTService) ValidateAccessToken(tokenString string) (*AccessTokenClaims
 		// 该方法会检查密钥状态和过期时间
 		if !keyVersion.CanVerify() {
 			return nil, apperrors.ErrKeyExpired
+		}
+	}
+
+	// 检查JTI是否已被使用（防止重放攻击）
+	s.mu.RLock()
+	tracker := s.jtiTracker
+	s.mu.RUnlock()
+
+	if tracker != nil && claims.ID != "" {
+		ctx := context.Background()
+		used, err := tracker.IsJTIUsed(ctx, claims.ID)
+		if err != nil {
+			// JTI检查失败时记录错误但不拒绝token（避免缓存故障导致服务不可用）
+			// 生产环境可以根据需要调整策略
+			return claims, nil
+		}
+		if used {
+			return nil, ErrTokenReplayed
+		}
+
+		// 标记JTI为已使用
+		// TTL设置为token的剩余有效期
+		ttl := time.Until(claims.ExpiresAt.Time)
+		if ttl > 0 {
+			_ = tracker.MarkJTIUsed(ctx, claims.ID, ttl)
 		}
 	}
 
