@@ -307,16 +307,18 @@ func (s *AuthService) validateUserCredentials(ctx context.Context, email, passwo
 //   - auditCtx: 审计上下文（可以为nil）
 //
 // 返回:
-//   - 无返回值，所有错误都被记录而不返回
-//   - 确保登录失败处理不会影响主流程
+//   - 如果递增登录尝试次数失败，返回错误（防止绕过账户锁定机制）
+//   - 其他错误（如审计日志失败）不返回，确保不影响主流程
 //
 // 优化: 接收user对象而非email，消除冗余的GetByEmail查询
-func (s *AuthService) handleLoginFailure(ctx context.Context, user *model.User, auditCtx *AuditContext) {
+// 安全修复: 数据库错误时返回错误，防止攻击者通过触发DB错误绕过账户锁定
+func (s *AuthService) handleLoginFailure(ctx context.Context, user *model.User, auditCtx *AuditContext) error {
 	// 使用原子操作递增登录尝试次数，避免竞态条件
 	attempts, locked, _, incErr := s.store.IncrementLoginAttempts(ctx, user.ID, s.maxAttempts, s.lockoutDuration)
 	if incErr != nil {
-		slog.Warn("更新登录尝试次数失败", "error", incErr, "user_id", user.ID)
-		return
+		// 安全修复：数据库错误时返回错误，防止绕过账户锁定机制
+		slog.Error("更新登录尝试次数失败", "error", incErr, "user_id", user.ID)
+		return serviceutil.WrapServiceError("更新登录尝试次数", incErr)
 	}
 
 	// 账户被锁定
@@ -344,6 +346,8 @@ func (s *AuthService) handleLoginFailure(ctx context.Context, user *model.User, 
 			"success":    false,
 		})
 	}
+
+	return nil
 }
 
 // handleLoginSuccess 处理登录成功的情况
@@ -436,7 +440,13 @@ func (s *AuthService) LoginWithAudit(ctx context.Context, req *model.LoginReques
 		// 处理密码验证失败的情况
 		if apperrors.Is(err, ErrInvalidCredentials) && user != nil {
 			// validateUserCredentials在密码错误时返回user对象，避免重复查询DB
-			s.handleLoginFailure(ctx, user, auditCtx)
+			// 安全修复：检查handleLoginFailure的返回值，防止绕过账户锁定
+			if failErr := s.handleLoginFailure(ctx, user, auditCtx); failErr != nil {
+				slog.Error("处理登录失败时出错", "error", failErr, "user_id", user.ID)
+				// 安全修复：数据库错误时返回服务错误，防止绕过账户锁定机制
+				// 不返回ErrInvalidCredentials，因为我们无法确定是否成功记录失败次数
+				return nil, serviceutil.WrapServiceError("记录登录失败", failErr)
+			}
 		}
 		return nil, err
 	}
