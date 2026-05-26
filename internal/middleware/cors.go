@@ -3,6 +3,7 @@
 package middleware
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,6 +19,23 @@ type CORSConfig struct {
 	AllowedMethods []string // 允许的HTTP方法
 	AllowedHeaders []string // 允许的请求头
 	MaxAge         int      // 预检请求缓存时间 (秒)
+}
+
+// Validate 验证CORS配置
+// 在生产环境下禁止使用通配符，防止CSRF攻击
+func (c *CORSConfig) Validate(env string) error {
+	if env == "production" {
+		for _, origin := range c.AllowedOrigins {
+			if origin == "*" {
+				return fmt.Errorf("生产环境禁止使用CORS通配符(*)，请配置具体的域名")
+			}
+			// 检查是否包含localhost（生产环境不应该允许）
+			if strings.Contains(strings.ToLower(origin), "localhost") || strings.Contains(origin, "127.0.0.1") {
+				return fmt.Errorf("生产环境禁止使用localhost或127.0.0.1作为CORS源")
+			}
+		}
+	}
+	return nil
 }
 
 // DefaultCORSConfig 默认CORS配置

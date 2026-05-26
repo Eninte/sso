@@ -234,6 +234,13 @@ func initHandlers(cfg *config.Config, svc *Services) (*mux.Router, *middleware.R
 		AllowedHeaders: []string{"Content-Type", "Authorization", "X-Requested-With"},
 		MaxAge:         86400, // 24小时
 	}
+	
+	// 验证CORS配置（生产环境禁止通配符）
+	if err := corsConfig.Validate(cfg.Env); err != nil {
+		slog.Error("CORS配置验证失败", "error", err)
+		os.Exit(1)
+	}
+	
 	router.Use(middleware.CORS(corsConfig))
 
 	// 添加语言中间件，支持多语言错误消息
