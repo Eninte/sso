@@ -51,6 +51,7 @@ const (
 	ErrCodeVerificationCodeExpired ErrorCode = "VERIFICATION_CODE_EXPIRED" // 验证码过期
 	ErrCodeResetTokenInvalid       ErrorCode = "RESET_TOKEN_INVALID"       // #nosec G101 -- 这是错误码常量，不是凭证
 	ErrCodeResetTokenExpired       ErrorCode = "RESET_TOKEN_EXPIRED"       // #nosec G101 -- 这是错误码常量，不是凭证
+	ErrCodeResetTokenUsed          ErrorCode = "RESET_TOKEN_USED"          // #nosec G101 -- 这是错误码常量，不是凭证
 
 	// OAuth相关错误
 	ErrCodeInvalidClient        ErrorCode = "INVALID_CLIENT"         // 客户端无效
@@ -203,6 +204,7 @@ var (
 	ErrVerificationCodeExpired = New(ErrCodeVerificationCodeExpired, "验证码已过期", 400)
 	ErrResetTokenInvalid       = New(ErrCodeResetTokenInvalid, "重置令牌无效", 400)
 	ErrResetTokenExpired       = New(ErrCodeResetTokenExpired, "重置令牌已过期", 400)
+	ErrResetTokenUsed          = New(ErrCodeResetTokenUsed, "重置令牌已被使用", 400)
 
 	// OAuth错误
 	ErrInvalidClient        = New(ErrCodeInvalidClient, "无效的客户端", 400)

@@ -27,6 +27,7 @@ var (
 	ErrVerificationCodeExpired = apperrors.ErrVerificationCodeExpired
 	ErrResetTokenInvalid       = apperrors.ErrResetTokenInvalid
 	ErrResetTokenExpired       = apperrors.ErrResetTokenExpired
+	ErrResetTokenUsed          = apperrors.ErrResetTokenUsed
 	ErrEmailAlreadyVerified    = apperrors.ErrEmailAlreadyVerified
 )
 
@@ -198,12 +199,23 @@ func (s *UserService) ResetPasswordWithAudit(ctx context.Context, userID, token,
 		return serviceutil.HandleStoreError(err, ErrResetTokenInvalid)
 	}
 
+	// 检查令牌是否已被使用
+	if storedToken.UsedAt != nil {
+		return ErrResetTokenUsed
+	}
+
 	if storedToken.Token != token {
 		return ErrResetTokenInvalid
 	}
 
 	if storedToken.ExpiresAt.Before(time.Now()) {
 		return ErrResetTokenExpired
+	}
+
+	// 先标记令牌为已使用（防止重复使用）
+	if err := s.store.MarkResetTokenUsed(ctx, userID); err != nil {
+		slog.Error("标记重置令牌为已使用失败", "error", err, "user_id", userID)
+		return serviceutil.WrapServiceError("标记令牌已使用", err)
 	}
 
 	user, err := s.store.GetByID(ctx, userID)

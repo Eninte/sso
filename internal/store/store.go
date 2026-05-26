@@ -80,6 +80,7 @@ type TokenStore interface {
 	DeleteVerificationToken(ctx context.Context, userID string) error
 	StoreResetToken(ctx context.Context, userID, token string, expiresAt time.Time) error
 	GetResetToken(ctx context.Context, userID string) (*ResetToken, error)
+	MarkResetTokenUsed(ctx context.Context, userID string) error
 	DeleteResetToken(ctx context.Context, userID string) error
 	CleanupExpired(ctx context.Context) error
 }
@@ -129,4 +130,5 @@ type ResetToken struct {
 	UserID    string
 	Token     string
 	ExpiresAt time.Time
+	UsedAt    *time.Time // 使用时间；NULL表示未使用
 }

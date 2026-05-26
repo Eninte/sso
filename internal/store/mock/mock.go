@@ -595,6 +595,26 @@ func (m *Store) GetResetToken(ctx context.Context, userID string) (*store.ResetT
 	return token, nil
 }
 
+// MarkResetTokenUsed 标记重置令牌为已使用
+func (m *Store) MarkResetTokenUsed(ctx context.Context, userID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	token, ok := m.resetTokens[userID]
+	if !ok {
+		return store.ErrNotFound
+	}
+
+	// 如果已经被使用，返回错误
+	if token.UsedAt != nil {
+		return store.ErrNotFound
+	}
+
+	now := time.Now()
+	token.UsedAt = &now
+	return nil
+}
+
 // DeleteResetToken 删除重置令牌
 func (m *Store) DeleteResetToken(ctx context.Context, userID string) error {
 	if m.DeleteResetTokenErr != nil {

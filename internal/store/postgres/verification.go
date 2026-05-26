@@ -90,9 +90,9 @@ func (s *Store) StoreResetToken(ctx context.Context, userID string, token string
 
 // GetResetToken 获取重置令牌
 func (s *Store) GetResetToken(ctx context.Context, userID string) (*store.ResetToken, error) {
-	query := `SELECT token, expires_at FROM reset_tokens WHERE user_id = $1`
+	query := `SELECT token, expires_at, used_at FROM reset_tokens WHERE user_id = $1`
 	var token store.ResetToken
-	err := s.db.QueryRowContext(ctx, query, userID).Scan(&token.Token, &token.ExpiresAt)
+	err := s.db.QueryRowContext(ctx, query, userID).Scan(&token.Token, &token.ExpiresAt, &token.UsedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, store.ErrNotFound
@@ -100,6 +100,29 @@ func (s *Store) GetResetToken(ctx context.Context, userID string) (*store.ResetT
 		return nil, err
 	}
 	return &token, nil
+}
+
+// MarkResetTokenUsed 标记重置令牌为已使用
+func (s *Store) MarkResetTokenUsed(ctx context.Context, userID string) error {
+	ctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+
+	query := `UPDATE reset_tokens SET used_at = $1 WHERE user_id = $2 AND used_at IS NULL`
+	result, err := s.db.ExecContext(ctx, query, time.Now(), userID)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return store.ErrNotFound
+	}
+
+	return nil
 }
 
 // DeleteResetToken 删除重置令牌
