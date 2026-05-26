@@ -36,46 +36,50 @@ func (s *Store) StoreAuditLog(ctx context.Context, log *model.AuditLog) error {
 }
 
 // ListAuditLogs 列出审计日志（支持分页和过滤）
-// 注意: SQL格式化是安全的，因为whereClause只包含固定的SQL片段
-// 用户输入通过参数化查询（$1, $2...）传递，不存在SQL注入风险
+// 使用安全的查询构建方式，避免SQL注入风险
 func (s *Store) ListAuditLogs(ctx context.Context, userID string, eventType string, offset, limit int) ([]*model.AuditLog, int, error) {
 	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 
-	// 构建查询条件
-	whereClause := "WHERE 1=1"
-	args := []interface{}{}
-	argIndex := 1
+	// 使用安全的查询构建器
+	// 构建WHERE条件列表
+	var conditions []string
+	var args []interface{}
 
 	if userID != "" {
-		whereClause += fmt.Sprintf(" AND user_id = $%d", argIndex)
+		conditions = append(conditions, "user_id = $"+fmt.Sprint(len(args)+1))
 		args = append(args, userID)
-		argIndex++
 	}
 
 	if eventType != "" {
-		whereClause += fmt.Sprintf(" AND event_type = $%d", argIndex)
+		conditions = append(conditions, "event_type = $"+fmt.Sprint(len(args)+1))
 		args = append(args, eventType)
-		argIndex++
+	}
+
+	// 构建WHERE子句
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = "WHERE " + joinConditions(conditions, " AND ")
 	}
 
 	// 获取总数
 	var total int
-	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM audit_logs %s", whereClause)
+	countQuery := "SELECT COUNT(*) FROM audit_logs " + whereClause
 	if err := s.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
-	// 获取分页数据
-	query := fmt.Sprintf(`
-		SELECT id, event_type, user_id, client_id, ip_address, user_agent, details, success, timestamp
-		FROM audit_logs
-		%s
-		ORDER BY timestamp DESC
-		LIMIT $%d OFFSET $%d
-	`, whereClause, argIndex, argIndex+1)
-
+	// 构建分页查询
+	// 添加LIMIT和OFFSET参数
+	limitArgIndex := len(args) + 1
+	offsetArgIndex := len(args) + 2
 	args = append(args, limit, offset)
+
+	query := "SELECT id, event_type, user_id, client_id, ip_address, user_agent, details, success, timestamp " +
+		"FROM audit_logs " +
+		whereClause +
+		" ORDER BY timestamp DESC " +
+		"LIMIT $" + fmt.Sprint(limitArgIndex) + " OFFSET $" + fmt.Sprint(offsetArgIndex)
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -109,4 +113,17 @@ func (s *Store) ListAuditLogs(ctx context.Context, userID string, eventType stri
 	}
 
 	return logs, total, nil
+}
+
+// joinConditions 连接SQL条件
+// 这是一个辅助函数，用于安全地连接WHERE条件
+func joinConditions(conditions []string, separator string) string {
+	if len(conditions) == 0 {
+		return ""
+	}
+	result := conditions[0]
+	for i := 1; i < len(conditions); i++ {
+		result += separator + conditions[i]
+	}
+	return result
 }
