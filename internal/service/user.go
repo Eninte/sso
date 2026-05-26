@@ -45,11 +45,12 @@ const (
 // ============================================================================
 
 type UserService struct {
-	store       store.Store
-	passwordSvc *crypto.PasswordService
-	emailSvc    *EmailService
-	baseURL     string
-	auditSvc    *AuditService
+	store          store.Store
+	passwordSvc    *crypto.PasswordService
+	emailSvc       *EmailService
+	baseURL        string
+	auditSvc       *AuditService
+	emailRateLimit *EmailRateLimiter
 }
 
 func NewUserService(
@@ -59,12 +60,19 @@ func NewUserService(
 	baseURL string,
 ) *UserService {
 	return &UserService{
-		store:       store,
-		passwordSvc: passwordSvc,
-		emailSvc:    emailSvc,
-		baseURL:     baseURL,
-		auditSvc:    NewAuditService(store),
+		store:          store,
+		passwordSvc:    passwordSvc,
+		emailSvc:       emailSvc,
+		baseURL:        baseURL,
+		auditSvc:       NewAuditService(store),
+		emailRateLimit: nil, // 默认不启用限流（向后兼容）
 	}
+}
+
+// WithEmailRateLimit 设置邮件限流器
+func (s *UserService) WithEmailRateLimit(rateLimiter *EmailRateLimiter) *UserService {
+	s.emailRateLimit = rateLimiter
+	return s
 }
 
 func NewUserServiceWithAudit(
@@ -75,11 +83,12 @@ func NewUserServiceWithAudit(
 	auditSvc *AuditService,
 ) *UserService {
 	return &UserService{
-		store:       store,
-		passwordSvc: passwordSvc,
-		emailSvc:    emailSvc,
-		baseURL:     baseURL,
-		auditSvc:    auditSvc,
+		store:          store,
+		passwordSvc:    passwordSvc,
+		emailSvc:       emailSvc,
+		baseURL:        baseURL,
+		auditSvc:       auditSvc,
+		emailRateLimit: nil, // 默认不启用限流（向后兼容）
 	}
 }
 
@@ -95,6 +104,24 @@ func (s *UserService) SendVerificationEmail(ctx context.Context, userID string) 
 
 	if user.EmailVerified {
 		return ErrEmailAlreadyVerified
+	}
+
+	// 检查邮件发送限流
+	if s.emailRateLimit != nil {
+		allowed, remaining, err := s.emailRateLimit.CheckLimit(ctx, user.Email)
+		if err != nil {
+			slog.Warn("检查邮件限流失败", "error", err, "email", user.Email)
+		}
+		if !allowed {
+			ttl, _ := s.emailRateLimit.GetTTL(ctx, user.Email)
+			return apperrors.Wrap(
+				apperrors.ErrCodeEmailRateLimitExceeded,
+				FormatRateLimitError(ttl),
+				429,
+				apperrors.ErrEmailRateLimitExceeded,
+			)
+		}
+		slog.Debug("邮件限流检查通过", "email", user.Email, "remaining", remaining)
 	}
 
 	token, err := common.GenerateToken()
@@ -162,6 +189,26 @@ func (s *UserService) ForgotPassword(ctx context.Context, email string) error {
 		// 安全设计：不泄露用户是否存在，但记录错误日志以便排查
 		slog.Debug("ForgotPassword: 获取用户失败", "error", err, "email", email)
 		return nil
+	}
+
+	// 检查邮件发送限流
+	if s.emailRateLimit != nil {
+		allowed, remaining, err := s.emailRateLimit.CheckLimit(ctx, email)
+		if err != nil {
+			slog.Warn("检查邮件限流失败", "error", err, "email", email)
+		}
+		if !allowed {
+			ttl, _ := s.emailRateLimit.GetTTL(ctx, email)
+			// 为了安全，不暴露限流错误，但记录日志
+			slog.Warn("密码重置邮件发送受限", "email", email, "ttl_minutes", int(ttl.Minutes()))
+			return apperrors.Wrap(
+				apperrors.ErrCodeEmailRateLimitExceeded,
+				FormatRateLimitError(ttl),
+				429,
+				apperrors.ErrEmailRateLimitExceeded,
+			)
+		}
+		slog.Debug("邮件限流检查通过", "email", email, "remaining", remaining)
 	}
 
 	token, err := common.GenerateToken()

@@ -35,6 +35,9 @@ type Cache interface {
 	SetWithNilProtection(ctx context.Context, key string, value interface{}, ttl time.Duration, nilTTL time.Duration) error
 	Delete(ctx context.Context, key string) error
 	DeletePattern(ctx context.Context, pattern string) error
+	Increment(ctx context.Context, key string) (int, error)
+	SetTTL(ctx context.Context, key string, ttl time.Duration) error
+	GetTTL(ctx context.Context, key string) (time.Duration, error)
 	Close() error
 }
 
@@ -254,6 +257,72 @@ func (c *MemoryCache) Close() error {
 	return nil
 }
 
+// Increment 原子递增计数器
+// 返回递增后的值
+func (c *MemoryCache) Increment(ctx context.Context, key string) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	item, exists := c.data[key]
+	var count int
+
+	if exists && time.Now().Before(item.expiresAt) {
+		// 键存在且未过期，解析当前值
+		if err := json.Unmarshal(item.value, &count); err != nil {
+			// 如果解析失败，从1开始
+			count = 0
+		}
+	}
+
+	count++
+	data, _ := json.Marshal(count)
+	
+	// 如果键不存在，设置默认过期时间（1小时）
+	expiresAt := time.Now().Add(1 * time.Hour)
+	if exists {
+		expiresAt = item.expiresAt
+	}
+
+	c.data[key] = cacheItem{
+		value:     data,
+		expiresAt: expiresAt,
+	}
+
+	return count, nil
+}
+
+// SetTTL 设置键的过期时间
+func (c *MemoryCache) SetTTL(ctx context.Context, key string, ttl time.Duration) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	item, exists := c.data[key]
+	if !exists {
+		return fmt.Errorf("key not found")
+	}
+
+	item.expiresAt = time.Now().Add(ttl)
+	c.data[key] = item
+	return nil
+}
+
+// GetTTL 获取键的剩余过期时间
+func (c *MemoryCache) GetTTL(ctx context.Context, key string) (time.Duration, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	item, exists := c.data[key]
+	if !exists {
+		return 0, fmt.Errorf("key not found")
+	}
+
+	ttl := time.Until(item.expiresAt)
+	if ttl < 0 {
+		return 0, nil
+	}
+	return ttl, nil
+}
+
 func (c *MemoryCache) cleanup() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
@@ -457,6 +526,33 @@ func (c *RedisCache) DeletePattern(ctx context.Context, pattern string) error {
 // Close 关闭Redis连接
 func (c *RedisCache) Close() error {
 	return c.client.Close()
+}
+
+// Increment 原子递增计数器
+// 返回递增后的值
+func (c *RedisCache) Increment(ctx context.Context, key string) (int, error) {
+	val, err := c.client.Incr(ctx, key).Result()
+	if err != nil {
+		return 0, err
+	}
+	return int(val), nil
+}
+
+// SetTTL 设置键的过期时间
+func (c *RedisCache) SetTTL(ctx context.Context, key string, ttl time.Duration) error {
+	return c.client.Expire(ctx, key, ttl).Err()
+}
+
+// GetTTL 获取键的剩余过期时间
+func (c *RedisCache) GetTTL(ctx context.Context, key string) (time.Duration, error) {
+	ttl, err := c.client.TTL(ctx, key).Result()
+	if err != nil {
+		return 0, err
+	}
+	if ttl < 0 {
+		return 0, nil
+	}
+	return ttl, nil
 }
 
 // ============================================================================

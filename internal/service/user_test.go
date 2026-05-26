@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/your-org/sso/internal/cache"
 	"github.com/your-org/sso/internal/crypto"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/service"
@@ -724,5 +725,77 @@ func TestUserService_ForgotPassword_WithEmail(t *testing.T) {
 
 		assert.NoError(t, err)
 		mockSender.shouldError = false
+	})
+}
+
+// ============================================================================
+// 邮件限流测试
+// ============================================================================
+
+func TestUserService_SendVerificationEmail_WithRateLimit(t *testing.T) {
+	userSvc, mockStore, _ := createTestUserServiceWithEmail()
+	ctx := context.Background()
+
+	// 添加限流器
+	memCache := cache.NewMemoryCache()
+	defer memCache.Close()
+	rateLimiter := service.NewEmailRateLimiter(memCache)
+	userSvc = userSvc.WithEmailRateLimit(rateLimiter)
+
+	user := &model.User{
+		ID:            "user-ratelimit",
+		Email:         "ratelimit@example.com",
+		EmailVerified: false,
+		Status:        model.UserStatusActive,
+	}
+	mockStore.AddUser(user)
+
+	t.Run("前5次发送成功", func(t *testing.T) {
+		rateLimiter.Reset(ctx, user.Email)
+
+		for i := 0; i < 5; i++ {
+			err := userSvc.SendVerificationEmail(ctx, user.ID)
+			assert.NoError(t, err, "第%d次发送应该成功", i+1)
+		}
+	})
+
+	t.Run("第6次发送被限流", func(t *testing.T) {
+		err := userSvc.SendVerificationEmail(ctx, user.ID)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "频繁")
+	})
+}
+
+func TestUserService_ForgotPassword_WithRateLimit(t *testing.T) {
+	userSvc, mockStore, _ := createTestUserServiceWithEmail()
+	ctx := context.Background()
+
+	// 添加限流器
+	memCache := cache.NewMemoryCache()
+	defer memCache.Close()
+	rateLimiter := service.NewEmailRateLimiter(memCache)
+	userSvc = userSvc.WithEmailRateLimit(rateLimiter)
+
+	user := &model.User{
+		ID:            "user-forgot-ratelimit",
+		Email:         "forgot@example.com",
+		EmailVerified: true,
+		Status:        model.UserStatusActive,
+	}
+	mockStore.AddUser(user)
+
+	t.Run("前5次发送成功", func(t *testing.T) {
+		rateLimiter.Reset(ctx, user.Email)
+
+		for i := 0; i < 5; i++ {
+			err := userSvc.ForgotPassword(ctx, user.Email)
+			assert.NoError(t, err, "第%d次发送应该成功", i+1)
+		}
+	})
+
+	t.Run("第6次发送被限流", func(t *testing.T) {
+		err := userSvc.ForgotPassword(ctx, user.Email)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "频繁")
 	})
 }

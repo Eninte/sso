@@ -1194,6 +1194,34 @@ func (m *MockCache) Close() error {
 	return m.closeErr
 }
 
+// Increment 原子递增计数器
+func (m *MockCache) Increment(ctx context.Context, key string) (int, error) {
+	value, ok := m.data[key]
+	if !ok {
+		m.data[key] = 1
+		return 1, nil
+	}
+	count, ok := value.(int)
+	if !ok {
+		count = 0
+	}
+	count++
+	m.data[key] = count
+	return count, nil
+}
+
+// SetTTL 设置键的过期时间
+func (m *MockCache) SetTTL(ctx context.Context, key string, ttl time.Duration) error {
+	// Mock实现不需要实际设置TTL
+	return nil
+}
+
+// GetTTL 获取键的剩余过期时间
+func (m *MockCache) GetTTL(ctx context.Context, key string) (time.Duration, error) {
+	// Mock实现返回固定值
+	return 1 * time.Hour, nil
+}
+
 // TestAuthService_RevokeTokenWithRetry_SuccessAfterRetry 测试重试成功场景
 // 验证: 需求 1.1, 1.6, 1.7
 func TestAuthService_RevokeTokenWithRetry_SuccessAfterRetry(t *testing.T) {
