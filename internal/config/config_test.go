@@ -17,6 +17,12 @@ import (
 // ============================================================================
 
 // setupTestEnv 设置测试环境变量
+//
+// 测试隔离的两条核心原则：
+//  1. 禁止读取磁盘 .env 文件——否则测试结果依赖运行环境，换台机器或改了 .env 就会随机失败。
+//     通过设置 SKIP_ENV_FILE=1 让 loadEnvFile() 直接返回。
+//  2. 隔离影响生产环境校验的关键开关——特别是 LAN_DEPLOYMENT，若残留为 true 会旁路
+//     生产环境的 CORS/SSL 等安全校验，使"期望报错"的测试用例静默通过。
 func setupTestEnv(t *testing.T) func() {
 	// 保存原始环境变量
 	origEnv := map[string]string{
@@ -27,12 +33,19 @@ func setupTestEnv(t *testing.T) func() {
 		"CORS_ALLOWED_ORIGINS": os.Getenv("CORS_ALLOWED_ORIGINS"),
 		"ADMIN_EMAILS":         os.Getenv("ADMIN_EMAILS"),
 		"BCRYPT_COST":          os.Getenv("BCRYPT_COST"),
+		"LAN_DEPLOYMENT":       os.Getenv("LAN_DEPLOYMENT"),
+		"SKIP_ENV_FILE":        os.Getenv("SKIP_ENV_FILE"),
 	}
 
 	// 设置测试环境变量
 	os.Setenv("DB_PASSWORD", "test_password")
 	os.Setenv("JWT_PRIVATE_KEY_PATH", "/keys/private.pem")
 	os.Setenv("JWT_PUBLIC_KEY_PATH", "/keys/public.pem")
+	// 禁止读取磁盘 .env 文件，保证测试环境完全自包含
+	os.Setenv("SKIP_ENV_FILE", "1")
+	// 默认非 LAN 部署模式，确保生产环境安全校验不被旁路；
+	// 需要测试 LAN 模式的用例可单独设置 LAN_DEPLOYMENT=true
+	os.Unsetenv("LAN_DEPLOYMENT")
 
 	// 返回清理函数
 	return func() {
@@ -259,7 +272,11 @@ func TestValidateProductionConfig_CORSLocalhostCheck(t *testing.T) {
 
 			cfg, err := config.Load()
 			if tt.wantErr {
-				assert.Error(t, err)
+				// 先断言 err 非 nil，避免后续 err.Error() 触发 nil 指针 panic
+				if err == nil {
+					t.Errorf("期望返回错误但得到 nil")
+					return
+				}
 				if tt.errContains != "" {
 					assert.Contains(t, err.Error(), tt.errContains)
 				}
@@ -323,7 +340,11 @@ func TestValidateProductionConfig_MetricsAuth(t *testing.T) {
 
 			cfg, err := config.Load()
 			if tt.wantErr {
-				assert.Error(t, err)
+				// 先断言 err 非 nil，避免后续 err.Error() 触发 nil 指针 panic
+				if err == nil {
+					t.Errorf("期望返回错误但得到 nil")
+					return
+				}
 				if tt.errContains != "" {
 					assert.Contains(t, err.Error(), tt.errContains)
 				}
