@@ -155,6 +155,55 @@ func TestAuthService_Login_ErrorPaths(t *testing.T) {
 		assert.NotContains(t, err.Error(), unverifiedUser.ID)
 	})
 
+	// ==== 测试3b: 未验证邮箱登录 - 验证SendVerificationEmail使用user.ID ====
+	t.Run("未验证邮箱登录触发验证邮件_sendUserID", func(t *testing.T) {
+		storeInst := mock.New()
+		passwordSvc := crypto.NewPasswordService(4)
+		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+		jwtSvc := crypto.NewJWTService(
+			privateKey,
+			&privateKey.PublicKey,
+			"test-issuer",
+			15*time.Minute,
+			7*24*time.Hour,
+		)
+
+		// 创建UserService并注入AuthService
+		userSvc := service.NewUserService(storeInst, passwordSvc, nil, "http://localhost")
+		authSvc := service.NewAuthServiceWithOptions(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute,
+			service.WithUserService(userSvc))
+
+		// 创建未验证邮箱用户
+		hashedPassword, err := passwordSvc.HashPassword("Xk9#mP2$vL7!")
+		require.NoError(t, err)
+
+		unverifiedUser := &model.User{
+			ID:            "verify-test-user-id",
+			Email:         "verify-test@example.com",
+			PasswordHash:  hashedPassword,
+			Status:        model.UserStatusPending,
+			EmailVerified: false,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
+		}
+		storeInst.AddUser(unverifiedUser)
+
+		// 登录未验证邮箱用户
+		_, err = authSvc.Login(ctx, &model.LoginRequest{
+			Email:    "verify-test@example.com",
+			Password: "Xk9#mP2$vL7!",
+		})
+		assert.ErrorIs(t, err, service.ErrInvalidCredentials)
+
+		// 验证SendVerificationEmail使用了user.ID（而非user.Email）
+		// 如果传了user.ID，GetByID能查到用户，验证令牌会被存储
+		// 如果传了user.Email，GetByID查不到用户，验证令牌不会被存储
+		token, tokenErr := storeInst.GetVerificationToken(ctx, "verify-test-user-id")
+		assert.NoError(t, tokenErr, "验证令牌应已存储（SendVerificationEmail应传user.ID）")
+		assert.NotNil(t, token, "验证令牌应存在")
+	})
+
 	// ==== 测试4: 密码错误场景 ====
 	// 验证: 需求 8.1
 	t.Run("密码错误", func(t *testing.T) {
