@@ -275,7 +275,7 @@ func (s *AuthService) validateUserCredentials(ctx context.Context, email, passwo
 		// 不暴露邮箱未验证状态，返回通用凭据错误
 		// 同时触发发送验证邮件，帮助用户完成验证
 		if s.userSvc != nil {
-			_ = s.userSvc.SendVerificationEmail(ctx, user.Email)
+			_ = s.userSvc.SendVerificationEmail(ctx, user.ID)
 		}
 		// 返回nil用户，避免触发handleLoginFailure的登录失败计数
 		// 合法用户未验证邮箱不应被锁定
