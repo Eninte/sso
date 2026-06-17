@@ -128,7 +128,7 @@ func main() {
 //   - svc: 服务集合
 //
 // 重构原因: 从main中提取服务器启动逻辑，降低主函数复杂度（17→<10）
-func startServer(cfg *config.Config, handler http.Handler, rateLimiter *middleware.RateLimiter, svc *Services) {
+func startServer(cfg *config.Config, handler http.Handler, rateLimiters []middleware.RateLimitMiddleware, svc *Services) {
 	// ==== 创建HTTP服务器 ====
 	server := &http.Server{
 		Addr:         cfg.ServerHost + ":" + cfg.ServerPort,
@@ -166,7 +166,9 @@ func startServer(cfg *config.Config, handler http.Handler, rateLimiter *middlewa
 	select {
 	case err := <-errChan:
 		slog.Error("服务器启动错误，正在关闭", "error", err)
-		rateLimiter.Stop()
+		for _, rl := range rateLimiters {
+			rl.Stop()
+		}
 		return
 	case sig := <-func() chan os.Signal {
 		quit := make(chan os.Signal, 1)
@@ -174,7 +176,7 @@ func startServer(cfg *config.Config, handler http.Handler, rateLimiter *middlewa
 		return quit
 	}():
 		slog.Info("收到关闭信号，正在优雅关闭服务器...", "signal", sig)
-		gracefulShutdown(rateLimiter, server, svc.Audit, svc.Social, cfg.ShutdownTimeout)
+		gracefulShutdown(rateLimiters, server, svc.Audit, svc.Social, cfg.ShutdownTimeout)
 	}
 }
 
@@ -196,7 +198,7 @@ func startServer(cfg *config.Config, handler http.Handler, rateLimiter *middlewa
 //   - 限流中间件实例
 //
 // 重构原因: 从main中提取处理器初始化逻辑，降低主函数复杂度（17→<10）
-func initHandlers(cfg *config.Config, svc *Services) (*mux.Router, *middleware.RateLimiter) {
+func initHandlers(cfg *config.Config, svc *Services) (*mux.Router, []middleware.RateLimitMiddleware) {
 	// ==== 初始化处理器 ====
 	registerHandler := handler.NewRegisterHandler(svc.Auth)
 	loginHandler := handler.NewLoginHandler(svc.Auth)
@@ -224,11 +226,22 @@ func initHandlers(cfg *config.Config, svc *Services) (*mux.Router, *middleware.R
 		middleware.SetTrustedProxies(proxies)
 	}
 
-	// 创建限流器并设置指标回调
-	rateLimiter := middleware.NewRateLimiter(cfg.RateLimitRequests, cfg.RateLimitWindow).
-		WithMetrics(func() {
+	// 创建限流器：Redis可用时使用分布式限流器，否则使用本地限流器
+	var rateLimiter middleware.RateLimitMiddleware
+	if rc, ok := svc.Cache.(*cache.RedisCache); ok {
+		rateLimiter = middleware.NewDistributedRateLimiter(
+			rc.Client(), cfg.RateLimitRequests, cfg.RateLimitWindow, "ratelimit:global",
+		)
+		slog.Info("使用分布式限流器（Redis）")
+	} else {
+		rateLimiter = middleware.NewRateLimiter(cfg.RateLimitRequests, cfg.RateLimitWindow)
+		slog.Info("使用本地限流器（内存）")
+	}
+	if rl, ok := rateLimiter.(interface{ WithMetrics(func()) *middleware.RateLimiter }); ok {
+		rl.WithMetrics(func() {
 			svc.Metrics.Increment("security_rate_limit_total")
 		})
+	}
 
 	router.Use(middleware.SecurityHeaders)
 	router.Use(middleware.RequestID)
@@ -282,13 +295,21 @@ func initHandlers(cfg *config.Config, svc *Services) (*mux.Router, *middleware.R
 	// API端点
 	api := router.PathPrefix("/api/v1").Subrouter()
 
+	// 创建敏感端点独立限流器（更严格的限额：全局限额的1/10，窗口1分钟）
+	sensitiveLimiter := newEndpointRateLimiter(svc.Cache, cfg.RateLimitRequests/10, 1*time.Minute, "ratelimit:sensitive")
+
 	// 公开端点 (不需要认证)
-	api.HandleFunc("/register", registerHandler.Handle).Methods("POST")
-	api.HandleFunc("/login", loginHandler.Handle).Methods("POST")
+	// 敏感端点使用独立的更严格限流器
+	sensitive := api.PathPrefix("").Subrouter()
+	sensitive.Use(sensitiveLimiter.Middleware)
+	sensitive.HandleFunc("/register", registerHandler.Handle).Methods("POST")
+	sensitive.HandleFunc("/login", loginHandler.Handle).Methods("POST")
+	sensitive.HandleFunc("/forgot-password", userHandler.HandleForgotPassword).Methods("POST")
+	sensitive.HandleFunc("/reset-password", userHandler.HandleResetPassword).Methods("POST")
+
+	// 一般公开端点（使用全局限流）
 	api.HandleFunc("/token", tokenHandler.HandleToken).Methods("POST")
 	api.HandleFunc("/token/revoke", tokenHandler.HandleRevoke).Methods("POST")
-	api.HandleFunc("/forgot-password", userHandler.HandleForgotPassword).Methods("POST")
-	api.HandleFunc("/reset-password", userHandler.HandleResetPassword).Methods("POST")
 	api.HandleFunc("/verify-email", userHandler.HandleVerifyEmail).Methods("GET")
 
 	// 受保护的端点 (需要认证)
@@ -322,7 +343,19 @@ func initHandlers(cfg *config.Config, svc *Services) (*mux.Router, *middleware.R
 	admin.HandleFunc("/users/{id}", adminHandler.HandleDeleteUser).Methods("DELETE")
 	admin.HandleFunc("/audit-logs", adminHandler.HandleAuditLogs).Methods("GET")
 
-	return router, rateLimiter
+	return router, []middleware.RateLimitMiddleware{rateLimiter, sensitiveLimiter}
+}
+
+// newEndpointRateLimiter 创建端点级限流器
+// Redis可用时使用分布式限流器，否则使用本地限流器
+func newEndpointRateLimiter(cacheSvc cache.Cache, limit int, window time.Duration, keyPrefix string) middleware.RateLimitMiddleware {
+	if limit <= 0 {
+		limit = 10
+	}
+	if rc, ok := cacheSvc.(*cache.RedisCache); ok {
+		return middleware.NewDistributedRateLimiter(rc.Client(), limit, window, keyPrefix)
+	}
+	return middleware.NewRateLimiter(limit, window)
 }
 
 // initConfig 加载和验证配置
@@ -679,9 +712,11 @@ func startSetupWizard(loadErr error) {
 }
 
 // gracefulShutdown 优雅关闭服务器
-func gracefulShutdown(rateLimiter *middleware.RateLimiter, server *http.Server, auditSvc *service.AuditService, socialSvc *service.SocialLoginService, timeout time.Duration) {
-	// 停止限流器
-	rateLimiter.Stop()
+func gracefulShutdown(rateLimiters []middleware.RateLimitMiddleware, server *http.Server, auditSvc *service.AuditService, socialSvc *service.SocialLoginService, timeout time.Duration) {
+	// 停止所有限流器
+	for _, rl := range rateLimiters {
+		rl.Stop()
+	}
 
 	// 关闭审计服务（确保所有日志写入完成）
 	if auditSvc != nil {

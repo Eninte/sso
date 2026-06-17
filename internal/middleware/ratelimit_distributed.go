@@ -128,3 +128,8 @@ func (drl *DistributedRateLimiter) Allow(ctx context.Context, clientIP string) (
 func (drl *DistributedRateLimiter) buildKey(clientIP string) string {
 	return drl.keyPrefix + ":" + clientIP
 }
+
+// Stop 停止分布式限流器（无操作，保持接口一致性）
+func (drl *DistributedRateLimiter) Stop() {
+	// Redis限流器无需清理后台goroutine
+}

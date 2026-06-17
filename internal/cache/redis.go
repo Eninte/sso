@@ -380,6 +380,12 @@ type RedisCache struct {
 	onCacheMiss func() // 缓存未命中时的回调
 }
 
+// Client 获取底层的Redis客户端
+// 用于需要直接访问Redis的场景（如分布式限流器）
+func (c *RedisCache) Client() *redis.Client {
+	return c.client
+}
+
 // NewRedisCache 创建Redis缓存实例
 // host: Redis主机地址 (如 "localhost")
 // password: Redis密码 (空字符串表示无需认证)
