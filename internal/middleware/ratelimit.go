@@ -4,11 +4,76 @@ package middleware
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 )
+
+// ============================================================================
+// 受信代理配置
+// ============================================================================
+
+// trustedProxyMu 保护受信代理全局状态的读写锁
+var trustedProxyMu sync.RWMutex
+
+// trustedProxies 受信代理IP列表
+// 仅当请求来自这些IP时，才信任 X-Real-IP 头
+var trustedProxies []net.IP
+
+// trustedProxyNets 受信代理CIDR网段
+var trustedProxyNets []*net.IPNet
+
+// SetTrustedProxies 设置受信代理IP列表
+// 支持单个IP（如 "10.0.0.1"）和CIDR格式（如 "172.16.0.0/12"）
+// 空列表表示不信任任何代理（X-Real-IP 将被忽略）
+func SetTrustedProxies(proxies []string) {
+	trustedProxyMu.Lock()
+	defer trustedProxyMu.Unlock()
+
+	trustedProxies = nil
+	trustedProxyNets = nil
+
+	for _, p := range proxies {
+		if p == "" {
+			continue
+		}
+		// 尝试解析为CIDR
+		if _, ipNet, err := net.ParseCIDR(p); err == nil {
+			trustedProxyNets = append(trustedProxyNets, ipNet)
+			continue
+		}
+		// 尝试解析为单个IP
+		if ip := net.ParseIP(p); ip != nil {
+			trustedProxies = append(trustedProxies, ip)
+			continue
+		}
+		slog.Warn("无效的受信代理配置，已忽略", "proxy", p)
+	}
+}
+
+// isTrustedProxy 检查IP是否为受信代理
+func isTrustedProxy(remoteIP net.IP) bool {
+	trustedProxyMu.RLock()
+	defer trustedProxyMu.RUnlock()
+
+	if remoteIP == nil {
+		return false
+	}
+	for _, ip := range trustedProxies {
+		if ip.Equal(remoteIP) {
+			return true
+		}
+	}
+	for _, ipNet := range trustedProxyNets {
+		if ipNet.Contains(remoteIP) {
+			return true
+		}
+	}
+	return false
+}
 
 // ============================================================================
 // RateLimiter 限流器（分片锁优化）
@@ -112,7 +177,7 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 			if rl.metricFunc != nil {
 				rl.metricFunc()
 			}
-			w.Header().Set("Retry-After", rl.window.String())
+			w.Header().Set("Retry-After", strconv.Itoa(int(rl.window.Seconds())))
 			writeError(w, http.StatusTooManyRequests, "请求过于频繁，请稍后再试")
 			return
 		}
@@ -123,23 +188,31 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 }
 
 // getClientIP 获取客户端真实IP
-// 优先使用 X-Real-IP，其次 RemoteAddr
-// 不信任 X-Forwarded-For (可被伪造)
+// 仅当请求来自受信代理时才信任 X-Real-IP 头
+// 否则直接使用 RemoteAddr（最可靠的来源）
 func getClientIP(r *http.Request) string {
-	// 优先使用 X-Real-IP (通常由反向代理设置)
-	if ip := r.Header.Get("X-Real-IP"); ip != "" {
-		if parsedIP := net.ParseIP(ip); parsedIP != nil {
-			return ip
-		}
+	// 解析 RemoteAddr（最可靠的来源）
+	remoteAddr := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		remoteAddr = host
 	}
 
-	// 使用 RemoteAddr (最可靠)
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
+	remoteIP := net.ParseIP(remoteAddr)
+	if remoteIP == nil {
+		// 无法解析IP时直接返回原始值
 		return r.RemoteAddr
 	}
 
-	return ip
+	// 仅当请求来自受信代理时，才信任 X-Real-IP 头
+	if isTrustedProxy(remoteIP) {
+		if ip := r.Header.Get("X-Real-IP"); ip != "" {
+			if parsedIP := net.ParseIP(ip); parsedIP != nil {
+				return ip
+			}
+		}
+	}
+
+	return remoteAddr
 }
 
 // Allow 检查是否允许请求
@@ -162,13 +235,13 @@ func (rl *RateLimiter) Allow(clientIP string) bool {
 		if len(shard.clients) >= maxClientsPerShard {
 			// 尝试清理过期客户端
 			rl.cleanupExpiredClients(shard, now)
-			
+
 			// 如果仍然超过限制，拒绝新客户端（防止内存耗尽）
 			if len(shard.clients) >= maxClientsPerShard {
 				return false
 			}
 		}
-		
+
 		// 新客户端，创建记录
 		shard.clients[clientIP] = &clientInfo{
 			tokens:    rl.limit - 1,
@@ -219,12 +292,12 @@ func (rl *RateLimiter) cleanup() {
 			now := time.Now()
 			for i := 0; i < numShards; i++ {
 				rl.shards[i].mu.Lock()
-				
+
 				// 检查是否超过最大客户端数
 				if len(rl.shards[i].clients) > maxClientsPerShard {
 					// 清理所有过期客户端（1个时间窗口）
 					rl.cleanupExpiredClients(rl.shards[i], now)
-					
+
 					// 如果仍然超过限制，清理最旧的客户端
 					if len(rl.shards[i].clients) > maxClientsPerShard {
 						rl.evictOldestClients(rl.shards[i], maxClientsPerShard)
@@ -237,7 +310,7 @@ func (rl *RateLimiter) cleanup() {
 						}
 					}
 				}
-				
+
 				rl.shards[i].mu.Unlock()
 			}
 		}
@@ -251,12 +324,12 @@ func (rl *RateLimiter) evictOldestClients(shard *shard, maxClients int) {
 		ip        string
 		lastReset time.Time
 	}
-	
+
 	entries := make([]clientEntry, 0, len(shard.clients))
 	for ip, client := range shard.clients {
 		entries = append(entries, clientEntry{ip, client.lastReset})
 	}
-	
+
 	// 按时间排序（最旧的在前）
 	for i := 0; i < len(entries)-1; i++ {
 		for j := i + 1; j < len(entries); j++ {
@@ -265,7 +338,7 @@ func (rl *RateLimiter) evictOldestClients(shard *shard, maxClients int) {
 			}
 		}
 	}
-	
+
 	// 删除最旧的客户端
 	toDelete := len(entries) - maxClients
 	for i := 0; i < toDelete; i++ {

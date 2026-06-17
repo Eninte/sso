@@ -36,6 +36,9 @@ type JTITracker interface {
 	// MarkJTIUsed 标记JTI为已使用
 	// ttl: JTI的有效期，应该与token的有效期一致
 	MarkJTIUsed(ctx context.Context, jti string, ttl time.Duration) error
+	// CheckAndMarkUsed 原子性检查并标记JTI为已使用
+	// 返回true表示JTI已被使用过（重放攻击），false表示首次使用
+	CheckAndMarkUsed(ctx context.Context, jti string, ttl time.Duration) (bool, error)
 }
 
 type JWTService struct {
@@ -324,21 +327,16 @@ func (s *JWTService) ValidateAccessToken(tokenString string) (*AccessTokenClaims
 
 	if tracker != nil && claims.ID != "" {
 		ctx := context.Background()
-		used, err := tracker.IsJTIUsed(ctx, claims.ID)
+		ttl := time.Until(claims.ExpiresAt.Time)
+
+		// 使用原子操作检查并标记JTI，防止TOCTOU竞态
+		replayed, err := tracker.CheckAndMarkUsed(ctx, claims.ID, ttl)
 		if err != nil {
-			// JTI检查失败时记录错误但不拒绝token（避免缓存故障导致服务不可用）
-			// 生产环境可以根据需要调整策略
+			// JTI检查失败时不拒绝token，避免缓存故障导致服务不可用
 			return claims, nil
 		}
-		if used {
+		if replayed {
 			return nil, ErrTokenReplayed
-		}
-
-		// 标记JTI为已使用
-		// TTL设置为token的剩余有效期
-		ttl := time.Until(claims.ExpiresAt.Time)
-		if ttl > 0 {
-			_ = tracker.MarkJTIUsed(ctx, claims.ID, ttl)
 		}
 	}
 

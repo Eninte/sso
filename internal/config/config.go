@@ -90,6 +90,9 @@ type Config struct {
 	GitHubClientID     string // GitHub客户端ID
 	GitHubClientSecret string // GitHub客户端密钥
 
+	// 受信代理配置（X-Real-IP仅在请求来自受信代理时才被信任）
+	TrustedProxies string // 受信代理IP列表 (逗号分隔，如 "10.0.0.1,172.16.0.0/12")
+
 	// CORS配置
 	CORSAllowedOrigins string // 允许的跨域源 (逗号分隔)
 
@@ -178,6 +181,9 @@ func Load() (*Config, error) {
 		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
 		GitHubClientID:     os.Getenv("GITHUB_CLIENT_ID"),
 		GitHubClientSecret: os.Getenv("GITHUB_CLIENT_SECRET"),
+
+		// 受信代理配置
+		TrustedProxies: getEnv("TRUSTED_PROXIES", ""),
 
 		// CORS配置
 		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000"),
@@ -521,6 +527,11 @@ func getEnvBool(key string, defaultValue bool) bool {
 // GetCORSAllowedOrigins 获取CORS允许的源列表
 func (c *Config) GetCORSAllowedOrigins() []string {
 	return splitAndTrim(c.CORSAllowedOrigins)
+}
+
+// GetTrustedProxies 获取受信代理IP列表
+func (c *Config) GetTrustedProxies() []string {
+	return splitAndTrim(c.TrustedProxies)
 }
 
 // GetJWTTransitionPubKeyPaths 获取轮换期间的旧公钥路径列表

@@ -491,6 +491,10 @@ func TestCORS_OriginNotAllowed(t *testing.T) {
 // ============================================================================
 
 func TestRateLimiter_XRealIP(t *testing.T) {
+	// 确保全局受信代理状态干净
+	middleware.SetTrustedProxies(nil)
+	defer middleware.SetTrustedProxies(nil)
+
 	limiter := middleware.NewRateLimiter(1, time.Minute)
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -499,7 +503,7 @@ func TestRateLimiter_XRealIP(t *testing.T) {
 
 	wrapped := limiter.Middleware(handler)
 
-	// 使用 X-Real-IP 头
+	// 未配置受信代理时，X-Real-IP 应被忽略，使用 RemoteAddr
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set("X-Real-IP", "10.0.0.1")
 	req.RemoteAddr = "192.168.1.1:12345"
@@ -508,14 +512,35 @@ func TestRateLimiter_XRealIP(t *testing.T) {
 	wrapped.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code)
 
-	// 同一个 X-Real-IP 应该被限制
+	// 不同 RemoteAddr 但相同 X-Real-IP → 应视为不同客户端（X-Real-IP 被忽略）
 	req2 := httptest.NewRequest("GET", "/test", nil)
 	req2.Header.Set("X-Real-IP", "10.0.0.1")
 	req2.RemoteAddr = "192.168.1.2:12345"
 	rec2 := httptest.NewRecorder()
 
 	wrapped.ServeHTTP(rec2, req2)
-	assert.Equal(t, http.StatusTooManyRequests, rec2.Code)
+	assert.Equal(t, http.StatusOK, rec2.Code, "未配置受信代理时X-Real-IP应被忽略")
+
+	// 配置受信代理后，X-Real-IP 应被信任
+	middleware.SetTrustedProxies([]string{"192.168.1.1", "192.168.1.2"})
+	defer middleware.SetTrustedProxies(nil)
+
+	req3 := httptest.NewRequest("GET", "/test", nil)
+	req3.Header.Set("X-Real-IP", "10.0.0.1")
+	req3.RemoteAddr = "192.168.1.1:12345"
+	rec3 := httptest.NewRecorder()
+
+	wrapped.ServeHTTP(rec3, req3)
+	assert.Equal(t, http.StatusOK, rec3.Code)
+
+	// 受信代理发来的相同 X-Real-IP 应被限流
+	req4 := httptest.NewRequest("GET", "/test", nil)
+	req4.Header.Set("X-Real-IP", "10.0.0.1")
+	req4.RemoteAddr = "192.168.1.2:12345"
+	rec4 := httptest.NewRecorder()
+
+	wrapped.ServeHTTP(rec4, req4)
+	assert.Equal(t, http.StatusTooManyRequests, rec4.Code, "受信代理发来的相同X-Real-IP应被限流")
 }
 
 func TestRateLimiter_InvalidXRealIP(t *testing.T) {

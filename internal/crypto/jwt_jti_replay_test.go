@@ -42,6 +42,12 @@ func (m *mockCache) Get(ctx context.Context, key string, dest interface{}) error
 			return nil
 		}
 	}
+	if intPtr, ok := dest.(*int); ok {
+		if intVal, ok := val.(int); ok {
+			*intPtr = intVal
+			return nil
+		}
+	}
 	return apperrors.ErrCacheMiss
 }
 
@@ -50,6 +56,27 @@ func (m *mockCache) Set(ctx context.Context, key string, value interface{}, ttl 
 	defer m.mu.Unlock()
 
 	m.data[key] = value
+	return nil
+}
+
+func (m *mockCache) Increment(ctx context.Context, key string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	val, ok := m.data[key]
+	if !ok {
+		m.data[key] = 1
+		return 1, nil
+	}
+	if intVal, ok := val.(int); ok {
+		m.data[key] = intVal + 1
+		return intVal + 1, nil
+	}
+	m.data[key] = 1
+	return 1, nil
+}
+
+func (m *mockCache) SetTTL(ctx context.Context, key string, ttl time.Duration) error {
 	return nil
 }
 

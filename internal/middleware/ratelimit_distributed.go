@@ -59,7 +59,7 @@ func (drl *DistributedRateLimiter) Middleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Ratelimit-Reset", strconv.FormatInt(resetTime.Unix(), 10))
 
 		if !allowed {
-			w.Header().Set("Retry-After", drl.window.String())
+			w.Header().Set("Retry-After", strconv.Itoa(int(drl.window.Seconds())))
 			writeError(w, http.StatusTooManyRequests, "请求过于频繁，请稍后再试")
 			return
 		}

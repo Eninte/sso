@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -214,6 +215,15 @@ func initHandlers(cfg *config.Config, svc *Services) (*mux.Router, *middleware.R
 	router := mux.NewRouter()
 
 	// ==== 应用中间件 ====
+	// 设置受信代理（仅信任这些代理发来的 X-Real-IP 头）
+	if cfg.TrustedProxies != "" {
+		proxies := strings.Split(cfg.TrustedProxies, ",")
+		for i := range proxies {
+			proxies[i] = strings.TrimSpace(proxies[i])
+		}
+		middleware.SetTrustedProxies(proxies)
+	}
+
 	// 创建限流器并设置指标回调
 	rateLimiter := middleware.NewRateLimiter(cfg.RateLimitRequests, cfg.RateLimitWindow).
 		WithMetrics(func() {
@@ -499,6 +509,11 @@ func initServices(cfg *config.Config) (*Services, *sql.DB, error) {
 
 	slog.Info("加密服务初始化完成")
 
+	// ==== 接入JTI防重放跟踪器 ====
+	jtiTracker := crypto.NewCacheJTITracker(cacheSvc, "jti:")
+	jwtSvc.SetJTITracker(jtiTracker)
+	slog.Info("JTI防重放跟踪器已启用")
+
 	// ==== 初始化邮件服务 ====
 	emailConfig := &service.EmailConfig{
 		SMTPHost: cfg.SMTPHost,
@@ -517,7 +532,8 @@ func initServices(cfg *config.Config) (*Services, *sql.DB, error) {
 	tokenSvc := service.NewTokenService(jwtSvc, store)
 
 	// ==== 初始化业务服务（带缓存） ====
-	userSvc := service.NewUserService(store, passwordSvc, emailSvc, cfg.BaseURL())
+	userSvc := service.NewUserService(store, passwordSvc, emailSvc, cfg.BaseURL()).
+		WithEmailRateLimit(service.NewEmailRateLimiter(cacheSvc))
 	authSvc := service.NewAuthServiceWithOptions(
 		store,
 		passwordSvc,
