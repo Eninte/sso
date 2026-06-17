@@ -173,8 +173,9 @@ func (s *AuthService) Register(ctx context.Context, req *model.RegisterRequest) 
 		return nil, serviceutil.WrapServiceError("检查邮箱", err)
 	}
 	if existingUser != nil {
-		// 不暴露邮箱已存在：返回nil错误和nil用户
-		// handler层对nil用户返回通用成功消息
+		// 执行 dummy bcrypt 哈希以消除时序侧信道
+		// 邮箱已存在和不存在的路径耗时一致，防止通过响应时间枚举邮箱
+		_, _ = s.passwordSvc.HashPassword(req.Password)
 		return nil, nil
 	}
 
@@ -276,7 +277,9 @@ func (s *AuthService) validateUserCredentials(ctx context.Context, email, passwo
 		if s.userSvc != nil {
 			_ = s.userSvc.SendVerificationEmail(ctx, user.Email)
 		}
-		return user, ErrInvalidCredentials
+		// 返回nil用户，避免触发handleLoginFailure的登录失败计数
+		// 合法用户未验证邮箱不应被锁定
+		return nil, ErrInvalidCredentials
 	}
 
 	// 检查账户状态
