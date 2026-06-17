@@ -231,9 +231,14 @@ func validateDatabaseConfig(c *Config) error {
 		return ErrDBPasswordRequired
 	}
 
-	// 生产环境建议启用数据库SSL（内网部署时允许disable）
+	// 生产环境建议启用数据库SSL（LAN部署时允许disable）
 	if c.Env == "production" && c.DBSSLMode == "disable" {
-		slog.Warn("生产环境数据库未启用SSL，建议使用require或更高模式")
+		if c.LANDeployment {
+			slog.Warn("生产环境数据库未启用SSL（LAN部署模式）", "ssl_mode", c.DBSSLMode)
+		} else {
+			slog.Error("生产环境数据库必须启用SSL", "ssl_mode", c.DBSSLMode)
+			return fmt.Errorf("生产环境DB_SSL_MODE不能为disable，请设置为require或更高模式")
+		}
 	}
 
 	return nil
@@ -325,11 +330,19 @@ func validateSecurityConfig(c *Config) error {
 
 	// 验证限流配置
 	if c.RateLimitRequests <= 0 {
+		if c.Env == "production" && !c.LANDeployment {
+			slog.Error("生产环境限流请求数必须为正数", "requests", c.RateLimitRequests)
+			return fmt.Errorf("生产环境RATE_LIMIT_REQUESTS必须为正数，当前值: %d", c.RateLimitRequests)
+		}
 		slog.Warn("限流请求数应为正数", "requests", c.RateLimitRequests)
 	}
 
 	// 验证登录保护配置
 	if c.MaxLoginAttempts <= 0 {
+		if c.Env == "production" && !c.LANDeployment {
+			slog.Error("生产环境最大登录尝试次数必须为正数", "attempts", c.MaxLoginAttempts)
+			return fmt.Errorf("生产环境MAX_LOGIN_ATTEMPTS必须为正数，当前值: %d", c.MaxLoginAttempts)
+		}
 		slog.Warn("最大登录尝试次数应为正数", "attempts", c.MaxLoginAttempts)
 	}
 	if c.LockoutDuration <= 0 {

@@ -69,6 +69,7 @@ type SocialLoginService struct {
 	store      store.Store
 	jwtSvc     *crypto.JWTService
 	tokenSvc   *TokenService
+	baseURL    string           // 服务基础URL，用于构建固定的回调地址
 	providers  map[string]*OAuthProvider
 	httpClient HTTPClient
 	stateCache sync.Map      // 用于存储OAuth state，防止CSRF攻击
@@ -78,6 +79,7 @@ type SocialLoginService struct {
 func NewSocialLoginService(
 	store store.Store,
 	jwtSvc *crypto.JWTService,
+	baseURL string,
 	googleClientID, googleClientSecret string,
 	githubClientID, githubClientSecret string,
 ) *SocialLoginService {
@@ -111,8 +113,9 @@ func NewSocialLoginService(
 		store:      store,
 		jwtSvc:     jwtSvc,
 		tokenSvc:   NewTokenService(jwtSvc, store),
+		baseURL:    baseURL,
 		providers:  providers,
-		httpClient: http.DefaultClient,
+		httpClient: &http.Client{Timeout: 10 * time.Second},
 		stopChan:   make(chan struct{}),
 	}
 
@@ -137,6 +140,7 @@ func NewSocialLoginServiceWithProviders(
 		store:      store,
 		jwtSvc:     jwtSvc,
 		tokenSvc:   NewTokenService(jwtSvc, store),
+		baseURL:    "http://localhost:9000",
 		providers:  providers,
 		httpClient: httpClient,
 		stopChan:   make(chan struct{}),
@@ -193,15 +197,14 @@ func (s *SocialLoginService) GetProviders() []string {
 	return providers
 }
 
-func (s *SocialLoginService) GetAuthorizationURL(provider, redirectURI, state string) (string, error) {
+func (s *SocialLoginService) GetAuthorizationURL(provider, state string) (string, error) {
 	p, ok := s.providers[provider]
 	if !ok {
 		return "", ErrProviderNotSupported
 	}
 
-	if redirectURI == "" {
-		redirectURI = "http://localhost:9090/auth/" + provider + "/callback"
-	}
+	// 使用固定的回调地址，不接受客户端传入的redirectURI，防止开放重定向
+	redirectURI := s.baseURL + "/auth/" + provider + "/callback"
 
 	// 如果未提供state，生成随机state
 	if state == "" {
@@ -302,7 +305,7 @@ func (s *SocialLoginService) exchangeCode(p *OAuthProvider, code, redirectURI st
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 限制响应体最大1MB
 	if err != nil {
 		return "", err
 	}
@@ -332,7 +335,7 @@ func (s *SocialLoginService) getUserInfo(p *OAuthProvider, accessToken string) (
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 限制响应体最大1MB
 	if err != nil {
 		return nil, err
 	}

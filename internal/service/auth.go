@@ -518,7 +518,7 @@ func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken st
 	slog.Debug("RefreshToken: 开始刷新Token", "refresh_token_length", len(refreshToken))
 	tokenRecord, err := s.store.GetTokenByRefreshToken(ctx, refreshToken)
 	if err != nil {
-		slog.Error("RefreshToken: 查询Token失败", "error", err, "refresh_token", refreshToken)
+		slog.Error("RefreshToken: 查询Token失败", "error", err, "refresh_token_length", len(refreshToken))
 		// 安全设计：不暴露token是否存在，所有错误都返回ErrInvalidToken
 		return nil, ErrInvalidToken
 	}

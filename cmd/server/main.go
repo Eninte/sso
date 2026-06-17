@@ -590,7 +590,7 @@ func initServices(cfg *config.Config) (*Services, *sql.DB, error) {
 	adminSvc := service.NewAdminServiceWithVersion(store, cacheSvc, Version, BuildTime)
 
 	// ==== 初始化第三方登录服务 ====
-	socialSvc := service.NewSocialLoginService(store, jwtSvc, cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GitHubClientID, cfg.GitHubClientSecret)
+	socialSvc := service.NewSocialLoginService(store, jwtSvc, cfg.BaseURL(), cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GitHubClientID, cfg.GitHubClientSecret)
 	if cfg.GoogleClientID != "" && cfg.GoogleClientSecret != "" {
 		slog.Info("Google第三方登录已启用")
 	}

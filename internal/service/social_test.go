@@ -77,7 +77,7 @@ func newMockSocialService(t *testing.T, tokenResp, userInfoResp interface{}) (*s
 	// 由于providers未导出，我们使用redirectHTTPClient
 	// 注意：providers的TokenURL是固定的，但HTTPClient会被调用
 	// 所以我们用redirectHTTPClient重定向所有请求到mock server
-	svc := service.NewSocialLoginService(storeInst, jwtSvc, "g-id", "g-secret", "gh-id", "gh-secret")
+	svc := service.NewSocialLoginService(storeInst, jwtSvc, "http://localhost:9000", "g-id", "g-secret", "gh-id", "gh-secret")
 
 	// 通过替换HTTPClient来mock请求
 	// 但providers里的URL还是真实的，所以redirectHTTPClient会把
@@ -97,7 +97,7 @@ func TestNewSocialLoginService(t *testing.T) {
 	jwtSvc := createTestJWTService()
 
 	t.Run("无提供商配置", func(t *testing.T) {
-		svc := service.NewSocialLoginService(storeInst, jwtSvc, "", "", "", "")
+		svc := service.NewSocialLoginService(storeInst, jwtSvc, "http://localhost:9000", "", "", "", "")
 		assert.NotNil(t, svc)
 
 		providers := svc.GetProviders()
@@ -105,7 +105,7 @@ func TestNewSocialLoginService(t *testing.T) {
 	})
 
 	t.Run("配置Google提供商", func(t *testing.T) {
-		svc := service.NewSocialLoginService(storeInst, jwtSvc, "google-id", "google-secret", "", "")
+		svc := service.NewSocialLoginService(storeInst, jwtSvc, "http://localhost:9000", "google-id", "google-secret", "", "")
 		assert.NotNil(t, svc)
 
 		providers := svc.GetProviders()
@@ -113,7 +113,7 @@ func TestNewSocialLoginService(t *testing.T) {
 	})
 
 	t.Run("配置GitHub提供商", func(t *testing.T) {
-		svc := service.NewSocialLoginService(storeInst, jwtSvc, "", "", "github-id", "github-secret")
+		svc := service.NewSocialLoginService(storeInst, jwtSvc, "http://localhost:9000", "", "", "github-id", "github-secret")
 		assert.NotNil(t, svc)
 
 		providers := svc.GetProviders()
@@ -121,7 +121,7 @@ func TestNewSocialLoginService(t *testing.T) {
 	})
 
 	t.Run("配置所有提供商", func(t *testing.T) {
-		svc := service.NewSocialLoginService(storeInst, jwtSvc, "google-id", "google-secret", "github-id", "github-secret")
+		svc := service.NewSocialLoginService(storeInst, jwtSvc, "http://localhost:9000", "google-id", "google-secret", "github-id", "github-secret")
 		assert.NotNil(t, svc)
 
 		providers := svc.GetProviders()
@@ -139,13 +139,13 @@ func TestSocialLoginService_GetProviders(t *testing.T) {
 	jwtSvc := createTestJWTService()
 
 	t.Run("获取空提供商列表", func(t *testing.T) {
-		svc := service.NewSocialLoginService(storeInst, jwtSvc, "", "", "", "")
+		svc := service.NewSocialLoginService(storeInst, jwtSvc, "http://localhost:9000", "", "", "", "")
 		providers := svc.GetProviders()
 		assert.Empty(t, providers)
 	})
 
 	t.Run("获取已配置的提供商列表", func(t *testing.T) {
-		svc := service.NewSocialLoginService(storeInst, jwtSvc, "google-id", "google-secret", "github-id", "github-secret")
+		svc := service.NewSocialLoginService(storeInst, jwtSvc, "http://localhost:9000", "google-id", "google-secret", "github-id", "github-secret")
 		providers := svc.GetProviders()
 		assert.Len(t, providers, 2)
 	})
@@ -160,9 +160,9 @@ func TestSocialLoginService_GetAuthorizationURL(t *testing.T) {
 	jwtSvc := createTestJWTService()
 
 	t.Run("成功获取Google授权URL", func(t *testing.T) {
-		svc := service.NewSocialLoginService(storeInst, jwtSvc, "google-id", "google-secret", "", "")
+		svc := service.NewSocialLoginService(storeInst, jwtSvc, "http://localhost:9000", "google-id", "google-secret", "", "")
 
-		url, err := svc.GetAuthorizationURL("google", "http://localhost/callback", "random-state")
+		url, err := svc.GetAuthorizationURL("google", "random-state")
 
 		require.NoError(t, err)
 		assert.Contains(t, url, "https://accounts.google.com/o/oauth2/v2/auth")
@@ -171,9 +171,9 @@ func TestSocialLoginService_GetAuthorizationURL(t *testing.T) {
 	})
 
 	t.Run("成功获取GitHub授权URL", func(t *testing.T) {
-		svc := service.NewSocialLoginService(storeInst, jwtSvc, "", "", "github-id", "github-secret")
+		svc := service.NewSocialLoginService(storeInst, jwtSvc, "http://localhost:9000", "", "", "github-id", "github-secret")
 
-		url, err := svc.GetAuthorizationURL("github", "http://localhost/callback", "random-state")
+		url, err := svc.GetAuthorizationURL("github", "random-state")
 
 		require.NoError(t, err)
 		assert.Contains(t, url, "https://github.com/login/oauth/authorize")
@@ -182,20 +182,20 @@ func TestSocialLoginService_GetAuthorizationURL(t *testing.T) {
 	})
 
 	t.Run("不支持的提供商", func(t *testing.T) {
-		svc := service.NewSocialLoginService(storeInst, jwtSvc, "", "", "", "")
+		svc := service.NewSocialLoginService(storeInst, jwtSvc, "http://localhost:9000", "", "", "", "")
 
-		_, err := svc.GetAuthorizationURL("unsupported", "http://localhost/callback", "state")
+		_, err := svc.GetAuthorizationURL("unsupported", "state")
 
 		assert.ErrorIs(t, err, service.ErrProviderNotSupported)
 	})
 
 	t.Run("空redirectURI使用默认值", func(t *testing.T) {
-		svc := service.NewSocialLoginService(storeInst, jwtSvc, "google-id", "google-secret", "", "")
+		svc := service.NewSocialLoginService(storeInst, jwtSvc, "http://localhost:9000", "google-id", "google-secret", "", "")
 
-		url, err := svc.GetAuthorizationURL("google", "", "state")
+		url, err := svc.GetAuthorizationURL("google", "state")
 
 		require.NoError(t, err)
-		assert.Contains(t, url, "redirect_uri=http%3A%2F%2Flocalhost%3A9090%2Fauth%2Fgoogle%2Fcallback")
+		assert.Contains(t, url, "redirect_uri=http%3A%2F%2Flocalhost%3A9000%2Fauth%2Fgoogle%2Fcallback")
 	})
 }
 
@@ -208,7 +208,7 @@ func TestSocialLoginService_HandleCallback(t *testing.T) {
 	jwtSvc := createTestJWTService()
 
 	t.Run("不支持的提供商", func(t *testing.T) {
-		svc := service.NewSocialLoginService(storeInst, jwtSvc, "", "", "", "")
+		svc := service.NewSocialLoginService(storeInst, jwtSvc, "http://localhost:9000", "", "", "", "")
 
 		_, err := svc.HandleCallback(context.Background(), "unsupported", "code", "test-state")
 
@@ -216,7 +216,7 @@ func TestSocialLoginService_HandleCallback(t *testing.T) {
 	})
 
 	t.Run("空redirectURI使用默认值-不支持的提供商", func(t *testing.T) {
-		svc := service.NewSocialLoginService(storeInst, jwtSvc, "", "", "", "")
+		svc := service.NewSocialLoginService(storeInst, jwtSvc, "http://localhost:9000", "", "", "", "")
 
 		_, err := svc.HandleCallback(context.Background(), "github", "code", "test-state")
 
@@ -271,7 +271,7 @@ func TestSocialLoginService_HandleCallback_FullFlow(t *testing.T) {
 		svc := service.NewSocialLoginServiceWithProviders(storeInst, jwtSvc, providers, http.DefaultClient)
 
 		// 先获取授权URL以生成state
-		authURL, err := svc.GetAuthorizationURL("google", "http://localhost/callback", "")
+		authURL, err := svc.GetAuthorizationURL("google", "")
 		require.NoError(t, err)
 
 		// 从URL中提取state
@@ -332,7 +332,7 @@ func TestSocialLoginService_HandleCallback_FullFlow(t *testing.T) {
 		svc := service.NewSocialLoginServiceWithProviders(storeInst, jwtSvc, providers, http.DefaultClient)
 
 		// 先获取授权URL以生成state
-		authURL, err := svc.GetAuthorizationURL("google", "http://localhost", "")
+		authURL, err := svc.GetAuthorizationURL("google", "")
 		require.NoError(t, err)
 		parsedURL, _ := url.Parse(authURL)
 		state := parsedURL.Query().Get("state")
@@ -374,7 +374,7 @@ func TestSocialLoginService_HandleCallback_FullFlow(t *testing.T) {
 		svc := service.NewSocialLoginServiceWithProviders(storeInst, jwtSvc, providers, http.DefaultClient)
 
 		// 先获取授权URL以生成state
-		authURL, err := svc.GetAuthorizationURL("github", "http://localhost", "")
+		authURL, err := svc.GetAuthorizationURL("github", "")
 		require.NoError(t, err)
 		parsedURL, _ := url.Parse(authURL)
 		state := parsedURL.Query().Get("state")
@@ -415,7 +415,7 @@ func TestSocialLoginService_HandleCallback_FullFlow(t *testing.T) {
 		svc := service.NewSocialLoginServiceWithProviders(storeInst, jwtSvc, providers, http.DefaultClient)
 
 		// 先获取授权URL以生成state
-		authURL, err := svc.GetAuthorizationURL("google", "http://localhost", "")
+		authURL, err := svc.GetAuthorizationURL("google", "")
 		require.NoError(t, err)
 		parsedURL, _ := url.Parse(authURL)
 		state := parsedURL.Query().Get("state")
@@ -454,7 +454,7 @@ func TestSocialLoginService_HandleCallback_FullFlow(t *testing.T) {
 		svc := service.NewSocialLoginServiceWithProviders(storeInst, jwtSvc, providers, http.DefaultClient)
 
 		// 先获取授权URL以生成state
-		authURL, err := svc.GetAuthorizationURL("github", "http://localhost", "")
+		authURL, err := svc.GetAuthorizationURL("github", "")
 		require.NoError(t, err)
 		parsedURL, _ := url.Parse(authURL)
 		state := parsedURL.Query().Get("state")

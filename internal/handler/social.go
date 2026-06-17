@@ -38,17 +38,11 @@ func (h *SocialLoginHandler) HandleLogin(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// 2. 获取回调URL
-	redirectURI := r.URL.Query().Get("redirect_uri")
-	if redirectURI == "" {
-		redirectURI = r.Referer()
-	}
-
-	// 3. 获取状态参数
+	// 2. 获取状态参数
 	state := r.URL.Query().Get("state")
 
-	// 4. 获取授权URL
-	authURL, err := h.socialSvc.GetAuthorizationURL(provider, redirectURI, state)
+	// 3. 获取授权URL（redirectURI由服务端固定，不接受客户端传入）
+	authURL, err := h.socialSvc.GetAuthorizationURL(provider, state)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeUnsupportedLoginMethod))
 		return

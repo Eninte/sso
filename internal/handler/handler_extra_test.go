@@ -135,7 +135,7 @@ func TestBasicAuth_Middleware(t *testing.T) {
 func createTestSocialLoginHandler(t *testing.T) *handler.SocialLoginHandler {
 	storeInst := mock.New()
 	jwtSvc := createTestJWTService()
-	socialSvc := service.NewSocialLoginService(storeInst, jwtSvc, "g-id", "g-secret", "gh-id", "gh-secret")
+	socialSvc := service.NewSocialLoginService(storeInst, jwtSvc, "http://localhost:9000", "g-id", "g-secret", "gh-id", "gh-secret")
 	return handler.NewSocialLoginHandler(socialSvc)
 }
 

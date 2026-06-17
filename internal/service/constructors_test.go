@@ -54,7 +54,7 @@ func TestSocialLoginService_Close(t *testing.T) {
 	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 	jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test", 15*time.Minute, 7*24*time.Hour)
 
-	socialSvc := service.NewSocialLoginService(mock.New(), jwtSvc, "", "", "", "")
+	socialSvc := service.NewSocialLoginService(mock.New(), jwtSvc, "http://localhost:9000", "", "", "", "")
 
 	// Close不应该panic
 	socialSvc.Close()
