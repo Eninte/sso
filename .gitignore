@@ -69,6 +69,7 @@ Thumbs.db
 .lingma/
 .qoder/
 .trae/
+.worktrees/
 
 # 启动脚本（含环境敏感信息）
 start_server.sh

@@ -22,9 +22,9 @@ import (
 )
 
 var (
-	ErrInvalidToken = apperrors.ErrInvalidToken
-	ErrTokenExpired = apperrors.ErrTokenExpired
-	ErrNoActiveKey  = apperrors.ErrNoActiveKey
+	ErrInvalidToken  = apperrors.ErrInvalidToken
+	ErrTokenExpired  = apperrors.ErrTokenExpired
+	ErrNoActiveKey   = apperrors.ErrNoActiveKey
 	ErrTokenReplayed = apperrors.New("ERR_TOKEN_REPLAYED", "Token已被使用，可能是重放攻击", 401)
 )
 
