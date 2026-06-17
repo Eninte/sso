@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"log/slog"
 	"time"
@@ -151,7 +152,7 @@ func (s *UserService) VerifyEmail(ctx context.Context, userID, token string) err
 		return serviceutil.HandleStoreError(err, ErrVerificationCodeInvalid)
 	}
 
-	if storedToken.Token != token {
+	if subtle.ConstantTimeCompare([]byte(storedToken.Token), []byte(token)) != 1 {
 		return ErrVerificationCodeInvalid
 	}
 
@@ -251,7 +252,7 @@ func (s *UserService) ResetPasswordWithAudit(ctx context.Context, userID, token,
 		return ErrResetTokenUsed
 	}
 
-	if storedToken.Token != token {
+	if subtle.ConstantTimeCompare([]byte(storedToken.Token), []byte(token)) != 1 {
 		return ErrResetTokenInvalid
 	}
 

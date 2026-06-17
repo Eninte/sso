@@ -254,10 +254,9 @@ func (s *SocialLoginService) HandleCallback(ctx context.Context, provider, code,
 		return nil, ErrOAuthStateExpired
 	}
 
-	// 如果未提供redirectURI，使用存储的值
-	if redirectURI == "" {
-		redirectURI = info.redirectURI
-	}
+	// 使用state缓存中存储的redirectURI（由GetAuthorizationURL设置）
+	// 不接受客户端传入的redirectURI，防止开放重定向攻击
+	redirectURI = info.redirectURI
 
 	accessToken, err := s.exchangeCode(p, code, redirectURI)
 	if err != nil {
