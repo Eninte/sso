@@ -65,6 +65,7 @@ type MFAService struct {
 	// TOTP使用记录（防止重放攻击）
 	totpMu    sync.Mutex
 	totpUsage map[string]*totpUsageRecord // userID -> 使用记录
+	stopChan  chan struct{}                // 停止清理goroutine
 }
 
 // recoveryAttempt 恢复码验证尝试记录
@@ -82,21 +83,47 @@ type totpUsageRecord struct {
 }
 
 func NewMFAService(store store.Store) *MFAService {
-	return &MFAService{
+	svc := &MFAService{
 		store:            store,
 		auditSvc:         NewAuditService(store),
 		recoveryAttempts: make(map[string]*recoveryAttempt),
 		totpUsage:        make(map[string]*totpUsageRecord),
+		stopChan:         make(chan struct{}),
 	}
+	go svc.runCleanup()
+	return svc
 }
 
 func NewMFAServiceWithAudit(store store.Store, auditSvc *AuditService) *MFAService {
-	return &MFAService{
+	svc := &MFAService{
 		store:            store,
 		auditSvc:         auditSvc,
 		recoveryAttempts: make(map[string]*recoveryAttempt),
 		totpUsage:        make(map[string]*totpUsageRecord),
+		stopChan:         make(chan struct{}),
 	}
+	go svc.runCleanup()
+	return svc
+}
+
+// runCleanup 定期清理过期的TOTP使用记录和恢复码尝试记录
+func (s *MFAService) runCleanup() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stopChan:
+			return
+		case <-ticker.C:
+			s.cleanupTOTPUsage()
+			s.cleanupRecoveryAttempts()
+		}
+	}
+}
+
+// Close 停止后台清理goroutine
+func (s *MFAService) Close() {
+	close(s.stopChan)
 }
 
 // SetHMACKey 设置HMAC密钥（用于恢复码哈希）
@@ -203,6 +230,19 @@ func (s *MFAService) cleanupTOTPUsage() {
 		// 清理超过90秒的记录
 		if now.Sub(record.usedAt) > 90*time.Second {
 			delete(s.totpUsage, userID)
+		}
+	}
+}
+
+// cleanupRecoveryAttempts 清理过期的恢复码验证尝试记录
+func (s *MFAService) cleanupRecoveryAttempts() {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+
+	now := time.Now()
+	for userID, attempt := range s.recoveryAttempts {
+		if now.Sub(attempt.lastFail) > 30*time.Minute {
+			delete(s.recoveryAttempts, userID)
 		}
 	}
 }

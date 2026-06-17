@@ -176,7 +176,7 @@ func startServer(cfg *config.Config, handler http.Handler, rateLimiters []middle
 		return quit
 	}():
 		slog.Info("收到关闭信号，正在优雅关闭服务器...", "signal", sig)
-		gracefulShutdown(rateLimiters, server, svc.Audit, svc.Social, cfg.ShutdownTimeout)
+		gracefulShutdown(rateLimiters, server, svc.Audit, svc.Social, svc.MFA, cfg.ShutdownTimeout)
 	}
 }
 
@@ -714,10 +714,16 @@ func startSetupWizard(loadErr error) {
 }
 
 // gracefulShutdown 优雅关闭服务器
-func gracefulShutdown(rateLimiters []middleware.RateLimitMiddleware, server *http.Server, auditSvc *service.AuditService, socialSvc *service.SocialLoginService, timeout time.Duration) {
+func gracefulShutdown(rateLimiters []middleware.RateLimitMiddleware, server *http.Server, auditSvc *service.AuditService, socialSvc *service.SocialLoginService, mfaSvc *service.MFAService, timeout time.Duration) {
 	// 停止所有限流器
 	for _, rl := range rateLimiters {
 		rl.Stop()
+	}
+
+	// 关闭MFA服务（停止TOTP清理goroutine）
+	if mfaSvc != nil {
+		mfaSvc.Close()
+		slog.Info("MFA服务已关闭")
 	}
 
 	// 关闭审计服务（确保所有日志写入完成）
