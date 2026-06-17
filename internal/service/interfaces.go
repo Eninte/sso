@@ -22,6 +22,9 @@ type AuthServiceInterface interface {
 	// Login 用户登录
 	Login(ctx context.Context, req *model.LoginRequest) (*model.LoginResponse, error)
 
+	// LoginWithAudit 带审计上下文的登录（支持IP限流）
+	LoginWithAudit(ctx context.Context, req *model.LoginRequest, auditCtx *AuditContext) (*model.LoginResponse, error)
+
 	// RefreshToken 刷新Token
 	RefreshToken(ctx context.Context, refreshToken string) (*model.LoginResponse, error)
 

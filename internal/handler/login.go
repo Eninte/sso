@@ -4,6 +4,7 @@ package handler
 
 import (
 	"log/slog"
+	"net"
 	"net/http"
 
 	"github.com/your-org/sso/internal/model"
@@ -41,14 +42,29 @@ func (h *LoginHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. 调用登录服务
-	resp, err := h.authSvc.Login(r.Context(), &req)
+	// 2. 构建审计上下文（含客户端IP，用于IP维度登录限流）
+	auditCtx := &service.AuditContext{
+		IPAddress: extractClientIP(r),
+		UserAgent: r.UserAgent(),
+	}
+
+	// 3. 调用登录服务（带IP限流）
+	resp, err := h.authSvc.LoginWithAudit(r.Context(), &req, auditCtx)
 	if err != nil {
 		// 统一处理所有错误
 		writeOAuthError(w, r, err)
 		return
 	}
 
-	// 3. 返回Token
+	// 4. 返回Token
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// extractClientIP 从请求中提取客户端IP
+func extractClientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }

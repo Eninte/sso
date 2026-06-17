@@ -70,6 +70,13 @@ func WithMetrics(metricsSvc *metrics.Service) AuthServiceOption {
 	}
 }
 
+// WithLoginRateLimit 设置登录频率限制器
+func WithLoginRateLimit(limiter *LoginRateLimiter) AuthServiceOption {
+	return func(s *AuthService) {
+		s.loginRateLimit = limiter
+	}
+}
+
 // AuthService 认证服务
 // 处理用户认证相关的业务逻辑
 type AuthService struct {
@@ -83,6 +90,7 @@ type AuthService struct {
 	metricsSvc      *metrics.Service        // 指标服务（可选）
 	auditSvc        *AuditService           // 审计服务
 	cache           cache.Cache             // 缓存服务（可选）
+	loginRateLimit  *LoginRateLimiter       // 登录频率限制器（可选）
 }
 
 // NewAuthService 创建AuthService实例
@@ -433,6 +441,25 @@ func (s *AuthService) handleLoginSuccess(ctx context.Context, user *model.User, 
 func (s *AuthService) LoginWithAudit(ctx context.Context, req *model.LoginRequest, auditCtx *AuditContext) (*model.LoginResponse, error) {
 	if err := validator.ValidateLoginRequest(req.Email, req.Password); err != nil {
 		return nil, err
+	}
+
+	// IP维度登录频率限制（防止撞库和账户锁定DoS）
+	if s.loginRateLimit != nil && auditCtx != nil && auditCtx.IPAddress != "" {
+		allowed, _, rateLimitErr := s.loginRateLimit.CheckAndRecord(ctx, auditCtx.IPAddress)
+		if rateLimitErr != nil {
+			slog.Error("IP登录限流检查失败", "error", rateLimitErr, "ip", auditCtx.IPAddress)
+		}
+		if !allowed {
+			slog.Warn("IP登录频率超限", "ip", auditCtx.IPAddress)
+			s.incrementMetric("auth_login_rate_limited_total")
+			auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventUserLogin), "", map[string]interface{}{
+				"ip_address": auditCtx.IPAddress,
+				"email":      req.Email,
+				"success":    false,
+				"reason":     "ip_rate_limited",
+			})
+			return nil, apperrors.ErrTooManyRequests
+		}
 	}
 
 	user, err := s.validateUserCredentials(ctx, req.Email, req.Password)

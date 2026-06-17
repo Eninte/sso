@@ -543,6 +543,7 @@ func initServices(cfg *config.Config) (*Services, *sql.DB, error) {
 		service.WithCache(cacheSvc),
 		service.WithMetrics(metricsSvc),
 		service.WithUserService(userSvc),
+		service.WithLoginRateLimit(service.NewLoginRateLimiter(cacheSvc)),
 	)
 	oauthSvc := service.NewOAuthServiceWithCache(store, cacheSvc, tokenSvc)
 	auditSvc := service.NewAuditService(store)
