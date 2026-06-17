@@ -404,12 +404,22 @@ func validateProductionConfig(c *Config) error {
 
 	// 检查JWT Issuer配置
 	if c.JWTIssuer == "sso" {
-		slog.Warn("生产环境使用默认JWT Issuer，建议自定义")
+		if lanMode {
+			slog.Warn("生产环境使用默认JWT Issuer（LAN部署模式）")
+		} else {
+			slog.Error("生产环境不能使用默认JWT Issuer")
+			return fmt.Errorf("生产环境必须设置 JWT_ISSUER，不能使用默认值 'sso'")
+		}
 	}
 
 	// 检查SMTP配置
 	if c.SMTPHost == "localhost" {
-		slog.Warn("生产环境使用localhost作为SMTP服务器")
+		if lanMode {
+			slog.Warn("生产环境使用localhost作为SMTP服务器（LAN部署模式）")
+		} else {
+			slog.Error("生产环境不能使用localhost作为SMTP服务器")
+			return fmt.Errorf("生产环境必须设置 SMTP_HOST，不能为 localhost")
+		}
 	}
 
 	// 检查Metrics认证配置

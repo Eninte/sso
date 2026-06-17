@@ -45,7 +45,7 @@ func SecurityHeaders(next http.Handler) http.Handler {
 
 		// 引用策略
 		// 控制Referer头的发送
-		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Referrer-Policy", "no-referrer")
 
 		// 权限策略
 		// 禁用不必要的浏览器功能

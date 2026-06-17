@@ -43,6 +43,7 @@ const (
 	ErrCodePasswordNoLowercase ErrorCode = "PASSWORD_NO_LOWERCASE" // 密码缺少小写
 	ErrCodePasswordNoDigit     ErrorCode = "PASSWORD_NO_DIGIT"     // 密码缺少数字
 	ErrCodePasswordNoSpecial   ErrorCode = "PASSWORD_NO_SPECIAL"   // 密码缺少特殊字符
+	ErrCodePasswordTooWeak     ErrorCode = "PASSWORD_TOO_WEAK"     // 密码太常见
 
 	// 邮箱验证相关错误
 	ErrCodeEmailAlreadyVerified    ErrorCode = "EMAIL_ALREADY_VERIFIED"    // 邮箱已验证
@@ -197,6 +198,7 @@ var (
 	ErrPasswordNoLowercase = New(ErrCodePasswordNoLowercase, "密码必须包含至少一个小写字母", 400)
 	ErrPasswordNoDigit     = New(ErrCodePasswordNoDigit, "密码必须包含至少一个数字", 400)
 	ErrPasswordNoSpecial   = New(ErrCodePasswordNoSpecial, "密码必须包含至少一个特殊字符", 400)
+	ErrPasswordTooWeak     = New(ErrCodePasswordTooWeak, "密码太常见，请使用更复杂的密码", 400)
 
 	// 邮箱验证错误
 	ErrEmailAlreadyVerified    = New(ErrCodeEmailAlreadyVerified, "邮箱已验证", 409)

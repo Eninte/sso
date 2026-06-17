@@ -72,7 +72,7 @@ func TestAuthService_Register(t *testing.T) {
 		assert.NotEmpty(t, user.ID)
 		assert.Equal(t, "test@example.com", user.Email)
 		assert.NotEmpty(t, user.PasswordHash)
-		assert.Equal(t, model.UserStatusActive, user.Status)
+		assert.Equal(t, model.UserStatusPending, user.Status)
 		assert.False(t, user.EmailVerified)
 	})
 

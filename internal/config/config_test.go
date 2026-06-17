@@ -35,12 +35,16 @@ func setupTestEnv(t *testing.T) func() {
 		"BCRYPT_COST":          os.Getenv("BCRYPT_COST"),
 		"LAN_DEPLOYMENT":       os.Getenv("LAN_DEPLOYMENT"),
 		"SKIP_ENV_FILE":        os.Getenv("SKIP_ENV_FILE"),
+		"JWT_ISSUER":           os.Getenv("JWT_ISSUER"),
+		"SMTP_HOST":            os.Getenv("SMTP_HOST"),
 	}
 
 	// 设置测试环境变量
 	os.Setenv("DB_PASSWORD", "test_password")
 	os.Setenv("JWT_PRIVATE_KEY_PATH", "/keys/private.pem")
 	os.Setenv("JWT_PUBLIC_KEY_PATH", "/keys/public.pem")
+	os.Setenv("JWT_ISSUER", "test-issuer")
+	os.Setenv("SMTP_HOST", "smtp.example.com")
 	// 禁止读取磁盘 .env 文件，保证测试环境完全自包含
 	os.Setenv("SKIP_ENV_FILE", "1")
 	// 默认非 LAN 部署模式，确保生产环境安全校验不被旁路；
@@ -163,6 +167,8 @@ func TestValidate_BcryptCostRange(t *testing.T) {
 			// 生产环境需要设置DB_SSL_MODE
 			if tt.env == "production" {
 				os.Setenv("DB_SSL_MODE", "require")
+				os.Setenv("JWT_ISSUER", "myapp")
+				os.Setenv("SMTP_HOST", "smtp.example.com")
 			}
 
 			cfg, err := config.Load()
@@ -204,6 +210,8 @@ func TestValidate_ProductionDefaults(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			os.Setenv("CORS_ALLOWED_ORIGINS", tt.corsOrigins)
+			os.Setenv("JWT_ISSUER", "myapp")
+			os.Setenv("SMTP_HOST", "smtp.example.com")
 
 			cfg, err := config.Load()
 			if tt.wantErr {

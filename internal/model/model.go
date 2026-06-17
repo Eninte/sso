@@ -30,6 +30,7 @@ const (
 	UserStatusActive   = "active"
 	UserStatusLocked   = "locked"
 	UserStatusDisabled = "disabled"
+	UserStatusPending  = "pending" // 注册后待邮箱验证
 )
 
 // 用户角色常量

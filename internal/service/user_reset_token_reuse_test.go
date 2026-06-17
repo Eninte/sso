@@ -80,7 +80,7 @@ func TestResetToken_ConcurrentUse(t *testing.T) {
 		mockStore.StoreResetToken(ctx, user.ID, token, time.Now().Add(1*time.Hour))
 
 		// 第一个请求成功
-		err1 := userSvc.ResetPassword(ctx, user.ID, token, "Password1!")
+		err1 := userSvc.ResetPassword(ctx, user.ID, token, "Xk9#mP2$vL7!")
 		assert.NoError(t, err1)
 
 		// 重新存储令牌并模拟第二个并发请求（令牌已被标记为使用）

@@ -46,7 +46,7 @@ func TestSecurityHeaders(t *testing.T) {
 	assert.Contains(t, rec.Header().Get("Strict-Transport-Security"), "max-age=31536000")
 	assert.Contains(t, rec.Header().Get("Content-Security-Policy"), "default-src 'self'")
 	assert.Contains(t, rec.Header().Get("Content-Security-Policy"), "script-src 'self' 'nonce-")
-	assert.Equal(t, "strict-origin-when-cross-origin", rec.Header().Get("Referrer-Policy"))
+	assert.Equal(t, "no-referrer", rec.Header().Get("Referrer-Policy"))
 	assert.Contains(t, rec.Header().Get("Permissions-Policy"), "geolocation=()")
 }
 

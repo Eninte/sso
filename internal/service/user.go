@@ -166,6 +166,7 @@ func (s *UserService) VerifyEmail(ctx context.Context, userID, token string) err
 	}
 
 	user.EmailVerified = true
+	user.Status = model.UserStatusActive
 	user.UpdatedAt = time.Now()
 
 	if err := s.store.Update(ctx, user); err != nil {

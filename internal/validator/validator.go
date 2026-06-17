@@ -24,6 +24,7 @@ var (
 	ErrPasswordNoLowercase = apperrors.ErrPasswordNoLowercase
 	ErrPasswordNoDigit     = apperrors.ErrPasswordNoDigit
 	ErrPasswordNoSpecial   = apperrors.ErrPasswordNoSpecial
+	ErrPasswordTooWeak     = apperrors.ErrPasswordTooWeak
 )
 
 // ============================================================================
@@ -44,6 +45,30 @@ func ValidateEmail(email string) error {
 	}
 
 	return nil
+}
+
+// weakPasswords 常见弱密码黑名单（小写匹配）
+var weakPasswords = map[string]bool{
+	"password1!":   true,
+	"qwerty123!":   true,
+	"abc123456!":   true,
+	"admin123!":    true,
+	"letmein123!":  true,
+	"welcome1!":    true,
+	"monkey123!":   true,
+	"dragon123!":   true,
+	"master123!":   true,
+	"login123!":    true,
+	"princess1!":   true,
+	"solo1234!":    true,
+	"passw0rd!":    true,
+	"trustno1!":    true,
+	"hello123!":    true,
+	"charlie1!":    true,
+	"12345678!":    true,
+	"123456789!":   true,
+	"12345678a!":   true,
+	"aaaaaaa1!":    true,
 }
 
 // ValidatePassword 验证密码强度
@@ -85,6 +110,11 @@ func ValidatePassword(password string) error {
 	}
 	if !hasSpecial {
 		return ErrPasswordNoSpecial
+	}
+
+	// 检查弱密码黑名单
+	if weakPasswords[strings.ToLower(password)] {
+		return ErrPasswordTooWeak
 	}
 
 	return nil
