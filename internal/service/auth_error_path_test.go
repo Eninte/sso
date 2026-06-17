@@ -147,9 +147,9 @@ func TestAuthService_Login_ErrorPaths(t *testing.T) {
 			Password: "Password123!",
 		})
 
-		// 验证返回邮箱未验证错误
+		// 验证返回通用凭据错误（不暴露邮箱未验证状态）
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, service.ErrEmailNotVerified)
+		assert.ErrorIs(t, err, service.ErrInvalidCredentials)
 		// 验证不暴露内部错误详情（需求 8.7）
 		assert.NotContains(t, err.Error(), "user_id")
 		assert.NotContains(t, err.Error(), unverifiedUser.ID)
@@ -511,18 +511,15 @@ func TestAuthService_Register_ErrorPaths(t *testing.T) {
 		}
 		storeInst.AddUser(existingUser)
 
-		// 尝试使用相同邮箱注册
-		_, err = authSvc.Register(ctx, &model.RegisterRequest{
+		// 尝试使用相同邮箱注册（应返回nil,nil，不暴露邮箱已存在）
+		user, err := authSvc.Register(ctx, &model.RegisterRequest{
 			Email:    "existing@example.com",
 			Password: "Password123!",
 		})
 
-		// 验证返回邮箱已存在错误
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, store.ErrDuplicateEmail)
-		// 验证不暴露内部用户详情（需求 8.7）
-		assert.NotContains(t, err.Error(), existingUser.ID)
-		assert.NotContains(t, err.Error(), "PasswordHash")
+		// 验证不返回错误（防止用户枚举），也不返回用户对象
+		assert.NoError(t, err)
+		assert.Nil(t, user)
 	})
 
 	// ==== 测试7: 密码验证失败 - 太短 ====

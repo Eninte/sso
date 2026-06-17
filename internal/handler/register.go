@@ -35,7 +35,7 @@ func (h *RegisterHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. 调用注册服务
-	user, err := h.authSvc.Register(r.Context(), &req)
+	_, err := h.authSvc.Register(r.Context(), &req)
 	if err != nil {
 		// 使用统一的错误处理函数
 		if !writeValidationError(w, r, err) {
@@ -45,9 +45,7 @@ func (h *RegisterHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. 返回成功响应
-	writeSuccess(w, http.StatusCreated, "注册成功", map[string]string{
-		"user_id": user.ID,
-		"email":   user.Email,
-	})
+	// 3. 返回成功响应（不暴露user_id，不区分邮箱是否已存在）
+	// user为nil表示邮箱已注册，返回相同响应防止用户枚举
+	writeSuccess(w, http.StatusCreated, "注册成功，如果邮箱未验证将收到验证邮件", nil)
 }

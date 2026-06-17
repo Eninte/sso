@@ -18,8 +18,6 @@ import (
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/service"
 	"github.com/your-org/sso/internal/store/mock"
-
-	store2 "github.com/your-org/sso/internal/store"
 )
 
 // ============================================================================
@@ -89,11 +87,11 @@ func TestAuthService_Register(t *testing.T) {
 		_, err := authSvc.Register(ctx, req)
 		require.NoError(t, err)
 
-		// 尝试用相同邮箱注册
-		_, err = authSvc.Register(ctx, req)
+		// 尝试用相同邮箱注册（应返回nil,nil，不暴露邮箱已存在）
+		user, err := authSvc.Register(ctx, req)
 
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, store2.ErrDuplicateEmail)
+		assert.NoError(t, err)
+		assert.Nil(t, user)
 	})
 
 	t.Run("邮箱格式无效", func(t *testing.T) {

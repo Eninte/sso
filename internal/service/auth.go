@@ -173,7 +173,9 @@ func (s *AuthService) Register(ctx context.Context, req *model.RegisterRequest) 
 		return nil, serviceutil.WrapServiceError("检查邮箱", err)
 	}
 	if existingUser != nil {
-		return nil, apperrors.ErrEmailExists
+		// 不暴露邮箱已存在：返回nil错误和nil用户
+		// handler层对nil用户返回通用成功消息
+		return nil, nil
 	}
 
 	// 3. 哈希密码
@@ -268,8 +270,13 @@ func (s *AuthService) validateUserCredentials(ctx context.Context, email, passwo
 
 	// 检查邮箱是否已验证
 	if !user.EmailVerified {
-		slog.Warn("用户尝试使用未验证邮箱登录", "user_id", user.ID, "email", user.Email)
-		return nil, ErrEmailNotVerified
+		slog.Debug("用户尝试使用未验证邮箱登录", "user_id", user.ID)
+		// 不暴露邮箱未验证状态，返回通用凭据错误
+		// 同时触发发送验证邮件，帮助用户完成验证
+		if s.userSvc != nil {
+			_ = s.userSvc.SendVerificationEmail(ctx, user.Email)
+		}
+		return user, ErrInvalidCredentials
 	}
 
 	// 检查账户状态

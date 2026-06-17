@@ -254,10 +254,7 @@ func TestRegisterHandler_Handle(t *testing.T) {
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
 
-		assert.Equal(t, "注册成功", resp["message"])
-		data := resp["data"].(map[string]interface{})
-		assert.NotEmpty(t, data["user_id"])
-		assert.Equal(t, "newuser@example.com", data["email"])
+		assert.NotEmpty(t, resp["message"])
 	})
 
 	t.Run("邮箱已存在", func(t *testing.T) {
@@ -275,14 +272,14 @@ func TestRegisterHandler_Handle(t *testing.T) {
 		registerHandler.Handle(w, req)
 		require.Equal(t, http.StatusCreated, w.Code)
 
-		// 尝试用相同邮箱注册
+		// 尝试用相同邮箱注册（应返回与成功相同的响应，防止用户枚举）
 		req = httptest.NewRequest("POST", "/api/v1/register", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
 		w = httptest.NewRecorder()
 
 		registerHandler.Handle(w, req)
 
-		assert.Equal(t, http.StatusConflict, w.Code)
+		assert.Equal(t, http.StatusCreated, w.Code)
 	})
 
 	t.Run("无效的JSON格式", func(t *testing.T) {
@@ -788,7 +785,8 @@ func TestRegisterHandler_BoundaryConditions(t *testing.T) {
 
 		registerHandler.Handle(w, req)
 
-		assert.Equal(t, http.StatusConflict, w.Code)
+		// 应返回与成功相同的响应，防止用户枚举
+		assert.Equal(t, http.StatusCreated, w.Code)
 	})
 
 	t.Run("无效邮箱格式", func(t *testing.T) {
