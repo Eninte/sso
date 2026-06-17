@@ -226,7 +226,7 @@ func (s *SocialLoginService) GetAuthorizationURL(provider, redirectURI, state st
 	return p.AuthURL + "?" + params.Encode(), nil
 }
 
-func (s *SocialLoginService) HandleCallback(ctx context.Context, provider, code, state, redirectURI string) (*model.LoginResponse, error) {
+func (s *SocialLoginService) HandleCallback(ctx context.Context, provider, code, state string) (*model.LoginResponse, error) {
 	p, ok := s.providers[provider]
 	if !ok {
 		return nil, ErrProviderNotSupported
@@ -256,7 +256,7 @@ func (s *SocialLoginService) HandleCallback(ctx context.Context, provider, code,
 
 	// 使用state缓存中存储的redirectURI（由GetAuthorizationURL设置）
 	// 不接受客户端传入的redirectURI，防止开放重定向攻击
-	redirectURI = info.redirectURI
+	redirectURI := info.redirectURI
 
 	accessToken, err := s.exchangeCode(p, code, redirectURI)
 	if err != nil {

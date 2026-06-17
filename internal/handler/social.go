@@ -85,11 +85,8 @@ func (h *SocialLoginHandler) HandleCallback(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// 4. 获取回调URL
-	redirectURI := r.URL.Query().Get("redirect_uri")
-
-	// 5. 处理回调（验证state）
-	token, err := h.socialSvc.HandleCallback(r.Context(), provider, code, state, redirectURI)
+	// 4. 处理回调（验证state，redirectURI从state缓存中获取防止开放重定向）
+	token, err := h.socialSvc.HandleCallback(r.Context(), provider, code, state)
 	if err != nil {
 		// 根据错误类型返回相应的错误码
 		if apperrors.Is(err, apperrors.ErrOAuthStateInvalid) {

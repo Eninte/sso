@@ -237,7 +237,9 @@ func initHandlers(cfg *config.Config, svc *Services) (*mux.Router, []middleware.
 		rateLimiter = middleware.NewRateLimiter(cfg.RateLimitRequests, cfg.RateLimitWindow)
 		slog.Info("使用本地限流器（内存）")
 	}
-	if rl, ok := rateLimiter.(interface{ WithMetrics(func()) *middleware.RateLimiter }); ok {
+	if rl, ok := rateLimiter.(interface {
+		WithMetrics(metricFunc func()) *middleware.RateLimiter
+	}); ok {
 		rl.WithMetrics(func() {
 			svc.Metrics.Increment("security_rate_limit_total")
 		})
@@ -257,13 +259,13 @@ func initHandlers(cfg *config.Config, svc *Services) (*mux.Router, []middleware.
 		AllowedHeaders: []string{"Content-Type", "Authorization", "X-Requested-With"},
 		MaxAge:         86400, // 24小时
 	}
-	
+
 	// 验证CORS配置（生产环境禁止通配符）
 	if err := corsConfig.Validate(cfg.Env); err != nil {
 		slog.Error("CORS配置验证失败", "error", err)
 		os.Exit(1)
 	}
-	
+
 	router.Use(middleware.CORS(corsConfig))
 
 	// 添加语言中间件，支持多语言错误消息
