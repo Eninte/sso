@@ -3,6 +3,7 @@
 package metrics
 
 import (
+	"math"
 	"net/http"
 	"strconv"
 	"sync"
@@ -22,18 +23,24 @@ const (
 	Histogram MetricType = "histogram" // 直方图
 )
 
+var defaultHistogramBuckets = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, math.Inf(1)}
+
 // ============================================================================
 // 指标结构
 // ============================================================================
 
 // Metric 指标
 type Metric struct {
-	Name      string            // 指标名称
-	Help      string            // 指标说明
-	Type      MetricType        // 指标类型
-	Value     float64           // 当前值
-	Labels    map[string]string // 标签
-	Timestamp time.Time         // 时间戳
+	Name         string            // 指标名称
+	Help         string            // 指标说明
+	Type         MetricType        // 指标类型
+	Value        float64           // 当前值
+	Labels       map[string]string // 标签
+	Timestamp    time.Time         // 时间戳
+	Buckets      []float64         // 直方图桶上限
+	BucketCounts []uint64          // 直方图桶计数
+	Sum          float64           // 直方图观测值总和
+	Count        uint64            // 直方图观测次数
 }
 
 // ============================================================================
@@ -99,7 +106,7 @@ func (s *Service) Register(name, help string, metricType MetricType) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.metrics[name] = &Metric{
+	metric := &Metric{
 		Name:      name,
 		Help:      help,
 		Type:      metricType,
@@ -107,6 +114,12 @@ func (s *Service) Register(name, help string, metricType MetricType) {
 		Labels:    make(map[string]string),
 		Timestamp: time.Now(),
 	}
+	if metricType == Histogram {
+		metric.Buckets = append([]float64(nil), defaultHistogramBuckets...)
+		metric.BucketCounts = make([]uint64, len(metric.Buckets))
+	}
+
+	s.metrics[name] = metric
 }
 
 // ============================================================================
@@ -140,6 +153,23 @@ func (s *Service) Set(name string, value float64) {
 	}
 }
 
+// Observe 记录直方图观测值
+func (s *Service) Observe(name string, value float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if m, ok := s.metrics[name]; ok && m.Type == Histogram {
+		for i, bucket := range m.Buckets {
+			if value <= bucket {
+				m.BucketCounts[i]++
+			}
+		}
+		m.Sum += value
+		m.Count++
+		m.Timestamp = time.Now()
+	}
+}
+
 // Get 获取指标值
 func (s *Service) Get(name string) float64 {
 	s.mu.RLock()
@@ -168,6 +198,15 @@ func (s *Service) ToPrometheusFormat() string {
 		// 输出TYPE注释
 		output += "# TYPE " + m.Name + " " + string(m.Type) + "\n"
 
+		if m.Type == Histogram {
+			for i, bucket := range m.Buckets {
+				output += m.Name + "_bucket{le=\"" + formatBucket(bucket) + "\"} " + strconv.FormatUint(m.BucketCounts[i], 10) + "\n"
+			}
+			output += m.Name + "_sum " + formatFloat(m.Sum) + "\n"
+			output += m.Name + "_count " + strconv.FormatUint(m.Count, 10) + "\n"
+			continue
+		}
+
 		// 输出指标值
 		output += m.Name + " " + formatFloat(m.Value) + "\n"
 	}
@@ -178,6 +217,14 @@ func (s *Service) ToPrometheusFormat() string {
 // formatFloat 格式化浮点数
 func formatFloat(f float64) string {
 	return strconv.FormatFloat(f, 'f', -1, 64)
+}
+
+// formatBucket 格式化直方图桶边界
+func formatBucket(f float64) string {
+	if math.IsInf(f, 1) {
+		return "+Inf"
+	}
+	return formatFloat(f)
 }
 
 // ============================================================================
@@ -202,7 +249,7 @@ func (s *Service) HTTPMiddleware(next http.Handler) http.Handler {
 		// 记录指标
 		s.Increment("http_requests_total")
 		duration := time.Since(start).Seconds()
-		s.Set("http_request_duration_seconds", duration)
+		s.Observe("http_request_duration_seconds", duration)
 	})
 }
 

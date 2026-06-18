@@ -13,6 +13,7 @@ import (
 	"github.com/your-org/sso/internal/cache"
 	"github.com/your-org/sso/internal/crypto"
 	apperrors "github.com/your-org/sso/internal/errors"
+	"github.com/your-org/sso/internal/logging"
 	"github.com/your-org/sso/internal/metrics"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/store"
@@ -263,6 +264,7 @@ type AuditContext struct {
 //
 // 重构原因: 从LoginWithAudit中提取验证逻辑，降低主函数复杂度（21→<10）
 func (s *AuthService) validateUserCredentials(ctx context.Context, email, password string) (*model.User, error) {
+	logger := logging.WithContext(ctx)
 	// 查询用户
 	user, err := s.store.GetByEmail(ctx, email)
 	if err != nil {
@@ -271,7 +273,7 @@ func (s *AuthService) validateUserCredentials(ctx context.Context, email, passwo
 
 	// 检查邮箱是否已验证
 	if !user.EmailVerified {
-		slog.Debug("用户尝试使用未验证邮箱登录", "user_id", user.ID)
+		logger.Debug("用户尝试使用未验证邮箱登录", "user_id", user.ID)
 		// 不暴露邮箱未验证状态，返回通用凭据错误
 		// 同时触发发送验证邮件，帮助用户完成验证
 		if s.userSvc != nil {
@@ -294,8 +296,9 @@ func (s *AuthService) validateUserCredentials(ctx context.Context, email, passwo
 		// 使用原子操作解锁过期账户，避免竞态条件
 		if unlockErr := s.store.UnlockExpiredAccount(ctx, user.ID); unlockErr != nil {
 			if !apperrors.Is(unlockErr, store.ErrNotFound) {
-				slog.Warn("解锁过期账户失败", "error", unlockErr, "user_id", user.ID)
+				logger.Warn("解锁过期账户失败", "error", unlockErr, "user_id", user.ID)
 			}
+
 			// 即使解锁失败也继续尝试登录（可能是并发解锁）
 		}
 	}
@@ -331,11 +334,12 @@ func (s *AuthService) validateUserCredentials(ctx context.Context, email, passwo
 // 优化: 接收user对象而非email，消除冗余的GetByEmail查询
 // 安全修复: 数据库错误时返回错误，防止攻击者通过触发DB错误绕过账户锁定
 func (s *AuthService) handleLoginFailure(ctx context.Context, user *model.User, auditCtx *AuditContext) error {
+	logger := logging.WithContext(ctx)
 	// 使用原子操作递增登录尝试次数，避免竞态条件
 	attempts, locked, _, incErr := s.store.IncrementLoginAttempts(ctx, user.ID, s.maxAttempts, s.lockoutDuration)
 	if incErr != nil {
 		// 安全修复：数据库错误时返回错误，防止绕过账户锁定机制
-		slog.Error("更新登录尝试次数失败", "error", incErr, "user_id", user.ID)
+		logger.Error("更新登录尝试次数失败", "error", incErr, "user_id", user.ID)
 		return serviceutil.WrapServiceError("更新登录尝试次数", incErr)
 	}
 
@@ -349,7 +353,7 @@ func (s *AuthService) handleLoginFailure(ctx context.Context, user *model.User, 
 				"attempts":   attempts,
 			})
 		}
-		slog.Warn("账户因多次登录失败被锁定", "user_id", user.ID, "attempts", attempts)
+		logger.Warn("账户因多次登录失败被锁定", "user_id", user.ID, "attempts", attempts)
 	}
 
 	// 记录登录失败指标
@@ -396,7 +400,7 @@ func (s *AuthService) handleLoginSuccess(ctx context.Context, user *model.User, 
 	go func() {
 		defer wg.Done()
 		if err := s.store.ResetLoginAttempts(ctx, user.ID); err != nil {
-			slog.Warn("重置登录尝试次数失败", "error", err, "user_id", user.ID)
+			logging.WithContext(ctx).Warn("重置登录尝试次数失败", "error", err, "user_id", user.ID)
 		}
 	}()
 
@@ -449,6 +453,7 @@ func (s *AuthService) handleLoginSuccess(ctx context.Context, user *model.User, 
 //   - handleLoginFailure: 处理登录失败
 //   - handleLoginSuccess: 处理登录成功
 func (s *AuthService) LoginWithAudit(ctx context.Context, req *model.LoginRequest, auditCtx *AuditContext) (*model.LoginResponse, error) {
+	logger := logging.WithContext(ctx)
 	if err := validator.ValidateLoginRequest(req.Email, req.Password); err != nil {
 		return nil, err
 	}
@@ -457,10 +462,10 @@ func (s *AuthService) LoginWithAudit(ctx context.Context, req *model.LoginReques
 	if s.loginRateLimit != nil && auditCtx != nil && auditCtx.IPAddress != "" {
 		allowed, _, rateLimitErr := s.loginRateLimit.CheckAndRecord(ctx, auditCtx.IPAddress)
 		if rateLimitErr != nil {
-			slog.Error("IP登录限流检查失败", "error", rateLimitErr, "ip", auditCtx.IPAddress)
+			logger.Error("IP登录限流检查失败", "error", rateLimitErr, "ip", auditCtx.IPAddress)
 		}
 		if !allowed {
-			slog.Warn("IP登录频率超限", "ip", auditCtx.IPAddress)
+			logger.Warn("IP登录频率超限", "ip", auditCtx.IPAddress)
 			s.incrementMetric("auth_login_rate_limited_total")
 			auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventUserLogin), "", map[string]interface{}{
 				"ip_address": auditCtx.IPAddress,
@@ -479,7 +484,7 @@ func (s *AuthService) LoginWithAudit(ctx context.Context, req *model.LoginReques
 			// validateUserCredentials在密码错误时返回user对象，避免重复查询DB
 			// 安全修复：检查handleLoginFailure的返回值，防止绕过账户锁定
 			if failErr := s.handleLoginFailure(ctx, user, auditCtx); failErr != nil {
-				slog.Error("处理登录失败时出错", "error", failErr, "user_id", user.ID)
+				logger.Error("处理登录失败时出错", "error", failErr, "user_id", user.ID)
 				// 安全修复：数据库错误时返回服务错误，防止绕过账户锁定机制
 				// 不返回ErrInvalidCredentials，因为我们无法确定是否成功记录失败次数
 				return nil, serviceutil.WrapServiceError("记录登录失败", failErr)
@@ -504,6 +509,7 @@ func (s *AuthService) Login(ctx context.Context, req *model.LoginRequest) (*mode
 // 使用retryutil.ExponentialBackoffRetry实现重试逻辑
 // 保持缓存清除逻辑不变，确保Token内容在日志中被掩码
 func (s *AuthService) revokeTokenWithRetry(ctx context.Context, accessToken string) error {
+	logger := logging.WithContext(ctx)
 	config := retryutil.DefaultRetryConfig()
 
 	return retryutil.ExponentialBackoffRetry(ctx, func(ctx context.Context) error {
@@ -515,7 +521,7 @@ func (s *AuthService) revokeTokenWithRetry(ctx context.Context, accessToken stri
 		if s.cache != nil {
 			cacheKey := cache.TokenKey(accessToken)
 			if err := s.cache.Delete(ctx, cacheKey); err != nil {
-				slog.Warn("清除Token缓存失败", "error", err, "token", maskToken(accessToken))
+				logger.Warn("清除Token缓存失败", "error", err, "token", maskToken(accessToken))
 			}
 		}
 
@@ -525,29 +531,30 @@ func (s *AuthService) revokeTokenWithRetry(ctx context.Context, accessToken stri
 
 // RefreshToken 刷新Token
 func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken string, auditCtx *AuditContext) (*model.LoginResponse, error) {
-	slog.Debug("RefreshToken: 开始刷新Token", "refresh_token_length", len(refreshToken))
+	logger := logging.WithContext(ctx)
+	logger.Debug("RefreshToken: 开始刷新Token", "refresh_token_length", len(refreshToken))
 	tokenRecord, err := s.store.GetTokenByRefreshToken(ctx, refreshToken)
 	if err != nil {
-		slog.Error("RefreshToken: 查询Token失败", "error", err, "refresh_token_length", len(refreshToken))
+		logger.Error("RefreshToken: 查询Token失败", "error", err, "refresh_token_length", len(refreshToken))
 		// 安全设计：不暴露token是否存在，所有错误都返回ErrInvalidToken
 		return nil, ErrInvalidToken
 	}
-	slog.Debug("RefreshToken: 查询到Token", "token_id", tokenRecord.ID, "user_id", tokenRecord.UserID)
+	logger.Debug("RefreshToken: 查询到Token", "token_id", tokenRecord.ID, "user_id", tokenRecord.UserID)
 
 	if tokenRecord.RevokedAt != nil {
-		slog.Warn("RefreshToken: Token已撤销", "token_id", tokenRecord.ID, "revoked_at", tokenRecord.RevokedAt)
+		logger.Warn("RefreshToken: Token已撤销", "token_id", tokenRecord.ID, "revoked_at", tokenRecord.RevokedAt)
 		return nil, ErrInvalidToken
 	}
 
 	user, err := s.store.GetByID(ctx, tokenRecord.UserID)
 	if err != nil {
-		slog.Error("RefreshToken: 查询用户失败", "error", err, "user_id", tokenRecord.UserID)
+		logger.Error("RefreshToken: 查询用户失败", "error", err, "user_id", tokenRecord.UserID)
 		return nil, serviceutil.WrapServiceError("查询用户", err)
 	}
-	slog.Debug("RefreshToken: 查询到用户", "user_id", user.ID, "email", user.Email)
+	logger.Debug("RefreshToken: 查询到用户", "user_id", user.ID, "email", user.Email)
 
 	if revokeErr := s.revokeTokenWithRetry(ctx, tokenRecord.AccessToken); revokeErr != nil {
-		slog.Error("撤销旧Token失败，已达到最大重试次数",
+		logger.Error("撤销旧Token失败，已达到最大重试次数",
 			"error", revokeErr,
 			"user_id", tokenRecord.UserID,
 			"token_id", tokenRecord.ID,
@@ -555,7 +562,7 @@ func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken st
 		// 撤销失败时返回错误，避免生成冲突的access_token
 		return nil, serviceutil.WrapServiceError("撤销旧Token", revokeErr)
 	}
-	slog.Debug("RefreshToken: 旧Token已撤销", "token_id", tokenRecord.ID)
+	logger.Debug("RefreshToken: 旧Token已撤销", "token_id", tokenRecord.ID)
 
 	s.incrementMetric("auth_token_refresh_total")
 
@@ -579,6 +586,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (*m
 
 // LogoutWithAudit 用户登出（带审计日志）
 func (s *AuthService) LogoutWithAudit(ctx context.Context, accessToken string, auditCtx *AuditContext) error {
+	logger := logging.WithContext(ctx)
 	claims, err := s.jwtSvc.ValidateAccessToken(accessToken)
 	if err == nil && auditCtx != nil {
 		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventUserLogout), claims.Subject, map[string]interface{}{
@@ -586,12 +594,13 @@ func (s *AuthService) LogoutWithAudit(ctx context.Context, accessToken string, a
 		})
 	}
 	if err := s.revokeTokenWithRetry(ctx, accessToken); err != nil {
-		slog.Error("登出时撤销Token失败",
+		logger.Error("登出时撤销Token失败",
 			"error", err,
 			"token_prefix", maskToken(accessToken),
 		)
 		return serviceutil.WrapServiceError("登出", err)
 	}
+
 	s.incrementMetric("auth_token_revoke_total")
 	return nil
 }
@@ -603,8 +612,9 @@ func (s *AuthService) Logout(ctx context.Context, accessToken string) error {
 
 // LogoutAllWithAudit 登出所有设备（带审计日志）
 func (s *AuthService) LogoutAllWithAudit(ctx context.Context, userID string, auditCtx *AuditContext) error {
+	logger := logging.WithContext(ctx)
 	if err := s.store.RevokeAllUserTokens(ctx, userID); err != nil {
-		slog.Error("撤销所有Token失败",
+		logger.Error("撤销所有Token失败",
 			"error", err,
 			"user_id", userID,
 		)
@@ -614,7 +624,7 @@ func (s *AuthService) LogoutAllWithAudit(ctx context.Context, userID string, aud
 	// 清除该用户相关的缓存（失败不影响主流程）
 	if s.cache != nil {
 		if err := s.cache.DeletePattern(ctx, cache.TokenCachePrefix+"*"); err != nil {
-			slog.Warn("清除用户Token缓存失败", "error", err, "user_id", userID)
+			logger.Warn("清除用户Token缓存失败", "error", err, "user_id", userID)
 		}
 	}
 
@@ -677,7 +687,7 @@ func (s *AuthService) ValidateToken(ctx context.Context, accessToken string) (*c
 	if s.cache != nil {
 		cacheKey := cache.TokenKey(accessToken)
 		if err := s.cache.Set(ctx, cacheKey, tokenRecord, cache.TokenTTL); err != nil {
-			slog.Warn("缓存Token记录失败", "error", err)
+			logging.WithContext(ctx).Warn("缓存Token记录失败", "error", err)
 		}
 	}
 
@@ -696,10 +706,11 @@ func (s *AuthService) generateTokenPair(
 	scopes []string,
 	clientID *string,
 ) (*model.LoginResponse, error) {
-	slog.Debug("generateTokenPair开始", "userID", userID, "email", email)
+	logger := logging.WithContext(ctx)
+	logger.Debug("generateTokenPair开始", "userID", userID, "email", email)
 	resp, err := s.tokenSvc.GenerateTokenPair(ctx, userID, email, role, scopes, clientID)
 	if err != nil {
-		slog.Error("generateTokenPair失败", "error", err, "userID", userID)
+		logger.Error("generateTokenPair失败", "error", err, "userID", userID)
 	}
 	return resp, err
 }

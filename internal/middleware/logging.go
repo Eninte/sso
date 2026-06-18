@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+const slowRequestThreshold = 500 * time.Millisecond
+
 // ============================================================================
 // 请求日志记录器
 // ============================================================================
@@ -46,7 +48,7 @@ func Logger(next http.Handler) http.Handler {
 		// 记录请求日志
 		// slog 会自动转义用户输入，防止日志注入
 		duration := time.Since(start)
-		slog.Info("HTTP请求", // #nosec G706 -- slog会自动转义用户输入，防止日志注入
+		attrs := []any{
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", wrapped.statusCode,
@@ -54,6 +56,11 @@ func Logger(next http.Handler) http.Handler {
 			"remote_addr", r.RemoteAddr,
 			"user_agent", r.UserAgent(),
 			"request_id", GetRequestIDFromContext(r.Context()),
-		)
+		}
+		if duration > slowRequestThreshold {
+			slog.Warn("HTTP慢请求", attrs...) // #nosec G706 -- slog会自动转义用户输入，防止日志注入
+			return
+		}
+		slog.Info("HTTP请求", attrs...) // #nosec G706 -- slog会自动转义用户输入，防止日志注入
 	})
 }

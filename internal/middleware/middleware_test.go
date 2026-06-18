@@ -2,10 +2,12 @@
 package middleware_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -132,6 +134,54 @@ func TestLogger(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "OK", rec.Body.String())
+}
+
+func TestLogger_SlowRequestUsesWarn(t *testing.T) {
+	var buf bytes.Buffer
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(oldLogger) })
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(550 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	wrapped := middleware.RequestID(middleware.Logger(handler))
+	req := httptest.NewRequest("GET", "/slow", nil)
+	rec := httptest.NewRecorder()
+
+	wrapped.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, buf.String(), "level=WARN")
+	assert.Contains(t, buf.String(), "HTTP慢请求")
+	assert.Contains(t, buf.String(), "request_id=")
+}
+
+// ============================================================================
+// Recover 测试
+// ============================================================================
+
+func TestRecover_CatchesPanic(t *testing.T) {
+	var buf bytes.Buffer
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(oldLogger) })
+
+	handler := middleware.RequestID(middleware.Recover(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("boom")
+	})))
+
+	req := httptest.NewRequest("GET", "/panic", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, buf.String(), "HTTP处理发生panic")
+	assert.Contains(t, buf.String(), "request_id=")
+	assert.Contains(t, buf.String(), "stack=")
 }
 
 // ============================================================================

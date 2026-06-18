@@ -130,6 +130,24 @@ func TestToPrometheusFormat_EmptyMetrics(t *testing.T) {
 	assert.Contains(t, output, "empty_test 0")
 }
 
+func TestHistogramObserve_PrometheusBuckets(t *testing.T) {
+	svc := metrics.NewService()
+
+	svc.Observe("http_request_duration_seconds", 0.007)
+	svc.Observe("http_request_duration_seconds", 0.2)
+	svc.Observe("http_request_duration_seconds", 12)
+
+	output := svc.ToPrometheusFormat()
+
+	assert.Contains(t, output, "# TYPE http_request_duration_seconds histogram")
+	assert.Contains(t, output, "http_request_duration_seconds_bucket{le=\"0.005\"} 0")
+	assert.Contains(t, output, "http_request_duration_seconds_bucket{le=\"0.01\"} 1")
+	assert.Contains(t, output, "http_request_duration_seconds_bucket{le=\"0.25\"} 2")
+	assert.Contains(t, output, "http_request_duration_seconds_bucket{le=\"+Inf\"} 3")
+	assert.Contains(t, output, "http_request_duration_seconds_sum 12.207")
+	assert.Contains(t, output, "http_request_duration_seconds_count 3")
+}
+
 // ============================================================================
 // HTTPMiddleware 测试
 // ============================================================================
@@ -148,6 +166,8 @@ func TestHTTPMiddleware(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, float64(1), svc.Get("http_requests_total"))
+	output := svc.ToPrometheusFormat()
+	assert.Contains(t, output, "http_request_duration_seconds_count 1")
 	// in_flight 应该在请求完成后减少回 0
 	assert.Equal(t, float64(0), svc.Get("http_requests_in_flight"))
 }

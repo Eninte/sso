@@ -26,6 +26,7 @@ import (
 	"github.com/your-org/sso/internal/metrics"
 	"github.com/your-org/sso/internal/middleware"
 	"github.com/your-org/sso/internal/service"
+	"github.com/your-org/sso/internal/store"
 	"github.com/your-org/sso/internal/store/postgres"
 )
 
@@ -198,7 +199,7 @@ func startServer(cfg *config.Config, handler http.Handler, rateLimiters []middle
 //   - 限流中间件实例
 //
 // 重构原因: 从main中提取处理器初始化逻辑，降低主函数复杂度（17→<10）
-func initHandlers(cfg *config.Config, svc *Services) (*mux.Router, []middleware.RateLimitMiddleware) {
+func initHandlers(cfg *config.Config, svc *Services) (http.Handler, []middleware.RateLimitMiddleware) {
 	// ==== 初始化处理器 ====
 	registerHandler := handler.NewRegisterHandler(svc.Auth)
 	loginHandler := handler.NewLoginHandler(svc.Auth)
@@ -247,6 +248,7 @@ func initHandlers(cfg *config.Config, svc *Services) (*mux.Router, []middleware.
 
 	router.Use(middleware.SecurityHeaders)
 	router.Use(middleware.RequestID)
+	router.Use(middleware.Recover)
 	router.Use(middleware.Logger)
 	// 添加metrics中间件，收集HTTP请求指标
 	router.Use(svc.Metrics.HTTPMiddleware)
@@ -273,6 +275,8 @@ func initHandlers(cfg *config.Config, svc *Services) (*mux.Router, []middleware.
 
 	// ==== 注册路由 ====
 	// 健康检查端点 (不需要认证)
+	// 注：/healthz 与 /readyz 探针端点在函数末尾通过独立路由器注册，
+	// 绕过限流和 metrics 中间件，避免 k8s 探针流量干扰业务指标或触发限流
 	router.HandleFunc("/health", healthHandler).Methods("GET")
 
 	// 初始化面板端点 (无管理员时可用，有管理员时返回404)
@@ -345,10 +349,37 @@ func initHandlers(cfg *config.Config, svc *Services) (*mux.Router, []middleware.
 	admin.HandleFunc("/users/{id}", adminHandler.HandleDeleteUser).Methods("DELETE")
 	admin.HandleFunc("/audit-logs", adminHandler.HandleAuditLogs).Methods("GET")
 
-	return router, []middleware.RateLimitMiddleware{rateLimiter, sensitiveLimiter}
+	// ==== 探针端点（独立路由器，绕过限流和metrics中间件） ====
+	// k8s liveness/readiness 探针频繁请求，若经过限流/metrics会干扰业务指标
+	// 并可能在限流收紧时导致探针失败、Pod被误驱逐
+	probeRouter := mux.NewRouter()
+	probeRouter.Use(middleware.SecurityHeaders)
+	probeRouter.Use(middleware.RequestID)
+	probeRouter.Use(middleware.Recover)
+	probeRouter.Use(middleware.Logger)
+	probeRouter.HandleFunc("/healthz", healthHandler).Methods("GET")
+	probeRouter.HandleFunc("/readyz", readyzHandler(svc.Store)).Methods("GET")
+
+	// 顶层分发：探针路径走探针路由器，其余走主路由
+	topHandler := probeDispatcher(probeRouter, router)
+
+	return topHandler, []middleware.RateLimitMiddleware{rateLimiter, sensitiveLimiter}
+}
+
+// probeDispatcher 按路径将探针请求分流到独立探针路由器，其余交给主路由
+// 探针路径（/healthz、/readyz）绕过主路由的限流和 metrics 中间件
+func probeDispatcher(probe, main http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
+			probe.ServeHTTP(w, r)
+			return
+		}
+		main.ServeHTTP(w, r)
+	})
 }
 
 // newEndpointRateLimiter 创建端点级限流器
+
 // Redis可用时使用分布式限流器，否则使用本地限流器
 func newEndpointRateLimiter(cacheSvc cache.Cache, limit int, window time.Duration, keyPrefix string) middleware.RateLimitMiddleware {
 	if limit <= 0 {
@@ -663,6 +694,24 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"ok","service":"sso","timestamp":"` + time.Now().Format(time.RFC3339) + `"}`))
+}
+
+// readyzHandler 就绪探针处理器
+func readyzHandler(storeSvc store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		if err := storeSvc.Ping(ctx); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"status":"unready","service":"sso"}`))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ready","service":"sso"}`))
+	}
 }
 
 // startSetupWizard 启动配置向导HTTP服务

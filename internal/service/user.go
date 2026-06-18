@@ -12,6 +12,7 @@ import (
 	"github.com/your-org/sso/internal/common"
 	"github.com/your-org/sso/internal/crypto"
 	apperrors "github.com/your-org/sso/internal/errors"
+	"github.com/your-org/sso/internal/logging"
 	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/store"
 	"github.com/your-org/sso/internal/util/auditutil"
@@ -186,10 +187,11 @@ func (s *UserService) VerifyEmail(ctx context.Context, userID, token string) err
 // ============================================================================
 
 func (s *UserService) ForgotPassword(ctx context.Context, email string) error {
+	logger := logging.WithContext(ctx)
 	user, err := s.store.GetByEmail(ctx, email)
 	if err != nil {
 		// 安全设计：不泄露用户是否存在，但记录错误日志以便排查
-		slog.Debug("ForgotPassword: 获取用户失败", "error", err, "email", email)
+		logger.Debug("ForgotPassword: 获取用户失败", "error", err, "email", email)
 		return nil
 	}
 
@@ -197,12 +199,12 @@ func (s *UserService) ForgotPassword(ctx context.Context, email string) error {
 	if s.emailRateLimit != nil {
 		allowed, remaining, err := s.emailRateLimit.CheckLimit(ctx, email)
 		if err != nil {
-			slog.Warn("检查邮件限流失败", "error", err, "email", email)
+			logger.Warn("检查邮件限流失败", "error", err, "email", email)
 		}
 		if !allowed {
 			ttl, _ := s.emailRateLimit.GetTTL(ctx, email)
 			// 为了安全，不暴露限流错误，但记录日志
-			slog.Warn("密码重置邮件发送受限", "email", email, "ttl_minutes", int(ttl.Minutes()))
+			logger.Warn("密码重置邮件发送受限", "email", email, "ttl_minutes", int(ttl.Minutes()))
 			return apperrors.Wrap(
 				apperrors.ErrCodeEmailRateLimitExceeded,
 				FormatRateLimitError(ttl),
@@ -210,18 +212,18 @@ func (s *UserService) ForgotPassword(ctx context.Context, email string) error {
 				apperrors.ErrEmailRateLimitExceeded,
 			)
 		}
-		slog.Debug("邮件限流检查通过", "email", email, "remaining", remaining)
+		logger.Debug("邮件限流检查通过", "email", email, "remaining", remaining)
 	}
 
 	token, err := common.GenerateToken()
 	if err != nil {
-		slog.Error("ForgotPassword: 生成令牌失败", "error", err, "user_id", user.ID)
+		logger.Error("ForgotPassword: 生成令牌失败", "error", err, "user_id", user.ID)
 		return nil
 	}
 
 	expiresAt := time.Now().Add(ResetTokenTTL)
 	if err := s.store.StoreResetToken(ctx, user.ID, token, expiresAt); err != nil {
-		slog.Error("ForgotPassword: 存储重置令牌失败", "error", err, "user_id", user.ID)
+		logger.Error("ForgotPassword: 存储重置令牌失败", "error", err, "user_id", user.ID)
 		return nil
 	}
 
@@ -229,7 +231,7 @@ func (s *UserService) ForgotPassword(ctx context.Context, email string) error {
 
 	if s.emailSvc != nil {
 		if err := s.emailSvc.SendPasswordResetEmail(ctx, user.Email, user.Email, resetLink); err != nil {
-			slog.Error("ForgotPassword: 发送重置邮件失败", "error", err, "user_id", user.ID)
+			logger.Error("ForgotPassword: 发送重置邮件失败", "error", err, "user_id", user.ID)
 			// 仍然返回 nil，不泄露内部错误
 		}
 	}
@@ -238,6 +240,7 @@ func (s *UserService) ForgotPassword(ctx context.Context, email string) error {
 }
 
 func (s *UserService) ResetPasswordWithAudit(ctx context.Context, userID, token, newPassword string, ipAddress string) error {
+	logger := logging.WithContext(ctx)
 	// 验证密码强度
 	if err := validator.ValidatePassword(newPassword); err != nil {
 		return err
@@ -263,7 +266,7 @@ func (s *UserService) ResetPasswordWithAudit(ctx context.Context, userID, token,
 
 	// 先标记令牌为已使用（防止重复使用）
 	if err := s.store.MarkResetTokenUsed(ctx, userID); err != nil {
-		slog.Error("标记重置令牌为已使用失败", "error", err, "user_id", userID)
+		logger.Error("标记重置令牌为已使用失败", "error", err, "user_id", userID)
 		return serviceutil.WrapServiceError("标记令牌已使用", err)
 	}
 
@@ -288,11 +291,11 @@ func (s *UserService) ResetPasswordWithAudit(ctx context.Context, userID, token,
 
 	// 清理重置令牌（失败不影响主流程）
 	if err := s.store.DeleteResetToken(ctx, userID); err != nil {
-		slog.Warn("清理重置令牌失败", "error", err, "user_id", userID)
+		logger.Warn("清理重置令牌失败", "error", err, "user_id", userID)
 	}
 	// 撤销用户所有Token（失败不影响主流程）
 	if err := s.store.RevokeAllUserTokens(ctx, userID); err != nil {
-		slog.Warn("撤销用户Token失败", "error", err, "user_id", userID)
+		logger.Warn("撤销用户Token失败", "error", err, "user_id", userID)
 	}
 
 	// 使用统一的审计日志工具记录密码重置事件
