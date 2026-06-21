@@ -3,6 +3,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -18,6 +19,52 @@ import (
 const (
 	MaxRequestBodySize = 1 << 20 // 1MB
 )
+
+// ============================================================================
+// 验证码接口和辅助函数
+// ============================================================================
+
+// captchaVerifier 验证码验证接口
+// 由 captcha.Service 实现，便于测试时使用 mock
+type captchaVerifier interface {
+	IsEnabled() bool
+	ShouldRequireCaptcha(ctx context.Context, key string) bool
+	Verify(ctx context.Context, id, answer string) (bool, error)
+	RecordFailure(ctx context.Context, key string)
+	ClearFailures(ctx context.Context, key string)
+}
+
+// verifyCaptcha 自适应验证码校验逻辑
+// 仅当该标识（如IP）的失败次数达到阈值时才要求验证码
+// 返回 true 表示验证通过（或不需要验证码），false 表示验证失败（已写入响应）
+func verifyCaptcha(w http.ResponseWriter, r *http.Request, svc captchaVerifier) bool {
+	if !svc.IsEnabled() {
+		return true
+	}
+
+	// 自适应触发：检查该IP是否需要验证码
+	clientIP := extractClientIP(r)
+	if !svc.ShouldRequireCaptcha(r.Context(), clientIP) {
+		return true // 失败次数未达阈值，跳过验证码
+	}
+
+	// 从请求头获取验证码信息
+	captchaID := r.Header.Get("X-Captcha-ID")
+	captchaAnswer := r.Header.Get("X-Captcha-Answer")
+
+	if captchaID == "" || captchaAnswer == "" {
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeCaptchaRequired))
+		return false
+	}
+
+	ok, err := svc.Verify(r.Context(), captchaID, captchaAnswer)
+	if err != nil || !ok {
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeCaptchaInvalid))
+		return false
+	}
+
+	return true
+}
 
 // 请求处理错误定义（使用统一错误定义）
 var (

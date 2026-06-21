@@ -16,12 +16,13 @@ import (
 
 // UserHandler 用户处理器
 type UserHandler struct {
-	userSvc service.UserServiceInterface
+	userSvc    service.UserServiceInterface
+	captchaSvc captchaVerifier
 }
 
 // NewUserHandler 创建用户处理器
-func NewUserHandler(userSvc service.UserServiceInterface) *UserHandler {
-	return &UserHandler{userSvc: userSvc}
+func NewUserHandler(userSvc service.UserServiceInterface, captchaSvc captchaVerifier) *UserHandler {
+	return &UserHandler{userSvc: userSvc, captchaSvc: captchaSvc}
 }
 
 // HandleSendVerificationEmail 处理发送验证邮件请求
@@ -82,14 +83,25 @@ func (h *UserHandler) HandleForgotPassword(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// 验证验证码
+	if !verifyCaptcha(w, r, h.captchaSvc) {
+		return
+	}
+
 	// 发送重置邮件
 	err := h.userSvc.ForgotPassword(r.Context(), req.Email)
 	if err != nil {
+		// 记录验证码失败计数
+		// 虽然前端始终收到成功响应（防枚举），但后端仍需记录失败
+		// 以便在攻击者大量尝试时触发验证码
+		h.captchaSvc.RecordFailure(r.Context(), extractClientIP(r))
 		// 为了安全，不暴露具体错误
 		writeSuccess(w, http.StatusOK, "如果该邮箱已注册，重置邮件已发送", nil)
 		return
 	}
 
+	// 成功，清除失败计数
+	h.captchaSvc.ClearFailures(r.Context(), extractClientIP(r))
 	writeSuccess(w, http.StatusOK, "如果该邮箱已注册，重置邮件已发送", nil)
 }
 
@@ -111,13 +123,22 @@ func (h *UserHandler) HandleResetPassword(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// 验证验证码
+	if !verifyCaptcha(w, r, h.captchaSvc) {
+		return
+	}
+
 	// 重置密码
 	err := h.userSvc.ResetPassword(r.Context(), req.UserID, req.Token, req.NewPassword)
 	if err != nil {
+		// 记录验证码失败计数
+		h.captchaSvc.RecordFailure(r.Context(), extractClientIP(r))
 		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeResetPasswordFailed))
 		return
 	}
 
+	// 成功，清除失败计数
+	h.captchaSvc.ClearFailures(r.Context(), extractClientIP(r))
 	writeSuccess(w, http.StatusOK, "密码重置成功", nil)
 }
 

@@ -43,7 +43,7 @@ func NewDistributedRateLimiter(redisClient *redis.Client, limit int, window time
 func (drl *DistributedRateLimiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 获取客户端标识
-		clientIP := getClientIP(r)
+		clientIP := GetClientIP(r)
 
 		// 检查是否超过限制
 		allowed, remaining, resetTime, err := drl.Allow(r.Context(), clientIP)

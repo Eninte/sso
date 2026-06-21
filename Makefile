@@ -69,7 +69,7 @@ test-integration: ## 运行集成测试
 
 .PHONY: test-e2e
 test-e2e: ## 运行端到端测试（需要服务运行中）
-	E2E_ADMIN_EMAIL="system@eninte.com" E2E_ADMIN_PASSWORD="Admin123!" RATE_LIMIT_REQUESTS=0 DATABASE_URL="$(TEST_DATABASE_URL)" gotestsum --format pkgname -- -race -tags=e2e ./test/e2e/...
+	E2E_ADMIN_EMAIL="system@eninte.com" E2E_ADMIN_PASSWORD="Admin123!" RATE_LIMIT_REQUESTS=0 CAPTCHA_ENABLED=false DATABASE_URL="$(TEST_DATABASE_URL)" gotestsum --format pkgname -- -race -tags=e2e ./test/e2e/...
 
 .PHONY: test-e2e-prepare
 test-e2e-prepare: ## 准备E2E测试数据（验证测试用户邮箱）

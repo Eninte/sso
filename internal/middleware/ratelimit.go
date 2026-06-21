@@ -182,7 +182,7 @@ func writeError(w http.ResponseWriter, status int, message string) {
 func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 获取客户端标识
-		clientIP := getClientIP(r)
+		clientIP := GetClientIP(r)
 
 		// 检查是否超过限制
 		if !rl.Allow(clientIP) {
@@ -200,10 +200,10 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// getClientIP 获取客户端真实IP
+// GetClientIP 获取客户端真实IP
 // 仅当请求来自受信代理时才信任 X-Real-IP 头
 // 否则直接使用 RemoteAddr（最可靠的来源）
-func getClientIP(r *http.Request) string {
+func GetClientIP(r *http.Request) string {
 	// 解析 RemoteAddr（最可靠的来源）
 	remoteAddr := r.RemoteAddr
 	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {

@@ -19,6 +19,7 @@ import (
 	_ "github.com/lib/pq"
 
 	"github.com/your-org/sso/internal/cache"
+	"github.com/your-org/sso/internal/captcha"
 	"github.com/your-org/sso/internal/config"
 	"github.com/your-org/sso/internal/crypto"
 	"github.com/your-org/sso/internal/handler"
@@ -52,6 +53,7 @@ type Services struct {
 	MFA      *service.MFAService
 	Admin    *service.AdminService
 	Social   *service.SocialLoginService
+	Captcha  *captcha.Service
 }
 
 // main 服务器主入口
@@ -201,18 +203,19 @@ func startServer(cfg *config.Config, handler http.Handler, rateLimiters []middle
 // 重构原因: 从main中提取处理器初始化逻辑，降低主函数复杂度（17→<10）
 func initHandlers(cfg *config.Config, svc *Services) (http.Handler, []middleware.RateLimitMiddleware) {
 	// ==== 初始化处理器 ====
-	registerHandler := handler.NewRegisterHandler(svc.Auth)
-	loginHandler := handler.NewLoginHandler(svc.Auth)
+	registerHandler := handler.NewRegisterHandler(svc.Auth, svc.Captcha)
+	loginHandler := handler.NewLoginHandler(svc.Auth, svc.Captcha)
 	tokenHandler := handler.NewTokenHandler(svc.Auth, svc.OAuth)
 	userInfoHandler := handler.NewUserInfoHandler(svc.Store, svc.Cache)
 	authorizeHandler := handler.NewAuthorizeHandler(svc.OAuth)
-	userHandler := handler.NewUserHandler(svc.User)
+	userHandler := handler.NewUserHandler(svc.User, svc.Captcha)
 	mfaHandler := handler.NewMFAHandler(svc.MFA)
 	socialHandler := handler.NewSocialLoginHandler(svc.Social)
 	// 使用支持多密钥JWKS的handler
 	wellKnownHandler := handler.NewWellKnownHandlerWithJWTService(cfg.BaseURL(), svc.JWT)
 	metricsHandler := handler.NewMetricsHandler(svc.Metrics)
 	adminHandler := handler.NewAdminHandler(svc.Admin)
+	captchaHandler := handler.NewCaptchaHandler(svc.Captcha)
 
 	// ==== 创建路由器 ====
 	router := mux.NewRouter()
@@ -314,6 +317,7 @@ func initHandlers(cfg *config.Config, svc *Services) (http.Handler, []middleware
 	sensitive.HandleFunc("/reset-password", userHandler.HandleResetPassword).Methods("POST")
 
 	// 一般公开端点（使用全局限流）
+	api.HandleFunc("/captcha", captchaHandler.Handle).Methods("GET")
 	api.HandleFunc("/token", tokenHandler.HandleToken).Methods("POST")
 	api.HandleFunc("/token/revoke", tokenHandler.HandleRevoke).Methods("POST")
 	api.HandleFunc("/verify-email", userHandler.HandleVerifyEmail).Methods("GET")
@@ -629,6 +633,14 @@ func initServices(cfg *config.Config) (*Services, *sql.DB, error) {
 		slog.Info("GitHub第三方登录已启用")
 	}
 
+	// ==== 初始化验证码服务 ====
+	captchaSvc := captcha.NewServiceWithAdaptive(cacheSvc, cfg.CaptchaEnabled, cfg.CaptchaTTL, cfg.CaptchaFailThreshold, cfg.CaptchaFailWindow)
+	if cfg.CaptchaEnabled {
+		slog.Info("验证码服务已启用", "ttl", cfg.CaptchaTTL, "fail_threshold", cfg.CaptchaFailThreshold, "fail_window", cfg.CaptchaFailWindow)
+	} else {
+		slog.Info("验证码服务已禁用")
+	}
+
 	// ==== 返回所有服务 ====
 	return &Services{
 		Store:    store,
@@ -645,6 +657,7 @@ func initServices(cfg *config.Config) (*Services, *sql.DB, error) {
 		MFA:      mfaSvc,
 		Admin:    adminSvc,
 		Social:   socialSvc,
+		Captcha:  captchaSvc,
 	}, db, nil
 }
 

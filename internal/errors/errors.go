@@ -98,6 +98,12 @@ const (
 	// 限流相关错误
 	ErrCodeTooManyRecoveryAttempts ErrorCode = "TOO_MANY_RECOVERY_ATTEMPTS" // 恢复码尝试次数过多
 
+	// 验证码相关错误
+	ErrCodeCaptchaRequired ErrorCode = "CAPTCHA_REQUIRED"        // 验证码必填
+	ErrCodeCaptchaInvalid  ErrorCode = "CAPTCHA_INVALID"         // 验证码无效或已过期
+	ErrCodeCaptchaDisabled ErrorCode = "CAPTCHA_DISABLED"        // 验证码服务未启用
+	ErrCodeCaptchaGenerate ErrorCode = "CAPTCHA_GENERATE_FAILED" // 验证码生成失败
+
 	// 请求相关错误
 	ErrCodeRequestBodyTooLarge  ErrorCode = "REQUEST_BODY_TOO_LARGE"  // 请求体过大
 	ErrCodeRequestBodyExtraData ErrorCode = "REQUEST_BODY_EXTRA_DATA" // 请求体包含多余数据
@@ -252,6 +258,12 @@ var (
 
 	// 限流错误
 	ErrTooManyRecoveryAttempts = New(ErrCodeTooManyRecoveryAttempts, "恢复码尝试次数过多，请稍后再试", 429)
+
+	// 验证码错误
+	ErrCaptchaRequired = New(ErrCodeCaptchaRequired, "验证码不能为空", 400)
+	ErrCaptchaInvalid  = New(ErrCodeCaptchaInvalid, "验证码无效或已过期", 400)
+	ErrCaptchaDisabled = New(ErrCodeCaptchaDisabled, "验证码服务未启用", 404)
+	ErrCaptchaGenerate = New(ErrCodeCaptchaGenerate, "验证码生成失败", 500)
 
 	// 请求错误
 	ErrRequestBodyTooLarge  = New(ErrCodeRequestBodyTooLarge, "请求体过大", 413)

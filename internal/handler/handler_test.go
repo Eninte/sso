@@ -39,6 +39,17 @@ func createTestJWTServiceForHandlerTest() *crypto.JWTService {
 	)
 }
 
+// mockCaptchaVerifier 测试用mock验证码服务（禁用状态，始终通过）
+type mockCaptchaVerifier struct{}
+
+func (m *mockCaptchaVerifier) IsEnabled() bool                                          { return false }
+func (m *mockCaptchaVerifier) ShouldRequireCaptcha(_ context.Context, _ string) bool    { return false }
+func (m *mockCaptchaVerifier) Verify(_ context.Context, _, _ string) (bool, error)      { return true, nil }
+func (m *mockCaptchaVerifier) RecordFailure(_ context.Context, _ string)                {}
+func (m *mockCaptchaVerifier) ClearFailures(_ context.Context, _ string)                {}
+
+var testCaptchaSvc = &mockCaptchaVerifier{}
+
 // createTestTokenServiceForHandler 创建测试用的Token服务
 func createTestTokenServiceForHandler() *service.TokenService {
 	return service.NewTokenService(createTestJWTServiceForHandlerTest(), mock.New())
@@ -68,7 +79,7 @@ func createTestLoginHandler(t *testing.T) (*handler.LoginHandler, *mock.Store) {
 	authSvc := service.NewAuthService(store, passwordSvc, jwtSvc, 5, 30*time.Minute)
 
 	// 创建登录处理器
-	loginHandler := handler.NewLoginHandler(authSvc)
+	loginHandler := handler.NewLoginHandler(authSvc, testCaptchaSvc)
 
 	return loginHandler, store
 }
@@ -97,7 +108,7 @@ func createTestRegisterHandler(t *testing.T) (*handler.RegisterHandler, *mock.St
 	authSvc := service.NewAuthService(store, passwordSvc, jwtSvc, 5, 30*time.Minute)
 
 	// 创建注册处理器
-	registerHandler := handler.NewRegisterHandler(authSvc)
+	registerHandler := handler.NewRegisterHandler(authSvc, testCaptchaSvc)
 
 	return registerHandler, store
 }

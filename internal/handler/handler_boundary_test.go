@@ -34,7 +34,7 @@ func createTestUserHandler(t *testing.T) (*handler.UserHandler, *mock.Store) {
 	var emailSvc *service.EmailService
 
 	userSvc := service.NewUserService(store, passwordSvc, emailSvc, "http://localhost:9090")
-	userHandler := handler.NewUserHandler(userSvc)
+	userHandler := handler.NewUserHandler(userSvc, testCaptchaSvc)
 
 	return userHandler, store
 }

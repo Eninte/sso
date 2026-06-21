@@ -16,12 +16,13 @@ import (
 
 // RegisterHandler 注册处理器
 type RegisterHandler struct {
-	authSvc service.AuthServiceInterface
+	authSvc    service.AuthServiceInterface
+	captchaSvc captchaVerifier
 }
 
 // NewRegisterHandler 创建注册处理器
-func NewRegisterHandler(authSvc service.AuthServiceInterface) *RegisterHandler {
-	return &RegisterHandler{authSvc: authSvc}
+func NewRegisterHandler(authSvc service.AuthServiceInterface, captchaSvc captchaVerifier) *RegisterHandler {
+	return &RegisterHandler{authSvc: authSvc, captchaSvc: captchaSvc}
 }
 
 // Handle 处理注册请求
@@ -34,18 +35,24 @@ func (h *RegisterHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. 调用注册服务
+	// 2. 验证验证码
+	if !verifyCaptcha(w, r, h.captchaSvc) {
+		return
+	}
+
+	// 3. 调用注册服务
 	_, err := h.authSvc.Register(r.Context(), &req)
 	if err != nil {
-		// 使用统一的错误处理函数
+		// 注册失败不记录验证码失败计数
+		// 原因：注册错误多为输入校验（邮箱格式等），非安全敏感操作
+		// 注册端点有独立限流保护，无需通过验证码计数器叠加
 		if !writeValidationError(w, r, err) {
-			// 未知错误
 			writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeRegisterFailed))
 		}
 		return
 	}
 
-	// 3. 返回成功响应（不暴露user_id，不区分邮箱是否已存在）
+	// 4. 返回成功响应（不暴露user_id，不区分邮箱是否已存在）
 	// user为nil表示邮箱已注册，返回相同响应防止用户枚举
 	writeSuccess(w, http.StatusCreated, "注册成功，如果邮箱未验证将收到验证邮件", nil)
 }

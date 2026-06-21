@@ -107,5 +107,10 @@
   "CLEANUP_FAILED": "清理失败",
   
   "UNSUPPORTED_GRANT_TYPE": "不支持的授权类型",
-  "UNSUPPORTED_LOGIN_METHOD": "不支持的登录方式"
+  "UNSUPPORTED_LOGIN_METHOD": "不支持的登录方式",
+
+  "CAPTCHA_REQUIRED": "验证码不能为空",
+  "CAPTCHA_INVALID": "验证码无效或已过期",
+  "CAPTCHA_DISABLED": "验证码服务未启用",
+  "CAPTCHA_GENERATE_FAILED": "验证码生成失败"
 }

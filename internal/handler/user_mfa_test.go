@@ -41,7 +41,7 @@ func createUserHandler(t *testing.T) (*handler.UserHandler, *mock.Store) {
 	})
 	require.NoError(t, err)
 	userSvc := service.NewUserService(storeInst, passwordSvc, emailSvc, "http://localhost:9090")
-	return handler.NewUserHandler(userSvc), storeInst
+	return handler.NewUserHandler(userSvc, testCaptchaSvc), storeInst
 }
 
 // createMFAHandler 创建测试用的MFA处理器

@@ -100,6 +100,12 @@ type Config struct {
 	MetricsUsername string // Metrics Basic Auth用户名
 	MetricsPassword string // Metrics Basic Auth密码
 
+	// 验证码配置
+	CaptchaEnabled       bool          // 是否启用验证码
+	CaptchaTTL           time.Duration // 验证码有效期
+	CaptchaFailThreshold int           // 连续失败N次后触发验证码
+	CaptchaFailWindow    time.Duration // 失败计数窗口
+
 	// 优雅关闭配置
 	ShutdownTimeout time.Duration // 优雅关闭超时时间
 	LANDeployment   bool          // LAN部署模式（放宽部分生产环境校验）
@@ -191,6 +197,12 @@ func Load() (*Config, error) {
 		// Metrics配置
 		MetricsUsername: os.Getenv("METRICS_USERNAME"),
 		MetricsPassword: os.Getenv("METRICS_PASSWORD"),
+
+		// 验证码配置
+		CaptchaEnabled:       getEnvBool("CAPTCHA_ENABLED", true),
+		CaptchaTTL:           getEnvDuration("CAPTCHA_TTL", 5*time.Minute),
+		CaptchaFailThreshold: getEnvInt("CAPTCHA_FAIL_THRESHOLD", 3),
+		CaptchaFailWindow:    getEnvDuration("CAPTCHA_FAIL_WINDOW", 15*time.Minute),
 
 		// 优雅关闭配置
 		ShutdownTimeout: getEnvDuration("SHUTDOWN_TIMEOUT", 30*time.Second),

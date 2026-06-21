@@ -240,7 +240,7 @@ func TestHandlerErrorFunctions(t *testing.T) {
 		passwordSvc := crypto.NewPasswordService(4)
 		jwtSvc := createTestJWTService()
 		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
-		loginHandler := handler.NewLoginHandler(authSvc)
+		loginHandler := handler.NewLoginHandler(authSvc, testCaptchaSvc)
 
 		// 无效JSON触发writeError
 		req := httptest.NewRequest("POST", "/login", nil)
@@ -270,7 +270,7 @@ func TestHandlerErrorFunctions(t *testing.T) {
 		passwordSvc := crypto.NewPasswordService(4)
 		jwtSvc := createTestJWTService()
 		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
-		loginHandler := handler.NewLoginHandler(authSvc)
+		loginHandler := handler.NewLoginHandler(authSvc, testCaptchaSvc)
 
 		// 空密码触发密码验证错误
 		req := httptest.NewRequest("POST", "/login", bytes.NewReader([]byte(`{"email":"test@example.com","password":""}`)))
@@ -289,7 +289,7 @@ func TestHandlerErrorFunctions(t *testing.T) {
 		passwordSvc := crypto.NewPasswordService(4)
 		jwtSvc := createTestJWTService()
 		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
-		loginHandler := handler.NewLoginHandler(authSvc)
+		loginHandler := handler.NewLoginHandler(authSvc, testCaptchaSvc)
 
 		// 正常JSON
 		req := httptest.NewRequest("POST", "/login", bytes.NewReader([]byte(`{"email":"test@example.com","password":"Pass123!"}`)))
