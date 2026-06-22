@@ -17,7 +17,9 @@ import (
 	"github.com/your-org/sso/internal/cache"
 	"github.com/your-org/sso/internal/captcha"
 	"github.com/your-org/sso/internal/crypto"
+	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/handler"
+	"github.com/your-org/sso/internal/model"
 	"github.com/your-org/sso/internal/service"
 	"github.com/your-org/sso/internal/store/mock"
 )
@@ -574,4 +576,414 @@ func TestCaptchaService_DisabledNoTracking(t *testing.T) {
 		svc.RecordFailure(ctx, "1.2.3.4")
 	}
 	assert.False(t, svc.ShouldRequireCaptcha(ctx, "1.2.3.4"))
+}
+
+// ============================================================================
+// 修复验证：仅凭据相关错误触发 RecordFailure
+// ============================================================================
+
+// setupFixTestUser 创建用于修复验证的测试用户
+func setupFixTestUser(t *testing.T, store *mock.Store) {
+	t.Helper()
+	passwordSvc := crypto.NewPasswordService(4)
+	hashedPassword, err := passwordSvc.HashPassword("Password123!")
+	require.NoError(t, err)
+
+	// 正常活跃用户
+	store.AddUser(&model.User{
+		ID:            "fix-user-active",
+		Email:         "fix-active@example.com",
+		PasswordHash:  hashedPassword,
+		EmailVerified: true,
+		Status:        model.UserStatusActive,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	})
+
+	// 被禁用的用户
+	store.AddUser(&model.User{
+		ID:            "fix-user-disabled",
+		Email:         "fix-disabled@example.com",
+		PasswordHash:  hashedPassword,
+		EmailVerified: true,
+		Status:        model.UserStatusDisabled,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	})
+
+	// 被锁定的用户（设置未来锁定时间，否则 validateUserCredentials 会自动解锁）
+	futureTime := time.Now().Add(1 * time.Hour)
+	store.AddUser(&model.User{
+		ID:            "fix-user-locked",
+		Email:         "fix-locked@example.com",
+		PasswordHash:  hashedPassword,
+		EmailVerified: true,
+		Status:        model.UserStatusLocked,
+		LockedUntil:   &futureTime,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	})
+
+	// 邮箱未验证的用户
+	store.AddUser(&model.User{
+		ID:            "fix-user-unverified",
+		Email:         "fix-unverified@example.com",
+		PasswordHash:  hashedPassword,
+		EmailVerified: false,
+		Status:        model.UserStatusActive,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	})
+}
+
+func TestLoginHandler_CredentialErrorTriggersRecordFailure(t *testing.T) {
+	// 验证：凭据相关错误（401/403）应递增验证码失败计数
+	env := createCaptchaTestEnv(t)
+	authSvc, store := createTestAuthSvc()
+	setupFixTestUser(t, store)
+	h := handler.NewLoginHandler(authSvc, env.captchaSvc)
+	ctx := context.Background()
+
+	t.Run("密码错误(401)递增失败计数", func(t *testing.T) {
+		ip := "20.0.0.1"
+		require.False(t, env.captchaSvc.ShouldRequireCaptcha(ctx, ip))
+
+		// 连续3次密码错误
+		for i := 0; i < 3; i++ {
+			body := bytes.NewReader([]byte(`{"email":"fix-active@example.com","password":"WrongPassword!"}`))
+			req := httptest.NewRequest("POST", "/api/v1/login", body)
+			req.Header.Set("Content-Type", "application/json")
+			req.RemoteAddr = ip + ":1234"
+			w := httptest.NewRecorder()
+			h.Handle(w, req)
+			assert.Equal(t, http.StatusUnauthorized, w.Code)
+		}
+
+		// 3次凭据错误后应触发验证码
+		assert.True(t, env.captchaSvc.ShouldRequireCaptcha(ctx, ip),
+			"3次凭据错误后应触发验证码要求")
+	})
+
+	t.Run("账户被禁用(403)递增失败计数", func(t *testing.T) {
+		ip := "20.0.0.2"
+		require.False(t, env.captchaSvc.ShouldRequireCaptcha(ctx, ip))
+
+		for i := 0; i < 3; i++ {
+			body := bytes.NewReader([]byte(`{"email":"fix-disabled@example.com","password":"Password123!"}`))
+			req := httptest.NewRequest("POST", "/api/v1/login", body)
+			req.Header.Set("Content-Type", "application/json")
+			req.RemoteAddr = ip + ":1234"
+			w := httptest.NewRecorder()
+			h.Handle(w, req)
+			assert.Equal(t, http.StatusForbidden, w.Code)
+		}
+
+		assert.True(t, env.captchaSvc.ShouldRequireCaptcha(ctx, ip),
+			"账户禁用(403)属于凭据相关错误，应递增失败计数")
+	})
+
+	t.Run("账户被锁定(403)递增失败计数", func(t *testing.T) {
+		ip := "20.0.0.3"
+		require.False(t, env.captchaSvc.ShouldRequireCaptcha(ctx, ip))
+
+		for i := 0; i < 3; i++ {
+			body := bytes.NewReader([]byte(`{"email":"fix-locked@example.com","password":"Password123!"}`))
+			req := httptest.NewRequest("POST", "/api/v1/login", body)
+			req.Header.Set("Content-Type", "application/json")
+			req.RemoteAddr = ip + ":1234"
+			w := httptest.NewRecorder()
+			h.Handle(w, req)
+			assert.Equal(t, http.StatusForbidden, w.Code)
+		}
+
+		assert.True(t, env.captchaSvc.ShouldRequireCaptcha(ctx, ip),
+			"账户锁定(403)属于凭据相关错误，应递增失败计数")
+	})
+
+	t.Run("邮箱未验证(401)递增失败计数", func(t *testing.T) {
+		ip := "20.0.0.4"
+		require.False(t, env.captchaSvc.ShouldRequireCaptcha(ctx, ip))
+
+		for i := 0; i < 3; i++ {
+			body := bytes.NewReader([]byte(`{"email":"fix-unverified@example.com","password":"Password123!"}`))
+			req := httptest.NewRequest("POST", "/api/v1/login", body)
+			req.Header.Set("Content-Type", "application/json")
+			req.RemoteAddr = ip + ":1234"
+			w := httptest.NewRecorder()
+			h.Handle(w, req)
+			assert.Equal(t, http.StatusUnauthorized, w.Code)
+		}
+
+		assert.True(t, env.captchaSvc.ShouldRequireCaptcha(ctx, ip),
+			"邮箱未验证(401)属于凭据相关错误，应递增失败计数")
+	})
+}
+
+func TestLoginHandler_NonCredentialErrorNoRecordFailure(t *testing.T) {
+	// 验证：服务器内部错误(500)不应递增验证码失败计数
+	env := createCaptchaTestEnv(t)
+	store := mock.New()
+	// 注入 GetUserByEmail 错误，模拟数据库故障
+	store.GetUserByEmailErr = apperrors.ErrInternal
+	authSvc := service.NewAuthService(
+		store,
+		crypto.NewPasswordService(4),
+		func() *crypto.JWTService {
+			pk, _ := crypto.GenerateRSAKeyPair(2048)
+			return crypto.NewJWTService(pk, &pk.PublicKey, "test-issuer", 15*time.Minute, 7*24*time.Hour)
+		}(),
+		5, 30*time.Minute,
+	)
+	h := handler.NewLoginHandler(authSvc, env.captchaSvc)
+	ctx := context.Background()
+
+	ip := "20.0.0.50"
+	require.False(t, env.captchaSvc.ShouldRequireCaptcha(ctx, ip))
+
+	// 连续3次服务器错误
+	for i := 0; i < 3; i++ {
+		body := bytes.NewReader([]byte(`{"email":"any@example.com","password":"Password123!"}`))
+		req := httptest.NewRequest("POST", "/api/v1/login", body)
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = ip + ":1234"
+		w := httptest.NewRecorder()
+		h.Handle(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	}
+
+	// 服务器内部错误不应递增失败计数
+	assert.False(t, env.captchaSvc.ShouldRequireCaptcha(ctx, ip),
+		"服务器内部错误(500)不应递增验证码失败计数，避免影响合法用户")
+}
+
+func TestLoginHandler_SuccessClearsFailures(t *testing.T) {
+	// 验证：登录成功后应清除失败计数
+	env := createCaptchaTestEnv(t)
+	authSvc, store := createTestAuthSvc()
+	setupFixTestUser(t, store)
+	h := handler.NewLoginHandler(authSvc, env.captchaSvc)
+	ctx := context.Background()
+
+	ip := "20.0.0.100"
+
+	// 先制造2次失败（未达阈值，无需验证码即可登录）
+	env.simulateFailures(t, ip, 2)
+	assert.False(t, env.captchaSvc.ShouldRequireCaptcha(ctx, ip))
+
+	// 登录成功应清除失败计数
+	body := bytes.NewReader([]byte(`{"email":"fix-active@example.com","password":"Password123!"}`))
+	req := httptest.NewRequest("POST", "/api/v1/login", body)
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = ip + ":1234"
+	w := httptest.NewRecorder()
+	h.Handle(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.False(t, env.captchaSvc.ShouldRequireCaptcha(ctx, ip),
+		"登录成功后应清除失败计数")
+}
+
+// ============================================================================
+// 修复验证：ForgotPassword/ResetPassword 的 RecordFailure 行为
+// ============================================================================
+
+func TestForgotPassword_NoRecordFailureForNonexistentEmail(t *testing.T) {
+	// ForgotPassword 对不存在的邮箱返回 nil（安全设计：防枚举）
+	// 因此不会触发 RecordFailure
+	env := createCaptchaTestEnv(t)
+	userSvc, _ := createTestUserSvc()
+	h := handler.NewUserHandler(userSvc, env.captchaSvc)
+	ctx := context.Background()
+
+	ip := "30.0.0.1"
+	require.False(t, env.captchaSvc.ShouldRequireCaptcha(ctx, ip))
+
+	// ForgotPassword 对不存在的邮箱返回成功响应（防枚举），且不调用 RecordFailure
+	for i := 0; i < 5; i++ {
+		body := bytes.NewReader([]byte(`{"email":"nonexistent@example.com"}`))
+		req := httptest.NewRequest("POST", "/api/v1/forgot-password", body)
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = ip + ":1234"
+		w := httptest.NewRecorder()
+		h.HandleForgotPassword(w, req)
+		// 响应始终为200（防枚举）
+		assert.Equal(t, http.StatusOK, w.Code)
+	}
+
+	// 不存在的邮箱不触发 RecordFailure（服务层返回 nil）
+	assert.False(t, env.captchaSvc.ShouldRequireCaptcha(ctx, ip),
+		"ForgotPassword 对不存在的邮箱不应递增失败计数")
+}
+
+func TestResetPassword_RecordFailureOnServiceError(t *testing.T) {
+	// ResetPassword 在服务层失败时无条件调用 RecordFailure
+	env := createCaptchaTestEnv(t)
+	userSvc, _ := createTestUserSvc()
+	h := handler.NewUserHandler(userSvc, env.captchaSvc)
+	ctx := context.Background()
+
+	ip := "30.0.0.2"
+	require.False(t, env.captchaSvc.ShouldRequireCaptcha(ctx, ip))
+
+	// 使用无效 token 重置密码
+	for i := 0; i < 3; i++ {
+		body := bytes.NewReader([]byte(`{"token":"invalid","user_id":"fake","new_password":"NewPass123!"}`))
+		req := httptest.NewRequest("POST", "/api/v1/reset-password", body)
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = ip + ":1234"
+		w := httptest.NewRecorder()
+		h.HandleResetPassword(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	}
+
+	assert.True(t, env.captchaSvc.ShouldRequireCaptcha(ctx, ip),
+		"ResetPassword 服务层失败应递增验证码失败计数")
+}
+
+// ============================================================================
+// 修复验证：Verify TTL 不被错误猜测延长（端到端）
+// ============================================================================
+
+func TestCaptcha_EndToEnd_VerifyTTLNotExtended(t *testing.T) {
+	// 端到端验证：错误猜测不会延长验证码生命周期
+	// 使用短 TTL 的 captchaTestEnv
+	c := cache.NewMemoryCache()
+	defer c.Close()
+	shortTTLSvc := captcha.NewServiceWithAdaptive(c, true, 2*time.Second, 3, 15*time.Minute)
+	env := &captchaTestEnv{captchaSvc: shortTTLSvc, memCache: c}
+
+	authSvc, store := createTestAuthSvc()
+	setupFixTestUser(t, store)
+	loginHandler := handler.NewLoginHandler(authSvc, env.captchaSvc)
+
+	ip := "40.0.0.1"
+	ctx := context.Background()
+
+	// 模拟失败达到阈值
+	env.simulateFailures(t, ip, 3)
+	require.True(t, env.captchaSvc.ShouldRequireCaptcha(ctx, ip))
+
+	// 生成验证码
+	captchaID, answer := env.generateAndSolve(t)
+
+	// 提交错误答案的验证码（TTL 几乎未消耗）
+	{
+		body := bytes.NewReader([]byte(`{"email":"fix-active@example.com","password":"Password123!"}`))
+		req := httptest.NewRequest("POST", "/api/v1/login", body)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Captcha-ID", captchaID)
+		req.Header.Set("X-Captcha-Answer", "wrong")
+		req.RemoteAddr = ip + ":1234"
+		w := httptest.NewRecorder()
+		loginHandler.Handle(w, req)
+		assert.Contains(t, w.Body.String(), "验证码无效或已过期")
+	}
+
+	// 等待超过原始 TTL（2秒），验证码应已过期
+	// 修复前：错误猜测会重置 TTL，此时验证码仍存在
+	// 修复后：错误猜测使用剩余 TTL，验证码应已过期
+	time.Sleep(2200 * time.Millisecond)
+
+	// 重新模拟失败以触发验证码要求
+	env.simulateFailures(t, ip, 3)
+
+	// 使用正确答案但验证码已过期
+	{
+		body := bytes.NewReader([]byte(`{"email":"fix-active@example.com","password":"Password123!"}`))
+		req := httptest.NewRequest("POST", "/api/v1/login", body)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Captcha-ID", captchaID)
+		req.Header.Set("X-Captcha-Answer", answer)
+		req.RemoteAddr = ip + ":1234"
+		w := httptest.NewRecorder()
+		loginHandler.Handle(w, req)
+		assert.Contains(t, w.Body.String(), "验证码无效或已过期",
+			"验证码应在原始 TTL 后过期，不被错误猜测延长")
+	}
+}
+
+// ============================================================================
+// 修复验证：完整登录 + 验证码自适应触发 + 凭据错误过滤 端到端
+// ============================================================================
+
+func TestCaptcha_EndToEnd_CredentialErrorFiltering(t *testing.T) {
+	// 端到端验证：凭据错误触发验证码，服务器错误不触发
+	env := createCaptchaTestEnv(t)
+	authSvc, store := createTestAuthSvc()
+	setupFixTestUser(t, store)
+	loginHandler := handler.NewLoginHandler(authSvc, env.captchaSvc)
+	ctx := context.Background()
+
+	ip := "50.0.0.1"
+
+	// Step 1: 正常登录成功，无需验证码
+	t.Log("Step 1: 正常登录成功")
+	{
+		body := bytes.NewReader([]byte(`{"email":"fix-active@example.com","password":"Password123!"}`))
+		req := httptest.NewRequest("POST", "/api/v1/login", body)
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = ip + ":1234"
+		w := httptest.NewRecorder()
+		loginHandler.Handle(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.False(t, env.captchaSvc.ShouldRequireCaptcha(ctx, ip))
+	}
+
+	// Step 2: 2次凭据错误，仍未达阈值
+	t.Log("Step 2: 2次凭据错误")
+	for i := 0; i < 2; i++ {
+		body := bytes.NewReader([]byte(`{"email":"fix-active@example.com","password":"WrongPassword!"}`))
+		req := httptest.NewRequest("POST", "/api/v1/login", body)
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = ip + ":1234"
+		w := httptest.NewRecorder()
+		loginHandler.Handle(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	}
+	assert.False(t, env.captchaSvc.ShouldRequireCaptcha(ctx, ip), "2次失败未达阈值")
+
+	// Step 3: 第3次凭据错误，达到阈值
+	t.Log("Step 3: 第3次凭据错误，触发验证码")
+	{
+		body := bytes.NewReader([]byte(`{"email":"fix-active@example.com","password":"WrongPassword!"}`))
+		req := httptest.NewRequest("POST", "/api/v1/login", body)
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = ip + ":1234"
+		w := httptest.NewRecorder()
+		loginHandler.Handle(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	}
+	assert.True(t, env.captchaSvc.ShouldRequireCaptcha(ctx, ip), "3次凭据错误后应触发验证码")
+
+	// Step 4: 不带验证码的请求被拒绝
+	t.Log("Step 4: 不带验证码被拒绝")
+	{
+		body := bytes.NewReader([]byte(`{"email":"fix-active@example.com","password":"Password123!"}`))
+		req := httptest.NewRequest("POST", "/api/v1/login", body)
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = ip + ":1234"
+		w := httptest.NewRecorder()
+		loginHandler.Handle(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "验证码不能为空")
+	}
+
+	// Step 5: 生成验证码并使用正确答案通过
+	t.Log("Step 5: 生成验证码并登录成功")
+	captchaID, answer := env.generateAndSolve(t)
+	{
+		body := bytes.NewReader([]byte(`{"email":"fix-active@example.com","password":"Password123!"}`))
+		req := httptest.NewRequest("POST", "/api/v1/login", body)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Captcha-ID", captchaID)
+		req.Header.Set("X-Captcha-Answer", answer)
+		req.RemoteAddr = ip + ":1234"
+		w := httptest.NewRecorder()
+		loginHandler.Handle(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	}
+
+	// Step 6: 登录成功后失败计数被清除
+	t.Log("Step 6: 登录成功后失败计数被清除")
+	assert.False(t, env.captchaSvc.ShouldRequireCaptcha(ctx, ip),
+		"登录成功后应清除失败计数")
 }

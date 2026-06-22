@@ -261,3 +261,155 @@ func TestRandInt_SameMinMax(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 5, n)
 }
+
+// ============================================================================
+// Verify 剩余 TTL 测试（修复：错误猜测不延长验证码生命周期）
+// ============================================================================
+
+func TestService_Verify_RemainingTTL(t *testing.T) {
+	// 使用短 TTL 验证错误猜测不会重置为完整 TTL
+	cacheSvc := newTestCache(t)
+	svc := NewService(cacheSvc, true, 2*time.Second)
+	ctx := context.Background()
+
+	t.Run("错误猜测不延长验证码生命周期", func(t *testing.T) {
+		c, err := svc.Generate(ctx)
+		require.NoError(t, err)
+
+		// 获取正确答案
+		var data captchaData
+		err = cacheSvc.Get(ctx, CaptchaCachePrefix+c.ID, &data)
+		require.NoError(t, err)
+
+		// 立即提交错误答案（TTL 几乎未消耗）
+		ok, err := svc.Verify(ctx, c.ID, "wrong")
+		assert.NoError(t, err)
+		assert.False(t, ok)
+
+		// 等待超过原始 TTL（2秒）后，验证码应已过期
+		// 修复前：错误猜测会重置 TTL 为完整 2 秒，此时验证码仍存在
+		// 修复后：错误猜测使用剩余 TTL，验证码应在约 2 秒后过期
+		time.Sleep(2200 * time.Millisecond)
+
+		ok, err = svc.Verify(ctx, c.ID, data.Answer)
+		assert.NoError(t, err)
+		assert.False(t, ok, "验证码应在原始 TTL 后过期，不被错误猜测延长")
+	})
+
+	t.Run("错误猜测后正确答案在剩余 TTL 内仍可验证", func(t *testing.T) {
+		c, err := svc.Generate(ctx)
+		require.NoError(t, err)
+
+		var data captchaData
+		err = cacheSvc.Get(ctx, CaptchaCachePrefix+c.ID, &data)
+		require.NoError(t, err)
+
+		// 提交一次错误答案
+		ok, err := svc.Verify(ctx, c.ID, "wrong")
+		assert.NoError(t, err)
+		assert.False(t, ok)
+
+		// 在剩余 TTL 内用正确答案仍可通过
+		ok, err = svc.Verify(ctx, c.ID, data.Answer)
+		assert.NoError(t, err)
+		assert.True(t, ok, "剩余 TTL 内正确答案应验证通过")
+	})
+
+	t.Run("接近过期时错误猜测导致立即过期", func(t *testing.T) {
+		c, err := svc.Generate(ctx)
+		require.NoError(t, err)
+
+		// 等待接近 TTL 过期
+		time.Sleep(1800 * time.Millisecond)
+
+		// 此时提交错误答案，剩余 TTL 很短
+		ok, err := svc.Verify(ctx, c.ID, "wrong")
+		assert.NoError(t, err)
+		assert.False(t, ok)
+
+		// 再等待很短时间，验证码应已过期
+		time.Sleep(300 * time.Millisecond)
+
+		var data captchaData
+		err = cacheSvc.Get(ctx, CaptchaCachePrefix+c.ID, &data)
+		assert.Error(t, err, "接近过期时错误猜测后验证码应很快过期")
+	})
+}
+
+// ============================================================================
+// RecordFailure 滑动窗口行为测试（修复：注释与实现一致性验证）
+// ============================================================================
+
+func TestService_RecordFailure_SlidingWindow(t *testing.T) {
+	cacheSvc := newTestCache(t)
+	svc := NewServiceWithAdaptive(cacheSvc, true, 5*time.Minute, 3, 15*time.Minute)
+	ctx := context.Background()
+
+	t.Run("每次失败都重置 TTL（滑动窗口语义）", func(t *testing.T) {
+		ip := "192.168.1.1"
+
+		// 第1次失败
+		svc.RecordFailure(ctx, ip)
+		assert.False(t, svc.ShouldRequireCaptcha(ctx, ip))
+
+		// 第2次失败 - TTL 被重置为完整 failWindow
+		svc.RecordFailure(ctx, ip)
+		assert.False(t, svc.ShouldRequireCaptcha(ctx, ip))
+
+		// 第3次失败 - 达到阈值
+		svc.RecordFailure(ctx, ip)
+		assert.True(t, svc.ShouldRequireCaptcha(ctx, ip))
+	})
+
+	t.Run("不同标识的失败计数相互独立", func(t *testing.T) {
+		ipA := "10.0.0.1"
+		ipB := "10.0.0.2"
+
+		// IP-A 失败3次
+		for i := 0; i < 3; i++ {
+			svc.RecordFailure(ctx, ipA)
+		}
+		assert.True(t, svc.ShouldRequireCaptcha(ctx, ipA))
+
+		// IP-B 无记录
+		assert.False(t, svc.ShouldRequireCaptcha(ctx, ipB))
+
+		// 清除 IP-A 不影响 IP-B
+		svc.ClearFailures(ctx, ipA)
+		assert.False(t, svc.ShouldRequireCaptcha(ctx, ipA))
+		assert.False(t, svc.ShouldRequireCaptcha(ctx, ipB))
+	})
+
+	t.Run("禁用时 RecordFailure 不生效", func(t *testing.T) {
+		disabledCache := newTestCache(t)
+		disabledSvc := NewServiceWithAdaptive(disabledCache, false, 5*time.Minute, 3, 15*time.Minute)
+
+		for i := 0; i < 10; i++ {
+			disabledSvc.RecordFailure(ctx, "1.2.3.4")
+		}
+		assert.False(t, disabledSvc.ShouldRequireCaptcha(ctx, "1.2.3.4"))
+	})
+
+	t.Run("ClearFailures 后计数从零开始", func(t *testing.T) {
+		ip := "172.16.0.1"
+
+		// 失败3次达到阈值
+		for i := 0; i < 3; i++ {
+			svc.RecordFailure(ctx, ip)
+		}
+		assert.True(t, svc.ShouldRequireCaptcha(ctx, ip))
+
+		// 清除后重新计数
+		svc.ClearFailures(ctx, ip)
+		assert.False(t, svc.ShouldRequireCaptcha(ctx, ip))
+
+		// 再次失败2次，仍未达阈值
+		svc.RecordFailure(ctx, ip)
+		svc.RecordFailure(ctx, ip)
+		assert.False(t, svc.ShouldRequireCaptcha(ctx, ip))
+
+		// 第3次失败达到阈值
+		svc.RecordFailure(ctx, ip)
+		assert.True(t, svc.ShouldRequireCaptcha(ctx, ip))
+	})
+}
