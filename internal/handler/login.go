@@ -57,8 +57,11 @@ func (h *LoginHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// 4. 调用登录服务（带IP限流）
 	resp, err := h.authSvc.LoginWithAudit(r.Context(), &req, auditCtx)
 	if err != nil {
-		// 记录验证码失败计数
-		h.captchaSvc.RecordFailure(r.Context(), auditCtx.IPAddress)
+		// 仅对凭据相关错误（401/403）记录验证码失败计数
+		// 排除服务器内部错误(500)和限流错误(429)，避免影响合法用户
+		if isCredentialError(err) {
+			h.captchaSvc.RecordFailure(r.Context(), auditCtx.IPAddress)
+		}
 		// 统一处理所有错误
 		writeOAuthError(w, r, err)
 		return

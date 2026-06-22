@@ -25,9 +25,6 @@ const (
 	// 默认验证码TTL
 	DefaultCaptchaTTL = 5 * time.Minute
 
-	// 默认验证码长度（运算结果的最大位数）
-	DefaultMaxAnswer = 99
-
 	// 验证码最大验证次数
 	MaxVerifyAttempts = 3
 
@@ -178,8 +175,10 @@ func (s *Service) Verify(ctx context.Context, id, answer string) (bool, error) {
 
 	// 检查尝试次数
 	data.Attempts++
+	// 防御性检查：正常流程下 Attempts 不会超过 MaxVerifyAttempts
+	// （达到阈值时下方 >= MaxVerifyAttempts 分支会删除验证码），
+	// 但若 cache.Delete 失败，验证码残留缓存中，此检查作为安全网防止无限尝试
 	if data.Attempts > MaxVerifyAttempts {
-		// 超过最大尝试次数，删除验证码
 		_ = s.cache.Delete(ctx, cacheKey)
 		return false, nil
 	}
@@ -196,8 +195,14 @@ func (s *Service) Verify(ctx context.Context, id, answer string) (bool, error) {
 		// 已达最大尝试次数，删除验证码
 		_ = s.cache.Delete(ctx, cacheKey)
 	} else {
-		// 更新缓存中的尝试次数
-		_ = s.cache.Set(ctx, cacheKey, &data, s.ttl)
+		// 更新缓存中的尝试次数，使用剩余TTL避免错误猜测延长验证码生命周期
+		remainingTTL := s.ttl - time.Since(time.Unix(data.CreatedAt, 0))
+		if remainingTTL <= 0 {
+			// 已过期，删除验证码
+			_ = s.cache.Delete(ctx, cacheKey)
+			return false, nil
+		}
+		_ = s.cache.Set(ctx, cacheKey, &data, remainingTTL)
 	}
 
 	return false, nil
@@ -224,7 +229,8 @@ func (s *Service) ShouldRequireCaptcha(ctx context.Context, key string) bool {
 }
 
 // RecordFailure 记录一次失败（按标识，如IP）
-// 在失败窗口内递增计数，首次失败时设置TTL
+// 每次失败都递增计数并重置TTL为完整的failWindow，实现滑动窗口语义：
+// 持续失败的标识其计数器永不过期，直到停止失败超过failWindow后自动清除。
 //
 // 注意：此方法使用 Get→Set 两步操作，非原子递增。
 // 在极端并发场景下（同一IP同时大量请求），可能丢失少量计数。

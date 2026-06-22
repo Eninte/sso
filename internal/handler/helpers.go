@@ -34,6 +34,15 @@ type captchaVerifier interface {
 	ClearFailures(ctx context.Context, key string)
 }
 
+// isCredentialError 判断是否为凭据相关错误（401/403）
+// 仅此类错误应触发验证码失败计数，排除服务器内部错误和限流错误
+func isCredentialError(err error) bool {
+	return errors.Is(err, service.ErrInvalidCredentials) ||
+		errors.Is(err, service.ErrAccountLocked) ||
+		errors.Is(err, service.ErrAccountDisabled) ||
+		errors.Is(err, service.ErrEmailNotVerified)
+}
+
 // verifyCaptcha 自适应验证码校验逻辑
 // 仅当该标识（如IP）的失败次数达到阈值时才要求验证码
 // 返回 true 表示验证通过（或不需要验证码），false 表示验证失败（已写入响应）
