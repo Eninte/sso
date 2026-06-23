@@ -261,7 +261,7 @@ func initHandlers(cfg *config.Config, svc *Services) (http.Handler, []middleware
 	corsConfig := &middleware.CORSConfig{
 		AllowedOrigins: cfg.GetCORSAllowedOrigins(),
 		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders: []string{"Content-Type", "Authorization", "X-Requested-With"},
+		AllowedHeaders: []string{"Content-Type", "Authorization", "X-Requested-With", "X-Captcha-ID", "X-Captcha-Answer"},
 		MaxAge:         86400, // 24小时
 	}
 
