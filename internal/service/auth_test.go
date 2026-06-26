@@ -74,6 +74,7 @@ func TestAuthService_Register(t *testing.T) {
 		assert.NotEmpty(t, user.PasswordHash)
 		assert.Equal(t, model.UserStatusPending, user.Status)
 		assert.False(t, user.EmailVerified)
+		assert.Equal(t, model.UserRoleUser, user.Role, "新注册用户应被赋予默认角色 user")
 	})
 
 	t.Run("邮箱已存在", func(t *testing.T) {

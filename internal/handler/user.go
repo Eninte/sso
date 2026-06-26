@@ -8,6 +8,7 @@ import (
 	apperrors "github.com/your-org/sso/internal/errors"
 	"github.com/your-org/sso/internal/middleware"
 	"github.com/your-org/sso/internal/service"
+	"github.com/your-org/sso/internal/validator"
 )
 
 // ============================================================================
@@ -38,7 +39,10 @@ func (h *UserHandler) HandleSendVerificationEmail(w http.ResponseWriter, r *http
 	// 2. 发送验证邮件
 	err := h.userSvc.SendVerificationEmail(r.Context(), userID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeSendVerificationEmailFailed))
+		// 区分业务错误与系统错误，避免将业务异常误映射为 500
+		if !writeValidationError(w, r, err) {
+			writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeSendVerificationEmailFailed))
+		}
 		return
 	}
 
@@ -78,8 +82,11 @@ func (h *UserHandler) HandleForgotPassword(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if req.Email == "" {
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeEmailRequired))
+	// 校验邮箱格式：空值与格式错误都属于客户端输入错误，应在进入业务逻辑前拦截
+	if err := validator.ValidateEmail(req.Email); err != nil {
+		if !writeValidationError(w, r, err) {
+			writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeEmailInvalid))
+		}
 		return
 	}
 

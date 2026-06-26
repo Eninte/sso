@@ -192,6 +192,7 @@ func (s *AuthService) Register(ctx context.Context, req *model.RegisterRequest) 
 		ID:           uuid.New().String(),
 		Email:        req.Email,
 		PasswordHash: hashedPassword,
+		Role:         model.UserRoleUser,
 		Status:       model.UserStatusPending,
 		CreatedAt:    now,
 		UpdatedAt:    now,

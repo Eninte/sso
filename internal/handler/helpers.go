@@ -218,6 +218,9 @@ var validationErrors = []validationError{
 	// 认证相关错误
 	{service.ErrInvalidCredentials, apperrors.ErrCodeInvalidCredentials, http.StatusUnauthorized},
 	{apperrors.ErrEmailExists, apperrors.ErrCodeEmailExists, http.StatusConflict},
+
+	// 邮箱验证相关错误
+	{service.ErrEmailAlreadyVerified, apperrors.ErrCodeEmailAlreadyVerified, http.StatusConflict},
 }
 
 // writeValidationError 统一处理验证错误

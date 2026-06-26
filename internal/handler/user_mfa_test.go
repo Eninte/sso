@@ -178,7 +178,8 @@ func TestUserHandler_HandleSendVerificationEmail(t *testing.T) {
 
 		userHandler.HandleSendVerificationEmail(w, req)
 
-		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		// 已验证邮箱属于业务错误，应返回 409 Conflict 而非 500
+		assert.Equal(t, http.StatusConflict, w.Code)
 	})
 }
 
@@ -204,6 +205,20 @@ func TestUserHandler_HandleForgotPassword(t *testing.T) {
 
 		userHandler.HandleForgotPassword(w, req)
 
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("无效邮箱格式", func(t *testing.T) {
+		body := map[string]string{"email": "invalid-email"}
+		bodyBytes, _ := json.Marshal(body)
+
+		req := httptest.NewRequest("POST", "/api/v1/forgot-password", bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		userHandler.HandleForgotPassword(w, req)
+
+		// 无效邮箱格式属于客户端输入错误，应在 Handler 层拦截并返回 400
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
