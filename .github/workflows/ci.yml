@@ -61,6 +61,13 @@ jobs:
       - name: Run tests
         env:
           DATABASE_URL: postgres://sso:testpassword@localhost:5432/sso_test?sslmode=disable
+          # helpers_internal_test.go::TestHandleSetupTestDB_RealDB 直接读取 DB_* 构造请求体
+          DB_HOST: localhost
+          DB_PORT: "5432"
+          DB_NAME: sso_test
+          DB_USER: sso
+          DB_PASSWORD: testpassword
+          DB_SSL_MODE: disable
           REDIS_TEST_ADDR: localhost:6379
           REDIS_PASSWORD: testpassword
           # 真实 DB/Redis 连接测试的统一重试与超时参数
@@ -115,7 +122,9 @@ jobs:
           cache: true
 
       - name: Install golangci-lint
-        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.64.8
+        # 旧 URL (raw.githubusercontent.com/.../master/install.sh) 在 v2.12.1 后已损坏，
+        # 官方推荐改用 https://golangci-lint.run/install.sh
+        run: curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.64.8
 
       - name: Run golangci-lint
         run: golangci-lint run ./... --timeout 5m
@@ -134,15 +143,14 @@ jobs:
           go-version: '1.26.4'
           cache: true
 
-      - name: Install gosec
-        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
-
-      - name: Run gosec
+      - name: Install and run gosec
         # G118: 异步 goroutine 有意使用 context.Background()
         # G201: 表名已通过 validateTableName 验证
         # G202: 参数化查询，仅 LIMIT/OFFSET 索引使用 fmt.Sprint
         # G706: slog 结构化日志不受注入影响
-        run: gosec -exclude G118,G201,G202,G706 ./...
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          gosec -exclude G118,G201,G202,G706 ./...
 
       - name: Run govulncheck
         run: |
