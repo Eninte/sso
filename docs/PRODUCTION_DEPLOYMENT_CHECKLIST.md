@@ -209,60 +209,6 @@ fi
 echo "✅ 数据库SSL配置正确"
 ```
 
-## 🔧 JWT JTI跟踪配置
-
-### 代码配置
-
-在`cmd/server/main.go`中添加：
-
-```go
-// 创建缓存实例
-cache, err := cache.NewCache(&cache.Option{
-    RedisEnable:   cfg.RedisEnable,
-    RedisHost:     cfg.RedisHost,
-    RedisPort:     cfg.RedisPort,
-    RedisPassword: cfg.RedisPassword,
-    RedisDB:       cfg.RedisDB,
-})
-if err != nil {
-    log.Fatal("创建缓存失败:", err)
-}
-
-// 创建JWT服务
-jwtSvc := crypto.NewJWTService(
-    privateKey,
-    publicKey,
-    cfg.JWTIssuer,
-    cfg.AccessTokenTTL,
-    cfg.RefreshTokenTTL,
-)
-
-// 配置JTI跟踪器（防止JWT重放攻击）
-jtiTracker := crypto.NewCacheJTITracker(cache, "jti:")
-jwtSvc.SetJTITracker(jtiTracker)
-log.Info("JWT JTI跟踪已启用")
-```
-
-### 验证JTI跟踪
-
-```bash
-# 1. 生成token
-TOKEN=$(curl -X POST http://localhost:8080/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"test@example.com","password":"Test123456!"}' \
-  | jq -r '.access_token')
-
-# 2. 第一次使用token（应该成功）
-curl -X GET http://localhost:8080/api/v1/user/profile \
-  -H "Authorization: Bearer $TOKEN"
-
-# 3. 第二次使用同一个token（应该失败）
-curl -X GET http://localhost:8080/api/v1/user/profile \
-  -H "Authorization: Bearer $TOKEN"
-
-# 预期: 第二次请求返回401 Unauthorized
-```
-
 ## 📊 监控指标
 
 ### 关键指标

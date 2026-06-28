@@ -41,10 +41,12 @@ func TestRegisterFlow(t *testing.T) {
 	})
 
 	t.Run("邮箱已存在", func(t *testing.T) {
+		// 防用户枚举设计：邮箱已存在时仍返回 201（执行 dummy bcrypt），
+		// 避免攻击者通过状态码差异枚举已注册邮箱
 		req := registerRequest{Email: email, Password: password}
 		resp, _, err := doRequest("POST", "/api/v1/register", req, "")
 		require.NoError(t, err)
-		assert.Equal(t, http.StatusConflict, resp.StatusCode)
+		assert.Equal(t, http.StatusCreated, resp.StatusCode)
 	})
 
 	t.Run("无效邮箱格式", func(t *testing.T) {

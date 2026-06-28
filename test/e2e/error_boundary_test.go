@@ -190,10 +190,12 @@ func TestSQLInjectionAttempt(t *testing.T) {
 			resp, _, err := doRequest("POST", "/api/v1/register", req, "")
 			require.NoError(t, err)
 
-			// 应该返回400（验证失败）而不是500（服务器错误）
+			// 核心安全断言：SQL 注入 payload 不应导致 500 服务器内部错误
+			// （参数化查询在 DB 层防护，无需在输入层拒绝合法字符）
+			// 注意：部分 payload（如 admin'--）生成的邮箱符合 RFC 5322，
+			// 会被正常接受（201），不应被断言为 >= 400
 			assert.NotEqual(t, http.StatusInternalServerError, resp.StatusCode,
 				"SQL 注入 payload 导致 500 内部错误，可能存在安全漏洞")
-			assert.True(t, resp.StatusCode >= 400)
 		})
 	}
 

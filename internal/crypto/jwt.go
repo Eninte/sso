@@ -16,30 +16,16 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	apperrors "github.com/your-org/sso/internal/errors"
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/store"
+	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/store"
 )
 
 var (
-	ErrInvalidToken  = apperrors.ErrInvalidToken
-	ErrTokenExpired  = apperrors.ErrTokenExpired
-	ErrNoActiveKey   = apperrors.ErrNoActiveKey
-	ErrTokenReplayed = apperrors.New("ERR_TOKEN_REPLAYED", "Token已被使用，可能是重放攻击", 401)
+	ErrInvalidToken = apperrors.ErrInvalidToken
+	ErrTokenExpired = apperrors.ErrTokenExpired
+	ErrNoActiveKey  = apperrors.ErrNoActiveKey
 )
-
-// JTITracker JTI跟踪接口
-// 用于防止JWT重放攻击
-type JTITracker interface {
-	// IsJTIUsed 检查JTI是否已被使用
-	IsJTIUsed(ctx context.Context, jti string) (bool, error)
-	// MarkJTIUsed 标记JTI为已使用
-	// ttl: JTI的有效期，应该与token的有效期一致
-	MarkJTIUsed(ctx context.Context, jti string, ttl time.Duration) error
-	// CheckAndMarkUsed 原子性检查并标记JTI为已使用
-	// 返回true表示JTI已被使用过（重放攻击），false表示首次使用
-	CheckAndMarkUsed(ctx context.Context, jti string, ttl time.Duration) (bool, error)
-}
 
 type JWTService struct {
 	mu              sync.RWMutex
@@ -49,7 +35,6 @@ type JWTService struct {
 	publicKeys      map[string]*rsa.PublicKey
 	activeKeyID     string
 	keyStore        store.KeyStore
-	jtiTracker      JTITracker // JTI跟踪器（可选）
 	issuer          string
 	accessTokenTTL  time.Duration
 	refreshTokenTTL time.Duration
@@ -87,14 +72,6 @@ func NewJWTServiceWithKeyStore(
 		accessTokenTTL:  accessTokenTTL,
 		refreshTokenTTL: refreshTokenTTL,
 	}
-}
-
-// SetJTITracker 设置JTI跟踪器
-// 用于防止JWT重放攻击
-func (s *JWTService) SetJTITracker(tracker JTITracker) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.jtiTracker = tracker
 }
 
 func (s *JWTService) SetActiveKey(keyID string, privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey) error {
@@ -317,26 +294,6 @@ func (s *JWTService) ValidateAccessToken(tokenString string) (*AccessTokenClaims
 		// 该方法会检查密钥状态和过期时间
 		if !keyVersion.CanVerify() {
 			return nil, apperrors.ErrKeyExpired
-		}
-	}
-
-	// 检查JTI是否已被使用（防止重放攻击）
-	s.mu.RLock()
-	tracker := s.jtiTracker
-	s.mu.RUnlock()
-
-	if tracker != nil && claims.ID != "" {
-		ctx := context.Background()
-		ttl := time.Until(claims.ExpiresAt.Time)
-
-		// 使用原子操作检查并标记JTI，防止TOCTOU竞态
-		replayed, err := tracker.CheckAndMarkUsed(ctx, claims.ID, ttl)
-		if err != nil {
-			// JTI检查失败时不拒绝token，避免缓存故障导致服务不可用
-			return claims, nil
-		}
-		if replayed {
-			return nil, ErrTokenReplayed
 		}
 	}
 
