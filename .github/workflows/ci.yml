@@ -90,12 +90,33 @@ jobs:
       - name: Print test results on failure
         if: failure()
         run: |
-          echo "=== test-results.xml (failed tests) ==="
-          if [ -f test-results.xml ]; then
-            grep -A 2 '<failure\|<error' test-results.xml | head -200 || cat test-results.xml
-          else
-            echo "test-results.xml not found"
+          if [ ! -f test-results.xml ]; then
+            echo "::error::test-results.xml not found"
+            exit 0
           fi
+          # 使用 ::error:: 工作流命令将失败信息输出为 GitHub Annotations
+          # 通过 API 可读取 check-runs annotations，无需访问日志
+          python3 -c "
+          import xml.etree.ElementTree as ET
+          tree = ET.parse('test-results.xml')
+          count = 0
+          for tc in tree.iter('testcase'):
+              for fail in list(tc) + list(tc.iter()):
+                  if fail.tag in ('failure', 'error'):
+                      name = tc.get('name', '?')
+                      cls = tc.get('classname', '?')
+                      msg = (fail.get('message') or '')[:200]
+                      # 只取前 50 行失败详情
+                      text = (fail.text or '').strip().split('\n')[:50]
+                      text_preview = ' | '.join(text)[:300]
+                      print(f'::error::FAILED: {cls}/{name} — {msg} {text_preview}')
+                      count += 1
+                      if count >= 30:
+                          break
+              if count >= 30:
+                  break
+          print(f'::error::Total failed/error tests: {count} (showing first 30)')
+          " 2>&1 || echo "::error::Failed to parse test-results.xml"
 
       - name: Upload test report
         uses: actions/upload-artifact@v4
