@@ -47,6 +47,7 @@ func startSetupWizard(loadErr error, version string) {
 	if addr == ":" {
 		addr = "127.0.0.1:9090"
 	}
+	// nosec G706 -- slog 结构化日志，值作为参数传递不受注入影响
 	slog.Info("配置向导启动", "address", addr, "config_error", loadErr.Error())
 
 	server := &http.Server{

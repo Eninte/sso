@@ -319,6 +319,7 @@ func (h *SetupHandler) testConnections(r *http.Request, dbDSN, redisAddr, redisP
 // HandleSetupTestDB 测试数据库连接
 func (h *SetupHandler) HandleSetupTestDB(w http.ResponseWriter, r *http.Request) {
 	if !isLocalRequest(r) {
+		// nosec G706 -- slog 结构化日志，r.RemoteAddr 作为参数传递不受注入影响
 		slog.Warn("setup test-db 拒绝非本地请求", "remote_addr", r.RemoteAddr)
 		handlerutil.WriteJSONError(w, apperrors.ErrForbidden.WithDetails("配置向导仅允许本地访问"))
 		return
@@ -332,6 +333,7 @@ func (h *SetupHandler) HandleSetupTestDB(w http.ResponseWriter, r *http.Request)
 		SSLMode  string `json:"ssl_mode"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// nosec G706 -- slog 结构化日志，r.RemoteAddr 作为参数传递不受注入影响
 		slog.Warn("setup test-db 请求体解析失败", "error", err, "remote_addr", r.RemoteAddr)
 		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails("无效的请求格式"))
 		return
@@ -392,6 +394,7 @@ func (h *SetupHandler) HandleSetupTestDB(w http.ResponseWriter, r *http.Request)
 // HandleSetupTestRedis 测试Redis连接
 func (h *SetupHandler) HandleSetupTestRedis(w http.ResponseWriter, r *http.Request) {
 	if !isLocalRequest(r) {
+		// nosec G706 -- slog 结构化日志，r.RemoteAddr 作为参数传递不受注入影响
 		slog.Warn("setup test-redis 拒绝非本地请求", "remote_addr", r.RemoteAddr)
 		handlerutil.WriteJSONError(w, apperrors.ErrForbidden.WithDetails("配置向导仅允许本地访问"))
 		return
@@ -403,6 +406,7 @@ func (h *SetupHandler) HandleSetupTestRedis(w http.ResponseWriter, r *http.Reque
 		DB       int    `json:"db"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// nosec G706 -- slog 结构化日志，r.RemoteAddr 作为参数传递不受注入影响
 		slog.Warn("setup test-redis 请求体解析失败", "error", err, "remote_addr", r.RemoteAddr)
 		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails("无效的请求格式"))
 		return

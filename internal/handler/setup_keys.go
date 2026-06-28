@@ -51,7 +51,7 @@ func (h *SetupHandler) HandleSetupGenerateKeys(w http.ResponseWriter, r *http.Re
 
 	// 确保目录存在（自动创建）
 	privDir := filepath.Dir(req.PrivatePath)
-	if err := os.MkdirAll(privDir, 0755); err != nil {
+	if err := os.MkdirAll(privDir, 0750); err != nil {
 		slog.Error("创建私钥目录失败", "dir", privDir, "error", err)
 		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("创建密钥目录失败"))
 		return
@@ -59,7 +59,7 @@ func (h *SetupHandler) HandleSetupGenerateKeys(w http.ResponseWriter, r *http.Re
 
 	pubDir := filepath.Dir(req.PublicPath)
 	if pubDir != privDir {
-		if err := os.MkdirAll(pubDir, 0755); err != nil {
+		if err := os.MkdirAll(pubDir, 0750); err != nil {
 			slog.Error("创建公钥目录失败", "dir", pubDir, "error", err)
 			handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("创建公钥目录失败"))
 			return

@@ -234,6 +234,8 @@ func (s *AuthService) Register(ctx context.Context, req *model.RegisterRequest) 
 
 	// 5. 异步发送验证邮件（不阻塞注册响应）
 	go func() {
+		// nosec G118 -- 异步邮件发送使用 context.Background() 是有意为之，
+		// 避免请求结束后 context 取消导致邮件发送中断
 		if err := s.sendVerificationEmail(context.Background(), user); err != nil {
 			slog.Warn("发送验证邮件失败", "error", err, "userID", user.ID)
 		}
