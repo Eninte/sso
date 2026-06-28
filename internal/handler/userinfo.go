@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/your-org/sso/internal/cache"
-	apperrors "github.com/your-org/sso/internal/errors"
-	"github.com/your-org/sso/internal/middleware"
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/store"
+	"github.com/example/sso/internal/cache"
+	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/middleware"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/store"
 )
 
 // ============================================================================

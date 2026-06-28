@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/cache"
+	"github.com/example/sso/internal/cache"
 )
 
 func TestLRUCache_DeleteNonExistent(t *testing.T) {

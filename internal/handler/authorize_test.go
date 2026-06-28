@@ -10,9 +10,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/your-org/sso/internal/handler"
-	"github.com/your-org/sso/internal/service"
-	"github.com/your-org/sso/internal/store/mock"
+	"github.com/example/sso/internal/crypto"
+	"github.com/example/sso/internal/handler"
+	"github.com/example/sso/internal/service"
+	"github.com/example/sso/internal/store/mock"
 )
 
 // ============================================================================
@@ -22,7 +23,8 @@ import (
 func createTestAuthorizeHandler(t *testing.T) *handler.AuthorizeHandler {
 	storeInst := mock.New()
 	tokenSvc := createTestTokenServiceForHandler()
-	oauthSvc := service.NewOAuthService(storeInst, tokenSvc)
+	passwordSvc := crypto.NewPasswordService(4)
+	oauthSvc := service.NewOAuthService(storeInst, tokenSvc, service.WithOAuthPassword(passwordSvc))
 	return handler.NewAuthorizeHandler(oauthSvc)
 }
 

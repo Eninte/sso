@@ -5,13 +5,13 @@ package auditutil
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"time"
 
-	"github.com/your-org/sso/internal/model"
+	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/model"
 )
 
 // 关键事件列表
@@ -194,7 +194,7 @@ func SafeAuditLog(ctx context.Context, auditSvc AuditService, event, userID stri
 func CriticalAuditLog(ctx context.Context, auditSvc AuditService, event, userID string, metadata map[string]interface{}) error {
 	// 关键操作必须有审计服务
 	if auditSvc == nil {
-		return errors.New("audit service required for critical operations")
+		return apperrors.New(apperrors.ErrCodeInternal, "audit service required for critical operations", 500)
 	}
 
 	// 构建审计日志对象

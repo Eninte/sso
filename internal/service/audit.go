@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/your-org/sso/internal/common"
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/store"
+	"github.com/example/sso/internal/common"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/store"
 )
 
 // ============================================================================
@@ -365,6 +365,41 @@ func (s *AuditService) LogSystemStart(ctx context.Context, version string) {
 	s.Log(ctx, &model.AuditLog{
 		EventType: string(model.EventSystemStart),
 		Details:   string(details),
+		Success:   true,
+	})
+}
+
+func (s *AuditService) LogUserDisabled(ctx context.Context, userID, ipAddress string) {
+	s.Log(ctx, &model.AuditLog{
+		EventType: string(model.EventUserDisabled),
+		UserID:    userID,
+		IPAddress: ipAddress,
+		Success:   true,
+	})
+}
+
+func (s *AuditService) LogUserEnabled(ctx context.Context, userID, ipAddress string) {
+	s.Log(ctx, &model.AuditLog{
+		EventType: string(model.EventUserEnabled),
+		UserID:    userID,
+		IPAddress: ipAddress,
+		Success:   true,
+	})
+}
+
+func (s *AuditService) LogUserDeleted(ctx context.Context, userID, ipAddress string) {
+	s.Log(ctx, &model.AuditLog{
+		EventType: string(model.EventUserDeleted),
+		UserID:    userID,
+		IPAddress: ipAddress,
+		Success:   true,
+	})
+}
+
+func (s *AuditService) LogSystemCleanup(ctx context.Context, ipAddress string) {
+	s.Log(ctx, &model.AuditLog{
+		EventType: string(model.EventSystemCleanup),
+		IPAddress: ipAddress,
 		Success:   true,
 	})
 }

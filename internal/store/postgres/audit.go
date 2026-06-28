@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/your-org/sso/internal/model"
+	"github.com/example/sso/internal/model"
 )
 
 // ============================================================================
@@ -75,6 +75,7 @@ func (s *Store) ListAuditLogs(ctx context.Context, userID string, eventType stri
 	offsetArgIndex := len(args) + 2
 	args = append(args, limit, offset)
 
+	// nosec G202 -- whereClause 通过参数化查询构建，LIMIT/OFFSET 使用 $N 参数占位符
 	query := "SELECT id, event_type, user_id, client_id, ip_address, user_agent, details, success, timestamp " +
 		"FROM audit_logs " +
 		whereClause +

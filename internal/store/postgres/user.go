@@ -10,8 +10,8 @@ import (
 
 	"github.com/lib/pq"
 
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/store"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/store"
 )
 
 // ============================================================================
@@ -262,4 +262,19 @@ func (s *Store) ListUsers(ctx context.Context, offset, limit int) ([]*model.User
 	}
 
 	return users, total, nil
+}
+
+// ExistsUserByRole 检查是否存在指定角色的用户
+// 使用 EXISTS 子查询，仅扫描索引即可返回结果，避免全表数据加载
+func (s *Store) ExistsUserByRole(ctx context.Context, role string) (bool, error) {
+	ctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+
+	var exists bool
+	query := `SELECT EXISTS(SELECT 1 FROM users WHERE role = $1 LIMIT 1)`
+	err := s.db.QueryRowContext(ctx, query, role).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
 }

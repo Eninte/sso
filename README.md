@@ -170,6 +170,31 @@ make test-e2e-cleanup
 
 详细的E2E测试说明请参考：[E2E测试指南](docs/E2E_TESTING.md)
 
+### 真实 DB/Redis 集成测试
+
+需要真实 PostgreSQL / Redis 连接的集成测试统一通过 [`internal/util/testutil`](internal/util/testutil/conn_helper.go) 包建立连接，内置重试与超时机制（复用 `retryutil`），应对 CI service container 启动抖动。
+
+```bash
+# 本地运行真实集成测试（需先配置环境变量）
+set -a && source .env.test && set +a
+go test ./internal/handler/ -run "TestHandleSetupTestDB_RealDB|TestHandleSetupTestRedis_RealRedis" -v
+
+# 默认 go test 无环境变量时会自动 t.Skip，不影响运行
+go test ./...
+```
+
+关键环境变量（CI 已配置）：
+
+| 环境变量 | 用途 | 默认值 |
+|----------|------|--------|
+| `DATABASE_URL` / `DB_*` | PostgreSQL 连接 | 无（未配置则 skip） |
+| `REDIS_TEST_ADDR` / `REDIS_PASSWORD` | Redis 连接 | 无（未配置则 skip） |
+| `TEST_CONN_MAX_RETRIES` | 最大重试次数 | `3` |
+| `TEST_CONN_BASE_DELAY` | 重试基础延迟 | `500ms` |
+| `TEST_CONN_TIMEOUT` | 单次测试超时 | `30s` |
+
+详细的 API、使用示例和新增测试的检查清单请参考：[测试指南 - 真实 DB/Redis 测试连接配置](docs/TESTING.md#真实-dbredis-测试连接配置)
+
 ### Docker部署
 
 ```bash

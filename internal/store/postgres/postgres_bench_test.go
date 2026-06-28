@@ -5,37 +5,27 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/store/postgres"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/store/postgres"
+	"github.com/example/sso/internal/util/testutil"
 )
 
 // ============================================================================
 // 基准测试辅助函数
 // ============================================================================
 
+// getBenchDB 返回已 ping 通的真实 PostgreSQL 连接（带重试与超时）。
+// 复用 testutil.ConnectTestDB，与全仓集成测试共享同一套 TEST_CONN_* 配置。
+// 注意：testutil 内部会通过 b.Cleanup 关闭连接，bench 中的 defer db.Close() 是幂等的多余调用，可保留。
 func getBenchDB(b *testing.B) *sql.DB {
 	b.Helper()
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		b.Skip("跳过基准测试：未设置DATABASE_URL环境变量")
-	}
-	db, err := sql.Open("postgres", dbURL)
-	if err != nil {
-		b.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := db.PingContext(ctx); err != nil {
-		b.Fatal(err)
-	}
-	return db
+	return testutil.ConnectTestDB(b)
 }
 
 func setupBenchStore(b *testing.B) (*postgres.Store, *sql.DB) {

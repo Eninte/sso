@@ -8,9 +8,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	apperrors "github.com/your-org/sso/internal/errors"
-	"github.com/your-org/sso/internal/store"
-	"github.com/your-org/sso/internal/util/serviceutil"
+	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/store"
+	"github.com/example/sso/internal/util/serviceutil"
 )
 
 // ============================================================================

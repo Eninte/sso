@@ -8,8 +8,8 @@ import (
 
 	"github.com/lib/pq"
 
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/store"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/store"
 )
 
 // ============================================================================

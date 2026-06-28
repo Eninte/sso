@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/your-org/sso/internal/metrics"
+	"github.com/example/sso/internal/metrics"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

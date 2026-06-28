@@ -69,7 +69,7 @@ test-integration: ## 运行集成测试
 
 .PHONY: test-e2e
 test-e2e: ## 运行端到端测试（需要服务运行中）
-	E2E_ADMIN_EMAIL="system@eninte.com" E2E_ADMIN_PASSWORD="Admin123!" RATE_LIMIT_REQUESTS=0 CAPTCHA_ENABLED=false DATABASE_URL="$(TEST_DATABASE_URL)" gotestsum --format pkgname -- -race -tags=e2e ./test/e2e/...
+	E2E_ADMIN_EMAIL="system@eninte.com" E2E_ADMIN_PASSWORD="Admin1234!" RATE_LIMIT_REQUESTS=0 CAPTCHA_ENABLED=false DATABASE_URL="$(TEST_DATABASE_URL)" gotestsum --format pkgname -- -race -tags=e2e ./test/e2e/...
 
 .PHONY: test-e2e-prepare
 test-e2e-prepare: ## 准备E2E测试数据（验证测试用户邮箱）
@@ -100,11 +100,11 @@ test-failed: ## 仅重跑失败的测试
 	gotestsum --rerun-fails --format pkgname -- -race ./...
 
 .PHONY: test-coverage-check
-test-coverage-check: ## 运行测试并检查覆盖率阈值 (>=70%)
-	@go test -coverprofile=coverage.out ./... > /dev/null 2>&1
+test-coverage-check: ## 运行测试并检查覆盖率阈值 (>=80%，排除app组合根与store/mock)
+	@go test -coverprofile=coverage.out $(shell go list ./internal/... | grep -v '/store/mock' | grep -v '/internal/app$$') > /dev/null 2>&1
 	@COVERAGE=$$(go tool cover -func=coverage.out | grep total | awk '{print $$3}' | sed 's/%//'); \
-	if [ $$(echo "$$COVERAGE < 70" | bc) -eq 1 ]; then \
-		echo "❌ Coverage $$COVERAGE% is below threshold 70%"; \
+	if [ $$(echo "$$COVERAGE < 80" | bc) -eq 1 ]; then \
+		echo "❌ Coverage $$COVERAGE% is below threshold 80%"; \
 		exit 1; \
 	fi; \
 	echo "✅ Coverage: $$COVERAGE%"
@@ -190,8 +190,8 @@ deploy: ## 部署到TrueNAS (用法: make deploy [TRUENAS_HOST=192.168.1.3])
 .PHONY: lint
 lint: ## 运行代码检查
 	go vet ./...
-	@which golangci-lint > /dev/null || echo "建议安装 golangci-lint"
-	@golangci-lint run ./... 2>/dev/null || true
+	@which golangci-lint > /dev/null || (echo "错误: 未安装 golangci-lint，请安装后再运行 lint" && exit 1)
+	golangci-lint run ./...
 
 .PHONY: fmt
 fmt: ## 格式化代码
@@ -271,7 +271,7 @@ BASE_URL ?= http://localhost:9090
 
 # 压测环境变量默认值（与 .env.test 保持一致，可通过 shell 环境变量或命令行覆盖）
 E2E_ADMIN_EMAIL ?= system@eninte.com
-E2E_ADMIN_PASSWORD ?= Admin123!
+E2E_ADMIN_PASSWORD ?= Admin1234!
 TEST_PASSWORD ?= TestPassword123!
 OAUTH_CLIENT_SECRET ?=
 OAUTH_PUBLIC_CLIENT_ID ?= public-test-client

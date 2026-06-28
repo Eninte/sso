@@ -6,12 +6,12 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/your-org/sso/internal/crypto"
-	apperrors "github.com/your-org/sso/internal/errors"
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/store"
-	"github.com/your-org/sso/internal/util/auditutil"
-	"github.com/your-org/sso/internal/util/serviceutil"
+	"github.com/example/sso/internal/crypto"
+	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/store"
+	"github.com/example/sso/internal/util/auditutil"
+	"github.com/example/sso/internal/util/serviceutil"
 )
 
 type KeyRotationService struct {

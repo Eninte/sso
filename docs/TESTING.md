@@ -700,18 +700,197 @@ go test -cover ./...
 
 ### 禁止跳过测试
 
-**绝对禁止使用 `t.Skip()` 跳过测试！这是严重的代码质量问题。**
+**禁止使用 `t.Skip()` 跳过测试来逃避实现！这是严重的代码质量问题。**
 
 ```go
 // ❌ 绝对禁止
 func TestSomething(t *testing.T) {
     t.Skip("功能未实现")
-    t.Skip("环境问题")
     t.Skip("端点未实现")
 }
 
 // ✅ 正确做法：实现功能后再运行测试
 ```
+
+**唯一允许的 `t.Skip` 场景**：真实 DB/Redis 集成测试在环境变量未配置时跳过（详见下方[真实 DB/Redis 测试连接配置](#真实-dbredis-测试连接配置)章节）。这种 skip 是合理的，因为：
+- 它跳过的是"环境未就绪"，不是"功能未实现"
+- CI 环境会配置好环境变量，测试在 CI 中一定会运行
+- 本地无 DB/Redis 环境时跳过，避免 `go test` 失败
+
+```go
+// ✅ 允许：环境未配置时跳过真实集成测试
+func TestHandleSetupTestDB_RealDB(t *testing.T) {
+    if _, ok := buildDSNFromEnv(); !ok {
+        t.Skip("跳过真实 DB 测试：未设置 DATABASE_URL 或 DB_* 环境变量")
+    }
+    // ... 真实连接测试逻辑
+}
+```
+
+## 真实 DB/Redis 测试连接配置
+
+### 概述
+
+项目中所有需要真实 PostgreSQL / Redis 连接的集成测试，统一通过 [`internal/util/testutil`](../internal/util/testutil/conn_helper.go) 包建立连接，共享同一套**重试**与**超时**机制，避免 CI service container 启动抖动导致的偶发失败。
+
+### 核心 API
+
+| API | 用途 |
+|-----|------|
+| `testutil.ConnectTestDB(tb)` | 返回已 ping 通的真实 PG 连接（带重试+超时，`t.Cleanup` 自动关闭）。参数 `testing.TB` 兼容 `*testing.T` 和 `*testing.B` |
+| `testutil.ConnectTestRedis(tb)` | 返回已 ping 通的真实 Redis 客户端（同上）。参数同上 |
+| `testutil.RedisAddr()` | 仅返回 Redis 地址字符串（不建连，供被测代码使用） |
+| `testutil.LoadConnConfig()` + `ConnConfig.RetryConfig()` | 供需要自行实现重试的测试（如测 HTTP handler）共享同一套配置 |
+
+### 连接环境变量
+
+以下环境变量控制真实 DB/Redis 测试的连接目标：
+
+| 环境变量 | 用途 | 示例值 |
+|----------|------|--------|
+| `DATABASE_URL` | PostgreSQL DSN（优先） | `postgres://sso:testpassword@localhost:5432/sso_test?sslmode=disable` |
+| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` / `DB_SSL_MODE` | 当 `DATABASE_URL` 未设置时，用这些字段拼装 DSN | `localhost` / `5432` / `sso_test` / `sso` / `testpassword` / `disable` |
+| `REDIS_TEST_ADDR` | Redis 地址（`host:port`） | `localhost:6379` |
+| `REDIS_PASSWORD` | Redis 密码（可选） | `testpassword` |
+
+未配置时测试自动 `t.Skip`，不影响默认 `go test`。
+
+### 重试与超时环境变量
+
+以下环境变量由 `testutil` 包统一读取，**全仓所有真实 DB/Redis 测试共享**：
+
+| 环境变量 | 默认值 | 说明 |
+|----------|--------|------|
+| `TEST_CONN_MAX_RETRIES` | `3` | 最大重试次数（应对 CI service container 启动抖动） |
+| `TEST_CONN_BASE_DELAY` | `500ms` | 重试基础延迟（指数退避，复用 `retryutil`） |
+| `TEST_CONN_TIMEOUT` | `30s` | 单次测试整体超时 |
+
+### 复用的重试机制
+
+`testutil` 复用项目已有的 [`retryutil.ExponentialBackoffRetry`](../internal/util/retryutil/retry.go)，采用指数退避 + 25% 抖动算法，避免 thundering herd：
+
+```
+delay = min(baseDelay * 2^attempt, 5s)
+jitter = random(0, delay * 0.25)
+actualDelay = delay + jitter
+```
+
+### 两层重试机制
+
+项目采用**两层重试**应对 CI 中的连接抖动：
+
+| 层级 | 机制 | 应对场景 |
+|------|------|---------|
+| 测试内重试 | `testutil` + `retryutil.ExponentialBackoffRetry` | 单测抖动（service container 启动后短暂连接拒绝） |
+| CI 层重跑 | `gotestsum --rerun-fails=2` | 偶发基础设施故障（整个 service container 不可达） |
+
+### 使用示例
+
+#### 直接建连的测试（Store 层集成测试）
+
+```go
+package postgres_test
+
+import (
+    "github.com/example/sso/internal/store/postgres"
+    "github.com/example/sso/internal/util/testutil"
+)
+
+func setupTestStore(t *testing.T) (*postgres.Store, *sql.DB) {
+    t.Helper()
+    db := testutil.ConnectTestDB(t) // 自动重试+超时+t.Cleanup
+    return postgres.New(db), db
+}
+```
+
+#### 测试 HTTP handler 的连接逻辑（Handler 层）
+
+```go
+package handler
+
+import (
+    "github.com/example/sso/internal/util/retryutil"
+    "github.com/example/sso/internal/util/testutil"
+)
+
+func TestHandleSetupTestDB_RealDB(t *testing.T) {
+    // ...构造请求体...
+
+    cfg := testutil.LoadConnConfig()
+    ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
+    defer cancel()
+
+    err := retryutil.ExponentialBackoffRetry(ctx, func(ctx context.Context) error {
+        rec := httptest.NewRecorder()
+        handler.HandleSetupTestDB(rec, req)
+        if rec.Code == http.StatusOK {
+            return nil
+        }
+        return fmt.Errorf("status=%d", rec.Code)
+    }, cfg.RetryConfig())
+
+    require.NoError(t, err)
+}
+```
+
+### 本地运行真实集成测试
+
+```bash
+# 方式 1：从 .env.test 加载环境变量
+set -a && source .env.test && set +a && go test ./internal/handler/ -run "TestHandleSetupTestDB_RealDB" -v
+
+# 方式 2：直接设置环境变量
+DATABASE_URL="postgres://sso:sso@192.168.1.3:5432/sso_test?sslmode=disable" \
+REDIS_TEST_ADDR=192.168.1.3:30059 \
+go test ./internal/handler/ -run "TestHandleSetupTestDB_RealDB|TestHandleSetupTestRedis_RealRedis" -v
+
+# 调节重试参数（调试时用）
+TEST_CONN_MAX_RETRIES=5 TEST_CONN_BASE_DELAY=1s TEST_CONN_TIMEOUT=60s \
+go test ./internal/store/postgres/... -v
+```
+
+### CI 配置参考
+
+CI 流水线（[`.github/workflows/ci.yml`](../.github/workflows/ci.yml)）已配置好环境变量和两层重试：
+
+```yaml
+- name: Run tests
+  env:
+    DATABASE_URL: postgres://sso:testpassword@localhost:5432/sso_test?sslmode=disable
+    REDIS_TEST_ADDR: localhost:6379
+    REDIS_PASSWORD: testpassword
+    TEST_CONN_MAX_RETRIES: "3"
+    TEST_CONN_BASE_DELAY: "500ms"
+    TEST_CONN_TIMEOUT: "30s"
+  run: |
+    gotestsum --junitfile test-results.xml --format pkgname --rerun-fails=2 --packages=./... -- \
+      -race -timeout 120s -coverprofile=coverage.out ./...
+```
+
+### 已接入的测试清单
+
+以下测试已接入统一的 `testutil` 重试与超时机制：
+
+| 文件 | 测试范围 | 接入方式 |
+|------|---------|---------|
+| [`internal/handler/helpers_internal_test.go`](../internal/handler/helpers_internal_test.go) | `HandleSetupTestDB` / `HandleSetupTestRedis` 成功路径 | `testutil.LoadConnConfig()` + `retryutil` |
+| [`internal/store/postgres/postgres_test.go`](../internal/store/postgres/postgres_test.go) | Store 层全量集成测试 | `testutil.ConnectTestDB(t)` |
+| [`internal/store/postgres/mfa_recovery_test.go`](../internal/store/postgres/mfa_recovery_test.go) | MFA 恢复码存储 | `testutil.ConnectTestDB(t)` |
+| [`internal/store/postgres/postgres_bench_test.go`](../internal/store/postgres/postgres_bench_test.go) | Store 层基准测试（10 个 Benchmark） | `testutil.ConnectTestDB(b)`（`testing.TB` 兼容 `*testing.B`） |
+| [`internal/handler/init_integration_test.go`](../internal/handler/init_integration_test.go) | Init handler 集成测试（build tag: `integration`） | `testutil.ConnectTestDB(t)` |
+| [`internal/cache/redis_test.go`](../internal/cache/redis_test.go) | Redis 缓存集成测试（build tag: `integration`） | `testutil.RedisAddr()` + `t.Skip` |
+| [`test/e2e/helpers.go`](../test/e2e/helpers.go) | E2E 测试 DB 探针（读取密码重置真实令牌） | `testutil.ConnectTestDB(t)`（build tag: `e2e`） |
+
+### 新增真实集成测试的检查清单
+
+新增需要真实 DB/Redis 的测试时，请遵循：
+
+- [ ] 使用 `testutil.ConnectTestDB(t)` / `testutil.ConnectTestRedis(t)` 建连，**禁止裸 `sql.Open` + `PingContext`**
+- [ ] 环境变量未配置时 `t.Skip`，不要尝试连接硬编码地址
+- [ ] 测试 HTTP handler 的连接逻辑时，用 `testutil.LoadConnConfig()` + `retryutil.ExponentialBackoffRetry` 包裹请求
+- [ ] **不要给被测代码加重试**（会掩盖 bug），重试只在测试层
+- [ ] 测试 `NewFromURL` / `NewFromConfig` 等构造函数本身时，**不加重试**（重试 Ping 会掩盖构造函数的 bug）
+- [ ] 通过 `t.Cleanup` 确保连接关闭
 
 ### 禁止宽松断言
 

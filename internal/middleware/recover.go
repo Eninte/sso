@@ -19,6 +19,7 @@ func Recover(next http.Handler) http.Handler {
 			if recovered := recover(); recovered != nil {
 				stack := make([]byte, 64*1024)
 				stack = stack[:runtime.Stack(stack, false)]
+				// nosec G706 -- slog 结构化日志将值作为参数传递，不受日志注入影响
 				slog.Error("HTTP处理发生panic",
 					"error", recovered,
 					"request_id", GetRequestIDFromContext(r.Context()),

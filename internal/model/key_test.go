@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/example/sso/internal/model"
 	"github.com/stretchr/testify/assert"
-	"github.com/your-org/sso/internal/model"
 )
 
 // ============================================================================

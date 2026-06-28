@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/model"
+	"github.com/example/sso/internal/model"
 )
 
 func TestToken_GetClientID(t *testing.T) {

@@ -5,7 +5,7 @@ package handler
 import (
 	"net/http"
 
-	"github.com/your-org/sso/internal/metrics"
+	"github.com/example/sso/internal/metrics"
 )
 
 // ============================================================================

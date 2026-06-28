@@ -6,7 +6,6 @@ package cache_test
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -14,19 +13,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/cache"
+	"github.com/example/sso/internal/cache"
+	"github.com/example/sso/internal/util/testutil"
 )
 
 // ============================================================================
 // 测试辅助函数
 // ============================================================================
 
-// testRedisAddr 返回测试用 Redis 地址，优先使用环境变量
-func testRedisAddr() string {
-	if addr := os.Getenv("REDIS_TEST_ADDR"); addr != "" {
-		return addr
+// testRedisAddr 返回测试用 Redis 地址（来自环境变量）
+//
+// 与 testutil.RedisAddr 共享同一套环境变量（REDIS_TEST_ADDR）。
+// 未配置时 t.Skip，避免无 Redis 环境下尝试连接硬编码地址。
+func testRedisAddr(t *testing.T) string {
+	t.Helper()
+	addr := testutil.RedisAddr()
+	if addr == "" {
+		t.Skip("跳过真实 Redis 测试：未设置 REDIS_TEST_ADDR 环境变量")
 	}
-	return "192.168.1.3:30059"
+	return addr
 }
 
 // ============================================================================
@@ -475,7 +480,7 @@ func TestNewCacheWithFallback(t *testing.T) {
 
 func TestRedisCache_GetSet(t *testing.T) {
 	c, err := cache.NewRedisCacheWithOptions(&redis.Options{
-		Addr: testRedisAddr(),
+		Addr: testRedisAddr(t),
 	})
 	require.NoError(t, err)
 	defer c.Close()
@@ -513,7 +518,7 @@ func TestRedisCache_Delete(t *testing.T) {
 	//
 
 	c, err := cache.NewRedisCacheWithOptions(&redis.Options{
-		Addr: testRedisAddr(),
+		Addr: testRedisAddr(t),
 	})
 	require.NoError(t, err)
 	defer c.Close()
@@ -541,7 +546,7 @@ func TestRedisCache_DeletePattern(t *testing.T) {
 	//
 
 	c, err := cache.NewRedisCacheWithOptions(&redis.Options{
-		Addr: testRedisAddr(),
+		Addr: testRedisAddr(t),
 	})
 	require.NoError(t, err)
 	defer c.Close()
@@ -573,7 +578,7 @@ func TestRedisCache_SetWithNilProtection(t *testing.T) {
 	//
 
 	c, err := cache.NewRedisCacheWithOptions(&redis.Options{
-		Addr: testRedisAddr(),
+		Addr: testRedisAddr(t),
 	})
 	require.NoError(t, err)
 	defer c.Close()
@@ -615,7 +620,7 @@ func TestRedisCache_Ping(t *testing.T) {
 	//
 
 	c, err := cache.NewRedisCacheWithOptions(&redis.Options{
-		Addr: testRedisAddr(),
+		Addr: testRedisAddr(t),
 	})
 	require.NoError(t, err)
 	defer c.Close()
@@ -630,7 +635,7 @@ func TestRedisCache_Close(t *testing.T) {
 	//
 
 	c, err := cache.NewRedisCacheWithOptions(&redis.Options{
-		Addr: testRedisAddr(),
+		Addr: testRedisAddr(t),
 	})
 	require.NoError(t, err)
 
@@ -644,7 +649,7 @@ func TestNewRedisCacheWithOptions(t *testing.T) {
 		//
 
 		c, err := cache.NewRedisCacheWithOptions(&redis.Options{
-			Addr: testRedisAddr(),
+			Addr: testRedisAddr(t),
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, c)
@@ -664,7 +669,7 @@ func TestRedisCache_SetNonSerializable(t *testing.T) {
 	//
 
 	c, err := cache.NewRedisCacheWithOptions(&redis.Options{
-		Addr: testRedisAddr(),
+		Addr: testRedisAddr(t),
 	})
 	require.NoError(t, err)
 	defer c.Close()

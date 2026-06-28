@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/your-org/sso/internal/middleware"
+	"github.com/example/sso/internal/middleware"
 )
 
 // ============================================================================

@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/crypto"
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/store/mock"
+	"github.com/example/sso/internal/crypto"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/store/mock"
 )
 
 // TestResetToken_PreventReuse 测试密码重置令牌不能被重复使用

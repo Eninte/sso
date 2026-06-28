@@ -13,10 +13,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/crypto"
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/service"
-	"github.com/your-org/sso/internal/store/mock"
+	"github.com/example/sso/internal/crypto"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/service"
+	"github.com/example/sso/internal/store/mock"
 )
 
 // ============================================================================
@@ -45,16 +45,19 @@ func createTestTokenService(store *mock.Store) *service.TokenService {
 func createTestOAuthService(t *testing.T) (*service.OAuthService, *mock.Store) {
 	store := mock.New()
 	tokenSvc := createTestTokenService(store)
-	oauthSvc := service.NewOAuthService(store, tokenSvc)
+	passwordSvc := crypto.NewPasswordService(10)
+	oauthSvc := service.NewOAuthService(store, tokenSvc, service.WithOAuthPassword(passwordSvc))
 	return oauthSvc, store
 }
 
-// createTestClient 创建测试用的OAuth客户端
+// createTestClient 创建测试用的OAuth客户端（ClientSecret 为 bcrypt 哈希）
 func createTestClient() *model.Client {
+	passwordSvc := crypto.NewPasswordService(10)
+	secretHash, _ := passwordSvc.HashPassword("test-client-secret")
 	return &model.Client{
 		ID:           "test-client-id",
 		ClientID:     "test-client-id",
-		ClientSecret: "test-client-secret",
+		ClientSecret: secretHash,
 		Name:         "Test Client",
 		RedirectURIs: []string{"http://localhost:3000/callback"},
 		GrantTypes:   []string{model.GrantTypeAuthorizationCode, model.GrantTypeRefreshToken},

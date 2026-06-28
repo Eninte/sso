@@ -43,7 +43,7 @@ func DefaultCORSConfig() *CORSConfig {
 	return &CORSConfig{
 		AllowedOrigins: []string{"http://localhost:3000"},
 		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders: []string{"Content-Type", "Authorization", "X-Requested-With", "X-Captcha-ID", "X-Captcha-Answer"},
+		AllowedHeaders: []string{"Content-Type", "Authorization", "X-Requested-With", "X-Captcha-Id", "X-Captcha-Answer"},
 		MaxAge:         86400, // 24小时
 	}
 }

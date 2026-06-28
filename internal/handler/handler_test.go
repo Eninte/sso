@@ -15,12 +15,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/crypto"
-	"github.com/your-org/sso/internal/handler"
-	"github.com/your-org/sso/internal/middleware"
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/service"
-	"github.com/your-org/sso/internal/store/mock"
+	"github.com/example/sso/internal/crypto"
+	"github.com/example/sso/internal/handler"
+	"github.com/example/sso/internal/middleware"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/service"
+	"github.com/example/sso/internal/store/mock"
 )
 
 // ============================================================================
@@ -42,11 +42,11 @@ func createTestJWTServiceForHandlerTest() *crypto.JWTService {
 // mockCaptchaVerifier 测试用mock验证码服务（禁用状态，始终通过）
 type mockCaptchaVerifier struct{}
 
-func (m *mockCaptchaVerifier) IsEnabled() bool                                          { return false }
-func (m *mockCaptchaVerifier) ShouldRequireCaptcha(_ context.Context, _ string) bool    { return false }
-func (m *mockCaptchaVerifier) Verify(_ context.Context, _, _ string) (bool, error)      { return true, nil }
-func (m *mockCaptchaVerifier) RecordFailure(_ context.Context, _ string)                {}
-func (m *mockCaptchaVerifier) ClearFailures(_ context.Context, _ string)                {}
+func (m *mockCaptchaVerifier) IsEnabled() bool                                       { return false }
+func (m *mockCaptchaVerifier) ShouldRequireCaptcha(_ context.Context, _ string) bool { return false }
+func (m *mockCaptchaVerifier) Verify(_ context.Context, _, _ string) (bool, error)   { return true, nil }
+func (m *mockCaptchaVerifier) RecordFailure(_ context.Context, _ string)             {}
+func (m *mockCaptchaVerifier) ClearFailures(_ context.Context, _ string)             {}
 
 var testCaptchaSvc = &mockCaptchaVerifier{}
 
@@ -373,7 +373,7 @@ func createTestTokenHandler(t *testing.T) (*handler.TokenHandler, *mock.Store) {
 
 	tokenSvc := service.NewTokenService(jwtSvc, store)
 	authSvc := service.NewAuthService(store, passwordSvc, jwtSvc, 5, 30*time.Minute)
-	oauthSvc := service.NewOAuthService(store, tokenSvc)
+	oauthSvc := service.NewOAuthService(store, tokenSvc, service.WithOAuthPassword(passwordSvc))
 
 	tokenHandler := handler.NewTokenHandler(authSvc, oauthSvc)
 

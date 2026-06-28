@@ -5,6 +5,8 @@ package e2e
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,8 +14,13 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/example/sso/internal/util/retryutil"
+	"github.com/example/sso/internal/util/testutil"
+	_ "github.com/lib/pq" // PostgreSQL 驱动
 )
 
 // ============================================================================
@@ -30,6 +37,11 @@ var (
 
 	// rateLimitDisabled 在 TestMain 中检测，为 true 表示限流已禁用
 	rateLimitDisabled bool
+
+	// e2eDB 是 E2E 测试专用的 DB 连接，在 TestMain 中初始化。
+	// 用途：registerUser 注册后从 DB 查 user_id（注册接口为防用户枚举不再返回 user_id）。
+	// 复用 testutil.ConnectTestDB 获得统一重试+超时。
+	e2eDB *sql.DB
 )
 
 func getEnvOrDefault(key, defaultValue string) string {
@@ -102,6 +114,42 @@ func TestMain(m *testing.M) {
 	fmt.Println()
 
 	os.Exit(m.Run())
+}
+
+// e2eDBOnce 保证 e2eDB 只初始化一次（懒加载）。
+// 注意：helpers.go 不带 _test.go 后缀，其中的 TestMain 不会被 go test 识别执行，
+// 所以 e2eDB 不能依赖 TestMain 初始化，改用 sync.Once 在首次需要时懒加载。
+var e2eDBOnce sync.Once
+
+// initE2EDB 懒加载 e2eDB。复用 testutil 的重试+超时配置（TEST_CONN_* 环境变量）。
+// 若 DATABASE_URL 未配置或连接失败，e2eDB 保持 nil，调用方需处理此情况。
+func initE2EDB() {
+	e2eDBOnce.Do(func() {
+		dbURL := os.Getenv("DATABASE_URL")
+		if dbURL == "" {
+			fmt.Println("WARN: DATABASE_URL 未设置，registerUser 将无法返回 user_id")
+			return
+		}
+		cfg := testutil.LoadConnConfig()
+		ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
+		defer cancel()
+
+		db, err := sql.Open("postgres", dbURL)
+		if err != nil {
+			fmt.Printf("WARN: sql.Open 失败，e2eDB 未初始化: %v\n", err)
+			return
+		}
+		pingErr := retryutil.ExponentialBackoffRetry(ctx, func(ctx context.Context) error {
+			return db.PingContext(ctx)
+		}, cfg.RetryConfig())
+		if pingErr != nil {
+			_ = db.Close()
+			fmt.Printf("WARN: E2E DB 连接失败，registerUser 将无法返回 user_id: %v\n", pingErr)
+			return
+		}
+		e2eDB = db
+		fmt.Println("[OK] E2E DB 连接已建立（用于 user_id 查询）")
+	})
 }
 
 // checkRateLimitDisabled 快速检测限流是否已禁用
@@ -237,6 +285,7 @@ type forgotPasswordRequest struct {
 
 type resetPasswordRequest struct {
 	Token       string `json:"token"`
+	UserID      string `json:"user_id"`
 	NewPassword string `json:"new_password"`
 }
 
@@ -354,7 +403,16 @@ func generateTestPassword() string {
 // 用户操作辅助函数
 // ============================================================================
 
-// registerUser 注册用户并返回用户信息
+// registerUser 注册用户并返回包含 user_id 的 map。
+//
+// 历史背景：注册接口曾返回 {"data":{"user_id":...,"email":...}}，
+// 2026-06-17 的安全修复（commit 7054cc7 "修复用户枚举漏洞 H3"）移除了 user_id 返回，
+// 防止攻击者通过注册接口枚举已注册邮箱。响应改为 {"message":"..."}（无 data 字段）。
+//
+// 但 E2E 测试需要 user_id（verifyEmail/setUserRole/getResetTokenFromDB 都依赖它），
+// 所以这里在注册成功后，用 e2eDB 按邮箱从 DB 查询 user_id 并填充到返回的 map 中。
+// 这不破坏生产代码的安全设计——user_id 仅在测试进程内通过 DB 直查获得，
+// 不经过 HTTP 响应暴露。
 func registerUser(email, password string) (map[string]interface{}, error) {
 	req := registerRequest{
 		Email:    email,
@@ -368,19 +426,40 @@ func registerUser(email, password string) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("注册失败: %d", resp.StatusCode)
 	}
 
-	// 响应格式: {"data": {"email": "...", "user_id": "..."}, "message": "..."}
+	// 兼容两种响应格式：
+	//   旧格式（已废弃）: {"data": {"user_id": "...", "email": "..."}, "message": "..."}
+	//   新格式（当前）:   {"message": "..."}（无 data 字段，防用户枚举）
 	var response map[string]interface{}
 	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, err
 	}
 
-	// 提取 data 字段
-	data, ok := response["data"].(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("响应格式错误: 缺少data字段")
+	// 优先用响应中的 data.user_id（若 handler 将来恢复返回）
+	if data, ok := response["data"].(map[string]interface{}); ok {
+		if _, ok := data["user_id"].(string); ok {
+			return data, nil
+		}
+		return data, nil // 有 data 但无 user_id，返回已有的
 	}
 
-	return data, nil
+	// 新格式：响应无 data 字段，从 DB 查 user_id 填充
+	initE2EDB()
+	if e2eDB == nil {
+		return nil, fmt.Errorf("响应无 data.user_id 且 e2eDB 未初始化（DATABASE_URL 未配置或连接失败），无法获取 user_id")
+	}
+
+	var userID string
+	queryErr := e2eDB.QueryRow(
+		`SELECT id FROM users WHERE email = $1`, email,
+	).Scan(&userID)
+	if queryErr != nil {
+		return nil, fmt.Errorf("从 DB 查询 user_id 失败 (email=%s): %w", email, queryErr)
+	}
+
+	return map[string]interface{}{
+		"user_id": userID,
+		"email":   email,
+	}, nil
 }
 
 // verifyEmail 使用测试API验证邮箱
@@ -448,6 +527,43 @@ func registerAndLogin() (string, *loginResponse, error) {
 	}
 
 	return email, tokens, nil
+}
+
+// ============================================================================
+// 数据库辅助函数（用于黑盒测试的白盒探针）
+// 说明：E2E 测试默认是 HTTP 黑盒，但某些链路（如邮件中的 token）
+// 需要直连 DB 读取真实值才能验证完整流程。
+// 不污染生产代码：不添加测试专用 HTTP 端点，不修改 DB schema。
+// ============================================================================
+
+// openTestDB 打开测试数据库连接
+// 通过 DATABASE_URL 环境变量获取连接字符串（与 Makefile 的 test-e2e target 一致），
+// 并复用 testutil.ConnectTestDB 的重试与超时机制（TEST_CONN_* 环境变量）。
+//
+// 历史问题：之前读 TEST_DATABASE_URL 环境变量是 bug——Makefile 实际传给测试进程的是
+// DATABASE_URL（见 Makefile 的 `DATABASE_URL="$(TEST_DATABASE_URL)" gotestsum ...`），
+// 导致 openTestDB 在 make test-e2e 下总是 t.Skip，getResetTokenFromDB 永远不执行。
+//
+// 连接生命周期由 testutil 通过 t.Cleanup 管理，无需全局缓存。
+func openTestDB(t *testing.T) *sql.DB {
+	t.Helper()
+	return testutil.ConnectTestDB(t)
+}
+
+// getResetTokenFromDB 从 reset_tokens 表读取真实重置令牌
+// 用于在邮件不可用的测试环境中验证完整密码重置链路
+func getResetTokenFromDB(t *testing.T, userID string) string {
+	t.Helper()
+	db := openTestDB(t)
+	var token string
+	err := db.QueryRow(
+		`SELECT token FROM reset_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`,
+		userID,
+	).Scan(&token)
+	if err != nil {
+		t.Fatalf("从 DB 读取重置令牌失败 (user_id=%s): %v", userID, err)
+	}
+	return token
 }
 
 // ============================================================================

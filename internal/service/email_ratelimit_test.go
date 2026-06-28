@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/your-org/sso/internal/cache"
+	"github.com/example/sso/internal/cache"
 )
 
 // TestEmailRateLimiter_CheckLimit 测试邮件限流检查
@@ -247,4 +247,3 @@ func TestEmailRateLimiter_Concurrent(t *testing.T) {
 		assert.False(t, allowed, "并发请求后应该超过限制")
 	})
 }
-

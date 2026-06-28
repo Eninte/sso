@@ -3,12 +3,11 @@
 package handler
 
 import (
-	"log/slog"
 	"net/http"
 
-	"github.com/your-org/sso/internal/middleware"
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/service"
+	"github.com/example/sso/internal/middleware"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/service"
 )
 
 // ============================================================================
@@ -28,14 +27,8 @@ func NewLoginHandler(authSvc service.AuthServiceInterface, captchaSvc captchaVer
 
 // Handle 处理登录请求
 // POST /api/v1/login
+// Panic恢复由中间件 middleware.Recover 统一处理，此处不再重复捕获
 func (h *LoginHandler) Handle(w http.ResponseWriter, r *http.Request) {
-	defer func() {
-		if err := recover(); err != nil {
-			slog.Error("LoginHandler panic", "error", err)
-			writeError(w, http.StatusInternalServerError, getMessage(r, "INTERNAL_ERROR"))
-		}
-	}()
-
 	// 1. 解析请求体 (带大小限制)
 	var req model.LoginRequest
 	if err := decodeJSON(r, &req); err != nil {

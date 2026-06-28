@@ -7,8 +7,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 
-	"github.com/your-org/sso/internal/crypto"
+	"github.com/example/sso/internal/crypto"
 )
 
 // ============================================================================
@@ -144,11 +145,11 @@ func TestNewPasswordService_CostNormalization(t *testing.T) {
 		inputCost    int
 		expectedCost int
 	}{
-		{"过低cost提升到12", 1, 12},
-		{"低于12提升到12", 5, 12},
+		{"过低cost提升到MinCost", 1, bcrypt.MinCost},
+		{"低于MinCost提升到MinCost", 3, bcrypt.MinCost},
 		{"正常cost不变", 12, 12},
 		{"13不变", 13, 13},
-		{"过高cost被限制到14", 20, 14},
+		{"过高cost被限制到MaxCost", 40, bcrypt.MaxCost},
 	}
 
 	for _, tt := range tests {

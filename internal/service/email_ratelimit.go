@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/your-org/sso/internal/cache"
+	"github.com/example/sso/internal/cache"
 )
 
 // ============================================================================

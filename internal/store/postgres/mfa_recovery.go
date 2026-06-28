@@ -7,6 +7,9 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"sync"
+	"time"
+
+	"github.com/example/sso/internal/model"
 )
 
 // mfaRecoveryHMACKey HMAC密钥（通过SetMFARecoveryHMACKey设置）
@@ -59,23 +62,30 @@ func (s *Store) StoreMFARecoveryCodes(ctx context.Context, userID string, codeHa
 	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 
-	// 先删除旧恢复码
-	_, err := s.db.ExecContext(ctx, `DELETE FROM mfa_recovery_codes WHERE user_id = $1`, userID)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		return fmt.Errorf("begin transaction failed: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// 先删除旧恢复码
+	if _, err := tx.ExecContext(ctx, `DELETE FROM mfa_recovery_codes WHERE user_id = $1`, userID); err != nil {
 		return fmt.Errorf("delete old recovery codes failed: %w", err)
 	}
 
 	// 插入新恢复码
 	for _, codeHash := range codeHashes {
-		_, err := s.db.ExecContext(ctx,
+		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO mfa_recovery_codes (user_id, code_hash) VALUES ($1, $2)`,
 			userID, codeHash,
-		)
-		if err != nil {
+		); err != nil {
 			return fmt.Errorf("insert recovery code failed: %w", err)
 		}
 	}
 
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit recovery codes transaction failed: %w", err)
+	}
 	return nil
 }
 
@@ -119,28 +129,22 @@ func (s *Store) VerifyAndUseMFARecoveryCode(ctx context.Context, userID, code st
 		return false, fmt.Errorf("hash recovery code failed: %w", err)
 	}
 
-	// 直接匹配哈希，O(1)操作
-	var exists bool
-	query := `SELECT EXISTS(SELECT 1 FROM mfa_recovery_codes WHERE user_id = $1 AND code_hash = $2 AND used_at IS NULL)`
-	err = s.db.QueryRowContext(ctx, query, userID, codeHash).Scan(&exists)
-	if err != nil {
-		return false, fmt.Errorf("query recovery code failed: %w", err)
-	}
-
-	if !exists {
-		return false, nil
-	}
-
-	// 标记为已使用
-	_, err = s.db.ExecContext(ctx,
-		`UPDATE mfa_recovery_codes SET used_at = NOW() WHERE user_id = $1 AND code_hash = $2`,
+	// 原子性地标记恢复码为已使用，仅当 code_hash 匹配且 used_at IS NULL 时才更新
+	// 通过 RowsAffected 判断是否真正消费了一个未使用的恢复码，防止并发重放
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE mfa_recovery_codes SET used_at = NOW() WHERE user_id = $1 AND code_hash = $2 AND used_at IS NULL`,
 		userID, codeHash,
 	)
 	if err != nil {
 		return false, fmt.Errorf("mark recovery code used failed: %w", err)
 	}
 
-	return true, nil
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("get affected rows failed: %w", err)
+	}
+
+	return affected > 0, nil
 }
 
 // DeleteUsedMFARecoveryCodes 删除已使用的恢复码
@@ -153,4 +157,70 @@ func (s *Store) DeleteUsedMFARecoveryCodes(ctx context.Context, userID string) e
 		userID,
 	)
 	return err
+}
+
+// DeleteAllMFARecoveryCodes 删除用户的所有恢复码
+// 在禁用MFA时调用，确保恢复码不会被遗留
+func (s *Store) DeleteAllMFARecoveryCodes(ctx context.Context, userID string) error {
+	ctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM mfa_recovery_codes WHERE user_id = $1`,
+		userID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete all recovery codes failed: %w", err)
+	}
+	return nil
+}
+
+// DisableMFAAndClearRecoveryCodes 原子地禁用MFA并清除所有恢复码
+// 在单个事务中执行 Update(user) + DeleteAllMFARecoveryCodes，
+// 防止出现"用户MFA已禁用但恢复码残留"的不一致状态
+func (s *Store) DisableMFAAndClearRecoveryCodes(ctx context.Context, user *model.User) error {
+	ctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction failed: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// 1. 更新用户：禁用MFA、清空密钥
+	updateQuery := `
+		UPDATE users
+		SET email = $2, password_hash = $3, email_verified = $4, mfa_enabled = $5,
+		    mfa_secret = $6, role = $7, status = $8, login_attempts = $9, locked_until = $10, updated_at = $11
+		WHERE id = $1
+	`
+	if _, err := tx.ExecContext(ctx, updateQuery,
+		user.ID,
+		user.Email,
+		user.PasswordHash,
+		user.EmailVerified,
+		user.MFAEnabled,
+		user.MFASecret,
+		user.Role,
+		user.Status,
+		user.LoginAttempts,
+		user.LockedUntil,
+		time.Now(),
+	); err != nil {
+		return fmt.Errorf("update user failed: %w", err)
+	}
+
+	// 2. 删除所有恢复码
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM mfa_recovery_codes WHERE user_id = $1`,
+		user.ID,
+	); err != nil {
+		return fmt.Errorf("delete recovery codes failed: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit disable MFA transaction failed: %w", err)
+	}
+	return nil
 }

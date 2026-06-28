@@ -8,7 +8,7 @@ import (
 	"math/big"
 	"net/http"
 
-	"github.com/your-org/sso/internal/crypto"
+	"github.com/example/sso/internal/crypto"
 )
 
 // ============================================================================
