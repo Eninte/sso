@@ -80,10 +80,22 @@ jobs:
         # 测试内重试（retryutil.ExponentialBackoffRetry）解决单测抖动，
         # CI 层重跑解决偶发基础设施故障
         # 覆盖率统计排除 app 组合根（由 E2E 覆盖）与 store/mock
+        # -p 1 禁用包级并行：多个测试包共享同一 PostgreSQL（store/handler/service），
+        # 并行执行时 cleanup（DELETE ... LIKE 'test-%'）会互相删除数据导致失败
         run: |
           PACKAGES=$(go list ./... | grep -v '/internal/app' | grep -v '/store/mock' | tr '\n' ' ')
           gotestsum --junitfile test-results.xml --format pkgname --rerun-fails=2 --packages="$PACKAGES" -- \
-            -race -timeout 120s -coverprofile=coverage.out $PACKAGES
+            -race -p 1 -timeout 180s -coverprofile=coverage.out $PACKAGES
+
+      - name: Print test results on failure
+        if: failure()
+        run: |
+          echo "=== test-results.xml (failed tests) ==="
+          if [ -f test-results.xml ]; then
+            grep -A 2 '<failure\|<error' test-results.xml | head -200 || cat test-results.xml
+          else
+            echo "test-results.xml not found"
+          fi
 
       - name: Upload test report
         uses: actions/upload-artifact@v4
