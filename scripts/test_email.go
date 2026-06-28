@@ -12,7 +12,7 @@ import (
 	"os"
 
 	"github.com/joho/godotenv"
-	"github.com/your-org/sso/internal/service"
+	"github.com/example/sso/internal/service"
 )
 
 func main() {

@@ -6,7 +6,7 @@
 # --------------------------------------------------------------------------
 # 阶段1: 构建
 # --------------------------------------------------------------------------
-FROM golang:1.26.1-alpine AS builder
+FROM golang:1.26.4-alpine AS builder
 
 # 使用国内Alpine镜像源（阿里云）
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories

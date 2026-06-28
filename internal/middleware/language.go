@@ -6,7 +6,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/your-org/sso/internal/common"
+	"github.com/example/sso/internal/common"
 )
 
 // ============================================================================

@@ -5,8 +5,8 @@ package handler
 import (
 	"net/http"
 
-	"github.com/your-org/sso/internal/captcha"
-	apperrors "github.com/your-org/sso/internal/errors"
+	"github.com/example/sso/internal/captcha"
+	apperrors "github.com/example/sso/internal/errors"
 )
 
 // ============================================================================

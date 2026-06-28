@@ -7,13 +7,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/util/auditutil"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/util/auditutil"
 )
 
 // mockAuditService 模拟审计服务
 type mockAuditService struct {
-	logs      []*model.AuditLog
+	logs       []*model.AuditLog
 	shouldFail bool
 }
 

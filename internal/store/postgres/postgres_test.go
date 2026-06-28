@@ -14,29 +14,20 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/store/postgres"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/store/postgres"
+	"github.com/example/sso/internal/util/testutil"
 )
 
 // ============================================================================
 // 测试辅助函数
 // ============================================================================
 
+// getTestDB 返回已 ping 通的真实 PostgreSQL 连接（带重试与超时）
+// 复用 testutil.ConnectTestDB，与全仓真实 DB 测试共享重试机制
 func getTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	if testing.Short() {
-		t.Skip("跳过集成测试：-short 模式")
-	}
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("跳过集成测试：未设置DATABASE_URL环境变量")
-	}
-	db, err := sql.Open("postgres", dbURL)
-	require.NoError(t, err)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	require.NoError(t, db.PingContext(ctx))
-	return db
+	return testutil.ConnectTestDB(t)
 }
 
 func setupTestStore(t *testing.T) (*postgres.Store, *sql.DB) {
@@ -737,10 +728,10 @@ func TestStore_NewFromConfig(t *testing.T) {
 }
 
 // ============================================================================
-// MarkAuthorizationCodeUsed 测试
+// CleanupExpired 测试
 // ============================================================================
 
-func TestStore_MarkAuthorizationCodeUsed(t *testing.T) {
+func TestStore_CleanupExpired(t *testing.T) {
 	store, db := setupTestStore(t)
 	t.Cleanup(func() {
 		cleanupTestData(t, db)

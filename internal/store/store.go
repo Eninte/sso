@@ -6,8 +6,8 @@ import (
 	"context"
 	"time"
 
-	apperrors "github.com/your-org/sso/internal/errors"
-	"github.com/your-org/sso/internal/model"
+	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/model"
 )
 
 // ============================================================================
@@ -15,9 +15,10 @@ import (
 // ============================================================================
 
 var (
-	ErrNotFound        = apperrors.ErrNotFound
-	ErrDuplicateEmail  = apperrors.ErrEmailExists
-	ErrDuplicateClient = apperrors.ErrConflict
+	ErrNotFound              = apperrors.ErrNotFound
+	ErrDuplicateEmail        = apperrors.ErrEmailExists
+	ErrDuplicateClient       = apperrors.ErrConflict
+	ErrAuthorizationCodeUsed = apperrors.ErrCodeUsedErr
 )
 
 // ============================================================================
@@ -50,6 +51,10 @@ type UserStore interface {
 	IncrementLoginAttempts(ctx context.Context, userID string, maxAttempts int, lockoutDuration time.Duration) (attempts int, locked bool, lockedUntil *time.Time, err error)
 	ResetLoginAttempts(ctx context.Context, userID string) error
 	UnlockExpiredAccount(ctx context.Context, userID string) error
+
+	// ExistsUserByRole 检查是否存在指定角色的用户
+	// 用于管理员存在性检查等场景，避免全表扫描
+	ExistsUserByRole(ctx context.Context, role string) (bool, error)
 }
 
 // ============================================================================
@@ -114,6 +119,12 @@ type MFARecoveryCodeStore interface {
 	GetUnusedMFARecoveryCodes(ctx context.Context, userID string) ([]string, error)
 	VerifyAndUseMFARecoveryCode(ctx context.Context, userID, codeHash string) (bool, error)
 	DeleteUsedMFARecoveryCodes(ctx context.Context, userID string) error
+	DeleteAllMFARecoveryCodes(ctx context.Context, userID string) error
+
+	// DisableMFAAndClearRecoveryCodes 原子地禁用MFA并清除所有恢复码
+	// 必须在单个事务中执行 Update(user) + DeleteAllMFARecoveryCodes，
+	// 防止出现"用户MFA已禁用但恢复码残留"的不一致状态
+	DisableMFAAndClearRecoveryCodes(ctx context.Context, user *model.User) error
 }
 
 // ============================================================================

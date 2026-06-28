@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/store/mock"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/store/mock"
 )
 
 func TestMFAService_GenerateRecoveryCodes(t *testing.T) {
@@ -73,7 +73,7 @@ func TestMFAService_VerifyRecoveryCode(t *testing.T) {
 		codes, err := svc.GenerateRecoveryCodes(context.Background(), "user-1", 8)
 		require.NoError(t, err)
 
-		used, err := svc.VerifyRecoveryCode(context.Background(), "user-1", codes[0])
+		used, err := svc.VerifyRecoveryCode(context.Background(), "user-1", codes[0], "127.0.0.1")
 		require.NoError(t, err)
 		assert.True(t, used)
 	})
@@ -87,7 +87,7 @@ func TestMFAService_VerifyRecoveryCode(t *testing.T) {
 		_, err := svc.GenerateRecoveryCodes(context.Background(), "user-1", 8)
 		require.NoError(t, err)
 
-		used, err := svc.VerifyRecoveryCode(context.Background(), "user-1", "INVALID-CODE-XXXX-XXXX")
+		used, err := svc.VerifyRecoveryCode(context.Background(), "user-1", "INVALID-CODE-XXXX-XXXX", "127.0.0.1")
 		assert.ErrorIs(t, err, ErrRecoveryCodeInvalid)
 		assert.False(t, used)
 	})
@@ -101,10 +101,10 @@ func TestMFAService_VerifyRecoveryCode(t *testing.T) {
 		codes, err := svc.GenerateRecoveryCodes(context.Background(), "user-1", 8)
 		require.NoError(t, err)
 
-		_, err = svc.VerifyRecoveryCode(context.Background(), "user-1", codes[0])
+		_, err = svc.VerifyRecoveryCode(context.Background(), "user-1", codes[0], "127.0.0.1")
 		require.NoError(t, err)
 
-		used, err := svc.VerifyRecoveryCode(context.Background(), "user-1", codes[0])
+		used, err := svc.VerifyRecoveryCode(context.Background(), "user-1", codes[0], "127.0.0.1")
 		assert.ErrorIs(t, err, ErrRecoveryCodeInvalid)
 		assert.False(t, used)
 	})
@@ -116,10 +116,10 @@ func TestMFAService_VerifyRecoveryCode(t *testing.T) {
 		svc.SetHMACKey(hmacKey)
 
 		for i := 0; i < 5; i++ {
-			_, _ = svc.VerifyRecoveryCode(context.Background(), "user-1", "bad")
+			_, _ = svc.VerifyRecoveryCode(context.Background(), "user-1", "bad", "127.0.0.1")
 		}
 
-		used, err := svc.VerifyRecoveryCode(context.Background(), "user-1", "another-bad")
+		used, err := svc.VerifyRecoveryCode(context.Background(), "user-1", "another-bad", "127.0.0.1")
 		assert.ErrorIs(t, err, ErrTooManyRecoveryAttempts)
 		assert.False(t, used)
 	})
@@ -134,10 +134,10 @@ func TestMFAService_VerifyRecoveryCode(t *testing.T) {
 		require.NoError(t, err)
 
 		for i := 0; i < 3; i++ {
-			_, _ = svc.VerifyRecoveryCode(context.Background(), "user-1", "bad")
+			_, _ = svc.VerifyRecoveryCode(context.Background(), "user-1", "bad", "127.0.0.1")
 		}
 
-		used, err := svc.VerifyRecoveryCode(context.Background(), "user-1", codes[0])
+		used, err := svc.VerifyRecoveryCode(context.Background(), "user-1", codes[0], "127.0.0.1")
 		require.NoError(t, err)
 		assert.True(t, used)
 
@@ -164,7 +164,7 @@ func TestMFAService_GetRecoveryCodeStatus(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 8, count)
 
-		_, err = svc.VerifyRecoveryCode(context.Background(), "user-1", codes[0])
+		_, err = svc.VerifyRecoveryCode(context.Background(), "user-1", codes[0], "127.0.0.1")
 		require.NoError(t, err)
 
 		count, err = svc.GetRecoveryCodeStatus(context.Background(), "user-1")

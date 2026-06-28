@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/your-org/sso/internal/crypto"
-	apperrors "github.com/your-org/sso/internal/errors"
-	"github.com/your-org/sso/internal/middleware"
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/service"
-	"github.com/your-org/sso/internal/store/mock"
-	"github.com/your-org/sso/internal/util/auditutil"
+	"github.com/example/sso/internal/crypto"
+	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/middleware"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/service"
+	"github.com/example/sso/internal/store/mock"
+	"github.com/example/sso/internal/util/auditutil"
 )
 
 var testTime = time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)

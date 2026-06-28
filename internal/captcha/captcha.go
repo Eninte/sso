@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/your-org/sso/internal/cache"
+	"github.com/example/sso/internal/cache"
 )
 
 // ============================================================================
@@ -339,14 +339,14 @@ func generateID() (string, error) {
 	return fmt.Sprintf("%x", b), nil
 }
 
-// randInt 生成 [min, max] 范围内的随机整数
-func randInt(min, max int) (int, error) {
-	if min > max {
-		return 0, fmt.Errorf("invalid range: min(%d) > max(%d)", min, max)
+// randInt 生成 [minVal, maxVal] 范围内的随机整数
+func randInt(minVal, maxVal int) (int, error) {
+	if minVal > maxVal {
+		return 0, fmt.Errorf("invalid range: min(%d) > max(%d)", minVal, maxVal)
 	}
-	n, err := rand.Int(rand.Reader, big.NewInt(int64(max-min+1)))
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(maxVal-minVal+1)))
 	if err != nil {
 		return 0, err
 	}
-	return int(n.Int64()) + min, nil
+	return int(n.Int64()) + minVal, nil
 }

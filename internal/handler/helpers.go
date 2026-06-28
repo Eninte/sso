@@ -9,10 +9,11 @@ import (
 	"io"
 	"net/http"
 
-	apperrors "github.com/your-org/sso/internal/errors"
-	"github.com/your-org/sso/internal/middleware"
-	"github.com/your-org/sso/internal/service"
-	"github.com/your-org/sso/internal/validator"
+	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/middleware"
+	"github.com/example/sso/internal/service"
+	"github.com/example/sso/internal/util/handlerutil"
+	"github.com/example/sso/internal/validator"
 )
 
 // 请求体大小限制常量
@@ -58,7 +59,7 @@ func verifyCaptcha(w http.ResponseWriter, r *http.Request, svc captchaVerifier) 
 	}
 
 	// 从请求头获取验证码信息
-	captchaID := r.Header.Get("X-Captcha-ID")
+	captchaID := r.Header.Get("X-Captcha-Id")
 	captchaAnswer := r.Header.Get("X-Captcha-Answer")
 
 	if captchaID == "" || captchaAnswer == "" {
@@ -92,10 +93,9 @@ func getMessage(r *http.Request, code apperrors.ErrorCode) string {
 }
 
 // writeJSON 写入JSON响应
+// 委托给 handlerutil.WriteJSON，统一处理编码错误
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(data)
+	handlerutil.WriteJSON(w, status, data)
 }
 
 // writeError 写入错误响应

@@ -13,7 +13,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/singleflight"
 
-	apperrors "github.com/your-org/sso/internal/errors"
+	apperrors "github.com/example/sso/internal/errors"
 )
 
 // ============================================================================
@@ -276,7 +276,7 @@ func (c *MemoryCache) Increment(ctx context.Context, key string) (int, error) {
 
 	count++
 	data, _ := json.Marshal(count)
-	
+
 	// 如果键不存在，设置默认过期时间（1小时）
 	expiresAt := time.Now().Add(1 * time.Hour)
 	if exists {
@@ -391,12 +391,32 @@ func (c *RedisCache) Client() *redis.Client {
 // password: Redis密码 (空字符串表示无需认证)
 // db: Redis数据库编号 (0-15)
 func NewRedisCache(host, port, password string, db int) (*RedisCache, error) {
+	return NewRedisCacheWithPool(host, port, password, db, 10, 5)
+}
+
+// NewRedisCacheWithPool 创建Redis缓存实例（支持自定义连接池）
+// host: Redis主机地址 (如 "localhost")
+// password: Redis密码 (空字符串表示无需认证)
+// db: Redis数据库编号 (0-15)
+// poolSize: 连接池大小（<=0 时使用默认值 10）
+// minIdleConns: 最小空闲连接数（<=0 时使用默认值 5）
+func NewRedisCacheWithPool(host, port, password string, db, poolSize, minIdleConns int) (*RedisCache, error) {
+	if poolSize <= 0 {
+		poolSize = 10
+	}
+	if minIdleConns <= 0 {
+		minIdleConns = 5
+	}
+	if minIdleConns > poolSize {
+		minIdleConns = poolSize
+	}
+
 	client := redis.NewClient(&redis.Options{
 		Addr:         host + ":" + port,
 		Password:     password,
 		DB:           db,
-		PoolSize:     10,
-		MinIdleConns: 5,
+		PoolSize:     poolSize,
+		MinIdleConns: minIdleConns,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -567,13 +587,14 @@ func (c *RedisCache) GetTTL(ctx context.Context, key string) (time.Duration, err
 
 // Option 配置选项
 type Option struct {
-	RedisEnable      bool
-	RedisHost        string
-	RedisPort        string
-	RedisPassword    string
-	RedisDB          int
-	RedisPoolSize    int
-	RedisConnTimeout time.Duration
+	RedisEnable       bool
+	RedisHost         string
+	RedisPort         string
+	RedisPassword     string
+	RedisDB           int
+	RedisPoolSize     int
+	RedisMinIdleConns int
+	RedisConnTimeout  time.Duration
 }
 
 // NewCache 创建缓存实例
@@ -583,7 +604,7 @@ func NewCache(opt *Option) (Cache, error) {
 		return NewMemoryCache(), nil
 	}
 
-	redisCache, err := NewRedisCache(opt.RedisHost, opt.RedisPort, opt.RedisPassword, opt.RedisDB)
+	redisCache, err := NewRedisCacheWithPool(opt.RedisHost, opt.RedisPort, opt.RedisPassword, opt.RedisDB, opt.RedisPoolSize, opt.RedisMinIdleConns)
 	if err != nil {
 		return nil, fmt.Errorf("create redis cache failed: %w", err)
 	}
@@ -599,7 +620,7 @@ func NewCacheWithFallback(opt *Option) (Cache, error) {
 		return NewMemoryCache(), nil
 	}
 
-	redisCache, err := NewRedisCache(opt.RedisHost, opt.RedisPort, opt.RedisPassword, opt.RedisDB)
+	redisCache, err := NewRedisCacheWithPool(opt.RedisHost, opt.RedisPort, opt.RedisPassword, opt.RedisDB, opt.RedisPoolSize, opt.RedisMinIdleConns)
 	if err != nil {
 		slog.Warn("redis connection failed, fallback to memory cache", "error", err)
 		return NewMemoryCache(), nil
@@ -620,7 +641,7 @@ func NewCacheWithFallback(opt *Option) (Cache, error) {
 // 使用方式:
 //
 //	sf := cache.NewSingleflightCache(baseCache)
-//	value, err := sf.Do(ctx, key, 5*time.Minute, func() (interface{}, error) {
+//	value, err := sf.Do(ctx, key, 5*time.Minute, func(ctx context.Context) (interface{}, error) {
 //	    return store.GetByID(ctx, userID)
 //	})
 type SingleflightCache struct {
@@ -646,7 +667,7 @@ func NewSingleflightCache(cache Cache) *SingleflightCache {
 // 返回:
 //   - 查询结果
 //   - 错误信息（如果load函数返回错误）
-func (sf *SingleflightCache) Do(ctx context.Context, key string, ttl time.Duration, load func() (interface{}, error)) (interface{}, error) {
+func (sf *SingleflightCache) Do(ctx context.Context, key string, ttl time.Duration, load func(context.Context) (interface{}, error)) (interface{}, error) {
 	v, err, _ := sf.sf.Do(key, func() (interface{}, error) {
 		// 再次检查缓存（可能已被其他请求设置）
 		var dest interface{}
@@ -654,8 +675,8 @@ func (sf *SingleflightCache) Do(ctx context.Context, key string, ttl time.Durati
 			return dest, nil
 		}
 
-		// 缓存未命中，执行查询
-		value, err := load()
+		// 缓存未命中，执行查询，将上下文传递给加载函数
+		value, err := load(ctx)
 		if err != nil {
 			return nil, err
 		}

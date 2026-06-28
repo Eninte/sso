@@ -6,8 +6,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/your-org/sso/internal/crypto"
-	"github.com/your-org/sso/internal/model"
+	"github.com/example/sso/internal/crypto"
+	"github.com/example/sso/internal/model"
 )
 
 // ============================================================================
@@ -113,7 +113,7 @@ type MFAServiceInterface interface {
 	GenerateRecoveryCodes(ctx context.Context, userID string, count int) ([]string, error)
 
 	// VerifyRecoveryCode 验证MFA恢复码
-	VerifyRecoveryCode(ctx context.Context, userID, code string) (bool, error)
+	VerifyRecoveryCode(ctx context.Context, userID, code, ipAddress string) (bool, error)
 
 	// GetRecoveryCodeStatus 获取恢复码状态
 	GetRecoveryCodeStatus(ctx context.Context, userID string) (int, error)

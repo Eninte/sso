@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	apperrors "github.com/your-org/sso/internal/errors"
+	apperrors "github.com/example/sso/internal/errors"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

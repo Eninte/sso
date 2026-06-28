@@ -9,8 +9,8 @@ import (
 
 	"github.com/gorilla/mux"
 
-	apperrors "github.com/your-org/sso/internal/errors"
-	"github.com/your-org/sso/internal/service"
+	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/service"
 )
 
 // ============================================================================
@@ -168,7 +168,8 @@ func (h *AdminHandler) handleUserStatusChange(
 		return
 	}
 
-	if err := action(r.Context(), userID); err != nil {
+	ctx := service.WithClientIP(r.Context(), extractClientIP(r))
+	if err := action(ctx, userID); err != nil {
 		writeError(w, http.StatusNotFound, getMessage(r, apperrors.ErrCodeNotFound))
 		return
 	}
@@ -202,7 +203,8 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := h.adminSvc.DeleteUser(r.Context(), userID); err != nil {
+	ctx := service.WithClientIP(r.Context(), extractClientIP(r))
+	if err := h.adminSvc.DeleteUser(ctx, userID); err != nil {
 		writeError(w, http.StatusNotFound, getMessage(r, apperrors.ErrCodeNotFound))
 		return
 	}
@@ -295,7 +297,8 @@ func (h *AdminHandler) HandleSystemHealth(w http.ResponseWriter, r *http.Request
 // 注意：管理员权限检查由 AdminMiddleware 处理
 func (h *AdminHandler) HandleCleanup(w http.ResponseWriter, r *http.Request) {
 	// 通过Service清理过期数据
-	if err := h.adminSvc.CleanupExpired(r.Context()); err != nil {
+	ctx := service.WithClientIP(r.Context(), extractClientIP(r))
+	if err := h.adminSvc.CleanupExpired(ctx); err != nil {
 		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeCleanupFailed))
 		return
 	}

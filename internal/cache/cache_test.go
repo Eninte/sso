@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/cache"
+	"github.com/example/sso/internal/cache"
 )
 
 func TestMemoryCache_GetSet(t *testing.T) {
@@ -347,5 +347,129 @@ func TestMemoryCache_Expiration(t *testing.T) {
 
 		err = c.Get(ctx, "long-ttl", &result)
 		assert.NoError(t, err)
+	})
+}
+
+// ============================================================================
+// MemoryCache.WithMetrics / Increment / SetTTL / GetTTL 测试
+// 覆盖原本 0% 的指标回调与计数器/TTL 管理方法
+// ============================================================================
+
+// TestMemoryCache_WithMetrics 测试设置指标回调
+func TestMemoryCache_WithMetrics(t *testing.T) {
+	c := cache.NewMemoryCache()
+	defer c.Close()
+	ctx := context.Background()
+
+	hitCount := 0
+	missCount := 0
+
+	returned := c.WithMetrics(
+		func() { hitCount++ },
+		func() { missCount++ },
+	)
+	assert.Same(t, c, returned, "WithMetrics 应返回缓存实例本身（链式调用）")
+
+	// 触发一次 miss
+	var v string
+	err := c.Get(ctx, "missing", &v)
+	assert.ErrorIs(t, err, cache.ErrCacheMiss)
+	assert.Equal(t, 1, missCount, "未命中应触发 onMiss")
+	assert.Equal(t, 0, hitCount)
+
+	// 触发一次 hit
+	require.NoError(t, c.Set(ctx, "exists", "value", 5*time.Minute))
+	var got string
+	require.NoError(t, c.Get(ctx, "exists", &got))
+	assert.Equal(t, "value", got)
+	assert.Equal(t, 1, hitCount, "命中应触发 onHit")
+	assert.Equal(t, 1, missCount)
+}
+
+// TestMemoryCache_Increment 测试内存计数器递增
+func TestMemoryCache_Increment(t *testing.T) {
+	c := cache.NewMemoryCache()
+	defer c.Close()
+	ctx := context.Background()
+
+	t.Run("首次递增_返回1", func(t *testing.T) {
+		count, err := c.Increment(ctx, "counter")
+		require.NoError(t, err)
+		assert.Equal(t, 1, count)
+	})
+
+	t.Run("连续递增_值递增", func(t *testing.T) {
+		key := "seq"
+		for i := 1; i <= 5; i++ {
+			count, err := c.Increment(ctx, key)
+			require.NoError(t, err)
+			assert.Equal(t, i, count)
+		}
+	})
+
+	t.Run("不同key独立计数", func(t *testing.T) {
+		c1, _ := c.Increment(ctx, "k1")
+		c2, _ := c.Increment(ctx, "k2")
+		assert.Equal(t, 1, c1)
+		assert.Equal(t, 1, c2, "不同 key 应独立计数")
+	})
+
+	t.Run("递增后可通过Get读取", func(t *testing.T) {
+		c.Increment(ctx, "readable")
+		c.Increment(ctx, "readable")
+		var val int
+		require.NoError(t, c.Get(ctx, "readable", &val))
+		assert.Equal(t, 2, val)
+	})
+}
+
+// TestMemoryCache_SetTTL 测试内存缓存设置 TTL
+func TestMemoryCache_SetTTL(t *testing.T) {
+	c := cache.NewMemoryCache()
+	defer c.Close()
+	ctx := context.Background()
+
+	t.Run("为已存在key设置TTL", func(t *testing.T) {
+		require.NoError(t, c.Set(ctx, "k", "v", 5*time.Minute))
+		require.NoError(t, c.SetTTL(ctx, "k", 50*time.Millisecond))
+
+		var v string
+		require.NoError(t, c.Get(ctx, "k", &v))
+		time.Sleep(60 * time.Millisecond)
+		err := c.Get(ctx, "k", &v)
+		assert.ErrorIs(t, err, cache.ErrCacheMiss, "SetTTL 后过期应返回 ErrCacheMiss")
+	})
+
+	t.Run("为不存在的key设置TTL_返回错误", func(t *testing.T) {
+		err := c.SetTTL(ctx, "nonexistent", 10*time.Second)
+		assert.Error(t, err, "不存在的 key 设置 TTL 应返回错误")
+	})
+}
+
+// TestMemoryCache_GetTTL 测试内存缓存获取剩余 TTL
+func TestMemoryCache_GetTTL(t *testing.T) {
+	c := cache.NewMemoryCache()
+	defer c.Close()
+	ctx := context.Background()
+
+	t.Run("已设置TTL的key_返回正数", func(t *testing.T) {
+		require.NoError(t, c.Set(ctx, "k", "v", 60*time.Second))
+		ttl, err := c.GetTTL(ctx, "k")
+		require.NoError(t, err)
+		assert.True(t, ttl > 0 && ttl <= 60*time.Second, "TTL 应在 (0, 60s]，实际 %v", ttl)
+	})
+
+	t.Run("不存在的key_返回错误", func(t *testing.T) {
+		ttl, err := c.GetTTL(ctx, "nonexistent")
+		assert.Error(t, err, "不存在的 key 应返回错误")
+		assert.Equal(t, time.Duration(0), ttl)
+	})
+
+	t.Run("SetTTL后GetTTL反映新值", func(t *testing.T) {
+		require.NoError(t, c.Set(ctx, "override", "v", 5*time.Minute))
+		require.NoError(t, c.SetTTL(ctx, "override", 10*time.Second))
+		ttl, err := c.GetTTL(ctx, "override")
+		require.NoError(t, err)
+		assert.True(t, ttl > 0 && ttl <= 10*time.Second, "SetTTL(10s) 后 TTL 应 <= 10s，实际 %v", ttl)
 	})
 }

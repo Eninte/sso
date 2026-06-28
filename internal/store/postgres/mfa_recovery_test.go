@@ -4,7 +4,6 @@ package postgres_test
 import (
 	"context"
 	"database/sql"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -12,25 +11,20 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/example/sso/internal/store/postgres"
+	"github.com/example/sso/internal/util/testutil"
 	_ "github.com/lib/pq"
-	"github.com/your-org/sso/internal/store/postgres"
 )
 
 // ============================================================================
 // 测试辅助函数
 // ============================================================================
 
+// setupMFAStore 返回已 ping 通的真实 PG 连接（带重试与超时）
+// 复用 testutil.ConnectTestDB，与全仓真实 DB 测试共享重试机制
 func setupMFAStore(t *testing.T) (*postgres.Store, *sql.DB) {
 	t.Helper()
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("跳过集成测试：未设置DATABASE_URL环境变量")
-	}
-	db, err := sql.Open("postgres", dbURL)
-	require.NoError(t, err)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	require.NoError(t, db.PingContext(ctx))
+	db := testutil.ConnectTestDB(t)
 	return postgres.New(db), db
 }
 

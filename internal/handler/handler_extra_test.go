@@ -14,12 +14,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/crypto"
-	"github.com/your-org/sso/internal/handler"
-	"github.com/your-org/sso/internal/metrics"
-	"github.com/your-org/sso/internal/middleware"
-	"github.com/your-org/sso/internal/service"
-	"github.com/your-org/sso/internal/store/mock"
+	"github.com/example/sso/internal/crypto"
+	"github.com/example/sso/internal/handler"
+	"github.com/example/sso/internal/metrics"
+	"github.com/example/sso/internal/middleware"
+	"github.com/example/sso/internal/service"
+	"github.com/example/sso/internal/store/mock"
 )
 
 // createTestJWTService 创建测试用的JWT服务
@@ -255,7 +255,8 @@ func TestHandlerErrorFunctions(t *testing.T) {
 	t.Run("writeOAuthError - ErrInvalidClient", func(t *testing.T) {
 		storeInst := mock.New()
 		tokenSvc := service.NewTokenService(createTestJWTService(), storeInst)
-		oauthSvc := service.NewOAuthService(storeInst, tokenSvc)
+		passwordSvc := crypto.NewPasswordService(4)
+		oauthSvc := service.NewOAuthService(storeInst, tokenSvc, service.WithOAuthPassword(passwordSvc))
 		h := handler.NewAuthorizeHandler(oauthSvc)
 
 		req := httptest.NewRequest("GET", "/authorize?client_id=invalid&redirect_uri=http://localhost", nil)

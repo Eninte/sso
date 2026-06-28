@@ -198,7 +198,7 @@ func TestRateLimiter_MemoryBound(t *testing.T) {
 			ip := fmt.Sprintf("192.168.%d.%d", round, i)
 			rl.Allow(ip)
 		}
-		
+
 		// 等待清理
 		time.Sleep(100 * time.Millisecond)
 	}

@@ -12,12 +12,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/cache"
-	"github.com/your-org/sso/internal/crypto"
-	"github.com/your-org/sso/internal/metrics"
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/service"
-	"github.com/your-org/sso/internal/store/mock"
+	"github.com/example/sso/internal/cache"
+	"github.com/example/sso/internal/crypto"
+	"github.com/example/sso/internal/metrics"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/service"
+	"github.com/example/sso/internal/store/mock"
 )
 
 // ============================================================================
@@ -1022,13 +1022,14 @@ func TestAuthService_LoginWithAudit_VerifyLog(t *testing.T) {
 		}, auditCtx)
 		assert.Error(t, err)
 
-		// 验证登录事件审计日志已写入（success=false）
+		// 验证登录失败事件审计日志已写入（success=false）
+		// Issue 4 修复：失败事件使用 EventUserLoginFailed 而非 EventUserLogin
 		require.Eventually(t, func() bool {
-			logs, _, err := storeInst.ListAuditLogs(ctx, "audit-login-fail-user", string(model.EventUserLogin), 0, 10)
+			logs, _, err := storeInst.ListAuditLogs(ctx, "audit-login-fail-user", string(model.EventUserLoginFailed), 0, 10)
 			return err == nil && len(logs) >= 1
 		}, 2*time.Second, 10*time.Millisecond, "登录失败审计日志未写入")
 
-		logs, _, _ := storeInst.ListAuditLogs(ctx, "audit-login-fail-user", string(model.EventUserLogin), 0, 10)
+		logs, _, _ := storeInst.ListAuditLogs(ctx, "audit-login-fail-user", string(model.EventUserLoginFailed), 0, 10)
 		assert.False(t, logs[0].Success)
 	})
 }

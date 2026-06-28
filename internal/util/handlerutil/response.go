@@ -5,9 +5,10 @@ package handlerutil
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
-	apperrors "github.com/your-org/sso/internal/errors"
+	apperrors "github.com/example/sso/internal/errors"
 )
 
 // ============================================================================
@@ -83,6 +84,22 @@ func WriteJSONError(w http.ResponseWriter, err error) {
 
 	// 写入JSON响应
 	writeJSON(w, status, response)
+}
+
+// WriteJSON 写入任意JSON响应
+// 用于需要自定义状态码和响应体的场景
+//
+// 此函数是处理非标准成功/错误响应的底层方式。它确保：
+// 1. 自动设置Content-Type为application/json
+// 2. 编码错误会被记录
+// 3. 状态码和响应体由调用者控制
+//
+// 参数:
+//   - w: HTTP响应写入器
+//   - status: HTTP状态码
+//   - data: 要序列化的响应体
+func WriteJSON(w http.ResponseWriter, status int, data interface{}) {
+	writeJSON(w, status, data)
 }
 
 // WriteJSONSuccess 写入标准化的成功响应
@@ -168,5 +185,8 @@ func WriteValidationError(w http.ResponseWriter, field, message string) {
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(data)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		// 响应头已发送，无法返回错误给客户端，记录日志以便排查
+		slog.Error("编码JSON响应失败", "error", err)
+	}
 }

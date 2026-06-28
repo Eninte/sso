@@ -16,14 +16,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/cache"
-	"github.com/your-org/sso/internal/captcha"
-	"github.com/your-org/sso/internal/crypto"
-	apperrors "github.com/your-org/sso/internal/errors"
-	"github.com/your-org/sso/internal/handler"
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/service"
-	"github.com/your-org/sso/internal/store/mock"
+	"github.com/example/sso/internal/cache"
+	"github.com/example/sso/internal/captcha"
+	"github.com/example/sso/internal/crypto"
+	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/handler"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/service"
+	"github.com/example/sso/internal/store/mock"
 )
 
 // ============================================================================
@@ -32,18 +32,22 @@ import (
 
 // trackingCaptchaVerifier 记录 RecordFailure 调用次数和参数的 mock
 type trackingCaptchaVerifier struct {
-	enabled              bool
-	requireCaptcha       bool
-	verifyOK             bool
-	recordFailureCalls   atomic.Int64
-	recordFailureKeys    []string
-	clearFailuresCalls   atomic.Int64
-	clearFailuresKeys    []string
+	enabled            bool
+	requireCaptcha     bool
+	verifyOK           bool
+	recordFailureCalls atomic.Int64
+	recordFailureKeys  []string
+	clearFailuresCalls atomic.Int64
+	clearFailuresKeys  []string
 }
 
-func (m *trackingCaptchaVerifier) IsEnabled() bool                                       { return m.enabled }
-func (m *trackingCaptchaVerifier) ShouldRequireCaptcha(_ context.Context, _ string) bool { return m.requireCaptcha }
-func (m *trackingCaptchaVerifier) Verify(_ context.Context, _, _ string) (bool, error)   { return m.verifyOK, nil }
+func (m *trackingCaptchaVerifier) IsEnabled() bool { return m.enabled }
+func (m *trackingCaptchaVerifier) ShouldRequireCaptcha(_ context.Context, _ string) bool {
+	return m.requireCaptcha
+}
+func (m *trackingCaptchaVerifier) Verify(_ context.Context, _, _ string) (bool, error) {
+	return m.verifyOK, nil
+}
 func (m *trackingCaptchaVerifier) RecordFailure(_ context.Context, key string) {
 	m.recordFailureCalls.Add(1)
 	m.recordFailureKeys = append(m.recordFailureKeys, key)
@@ -293,18 +297,18 @@ func TestFix_VerifyUsesRemainingTTL(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("错误猜测不延长验证码生命周期", func(t *testing.T) {
-		cap, err := svc.Generate(ctx)
+		captchaResp, err := svc.Generate(ctx)
 		require.NoError(t, err)
 
 		// 获取正确答案
 		var data struct {
 			Answer string `json:"answer"`
 		}
-		err = c.Get(ctx, captcha.CaptchaCachePrefix+cap.ID, &data)
+		err = c.Get(ctx, captcha.CaptchaCachePrefix+captchaResp.ID, &data)
 		require.NoError(t, err)
 
 		// 立即提交错误答案（TTL 几乎未消耗）
-		ok, err := svc.Verify(ctx, cap.ID, "wrong")
+		ok, err := svc.Verify(ctx, captchaResp.ID, "wrong")
 		assert.NoError(t, err)
 		assert.False(t, ok)
 
@@ -314,28 +318,28 @@ func TestFix_VerifyUsesRemainingTTL(t *testing.T) {
 		time.Sleep(2200 * time.Millisecond)
 
 		// 验证码应已过期，使用正确答案也无法通过
-		ok, err = svc.Verify(ctx, cap.ID, data.Answer)
+		ok, err = svc.Verify(ctx, captchaResp.ID, data.Answer)
 		assert.NoError(t, err)
 		assert.False(t, ok, "验证码应在原始 TTL 后过期，不被错误猜测延长")
 	})
 
 	t.Run("正确答案在 TTL 内仍可验证", func(t *testing.T) {
-		cap, err := svc.Generate(ctx)
+		captchaResp2, err := svc.Generate(ctx)
 		require.NoError(t, err)
 
 		var data struct {
 			Answer string `json:"answer"`
 		}
-		err = c.Get(ctx, captcha.CaptchaCachePrefix+cap.ID, &data)
+		err = c.Get(ctx, captcha.CaptchaCachePrefix+captchaResp2.ID, &data)
 		require.NoError(t, err)
 
 		// 先提交一次错误答案
-		ok, err := svc.Verify(ctx, cap.ID, "wrong")
+		ok, err := svc.Verify(ctx, captchaResp2.ID, "wrong")
 		assert.NoError(t, err)
 		assert.False(t, ok)
 
 		// 在 TTL 内用正确答案仍可通过
-		ok, err = svc.Verify(ctx, cap.ID, data.Answer)
+		ok, err = svc.Verify(ctx, captchaResp2.ID, data.Answer)
 		assert.NoError(t, err)
 		assert.True(t, ok, "TTL 内正确答案应验证通过")
 	})
@@ -408,7 +412,7 @@ func TestFix_EndToEnd_LoginCaptchaFlow(t *testing.T) {
 	body = bytes.NewReader([]byte(`{"email":"fixtest@example.com","password":"Password123!"}`))
 	req = httptest.NewRequest("POST", "/api/v1/login", body)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Captcha-ID", captchaResp.ID)
+	req.Header.Set("X-Captcha-Id", captchaResp.ID)
 	req.Header.Set("X-Captcha-Answer", captchaData.Answer)
 	req.RemoteAddr = ip + ":1234"
 	w = httptest.NewRecorder()
@@ -428,7 +432,7 @@ func TestFix_EndToEnd_LoginCaptchaFlow(t *testing.T) {
 	body = bytes.NewReader([]byte(`{"email":"fixtest@example.com","password":"Password123!"}`))
 	req = httptest.NewRequest("POST", "/api/v1/login", body)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Captcha-ID", captchaResp.ID)
+	req.Header.Set("X-Captcha-Id", captchaResp.ID)
 	req.Header.Set("X-Captcha-Answer", captchaData.Answer)
 	req.RemoteAddr = ip + ":1234"
 	w = httptest.NewRecorder()

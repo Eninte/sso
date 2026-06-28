@@ -74,6 +74,7 @@ const (
 	ErrCodeRecoveryCodeInvalid    ErrorCode = "RECOVERY_CODE_INVALID"    // 恢复码无效
 	ErrCodeRecoveryCodeUsed       ErrorCode = "RECOVERY_CODE_USED"       // 恢复码已使用
 	ErrCodeRecoveryCodeGeneration ErrorCode = "RECOVERY_CODE_GENERATION" // 恢复码生成失败
+	ErrCodeMFAHMACKeyNotSet       ErrorCode = "MFA_HMAC_KEY_NOT_SET"     // MFA恢复码HMAC密钥未设置
 
 	// 第三方登录相关错误
 	ErrCodeProviderNotSupported    ErrorCode = "PROVIDER_NOT_SUPPORTED"     // 提供商不支持
@@ -235,6 +236,7 @@ var (
 	ErrRecoveryCodeInvalid  = New(ErrCodeRecoveryCodeInvalid, "恢复码无效", 400)
 	ErrRecoveryCodeUsed     = New(ErrCodeRecoveryCodeUsed, "恢复码已使用", 400)
 	ErrRecoveryCodeGenerate = New(ErrCodeRecoveryCodeGeneration, "恢复码生成失败", 500)
+	ErrMFAHMACKeyNotSet     = New(ErrCodeMFAHMACKeyNotSet, "MFA恢复码HMAC密钥未设置", 500)
 
 	// 第三方登录错误
 	ErrProviderNotSupported    = New(ErrCodeProviderNotSupported, "不支持的登录提供商", 400)

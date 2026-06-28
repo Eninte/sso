@@ -1,4 +1,4 @@
-module github.com/your-org/sso
+module github.com/example/sso
 
 go 1.26.1
 

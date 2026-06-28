@@ -6,14 +6,15 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	apperrors "github.com/example/sso/internal/errors"
 	"github.com/joho/godotenv"
-	apperrors "github.com/your-org/sso/internal/errors"
 )
 
 // 配置错误定义（使用统一错误定义）
@@ -217,25 +218,7 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// validate 验证配置的有效性
-// validateDatabaseConfig 验证数据库配置
-// 检查数据库密码是否设置，以及生产环境是否启用SSL
-// validateDatabaseConfig 验证数据库配置
-// 此函数从Config.validate中提取，用于降低主函数的复杂度
-//
-// 职责:
-//   - 检查DB_PASSWORD是否设置（非空）
-//   - 检查生产环境是否启用数据库SSL（DB_SSL_MODE=require）
-//
-// 参数:
-//   - c: 配置对象
-//
-// 返回:
-//   - 如果配置有效，返回nil
-//   - 如果DB_PASSWORD为空，返回ErrDBPasswordRequired
-//   - 如果生产环境未启用SSL，返回错误
-//
-// 重构原因: 从Config.validate中提取数据库验证逻辑，降低主函数复杂度（21→<10）
+// validateDatabaseConfig 验证数据库配置：DB_PASSWORD 必填，生产环境需启用 SSL（LAN 部署除外）
 func validateDatabaseConfig(c *Config) error {
 	// 验证数据库密码
 	if c.DBPassword == "" {
@@ -256,25 +239,7 @@ func validateDatabaseConfig(c *Config) error {
 	return nil
 }
 
-// validateJWTConfig 验证JWT配置
-// 检查JWT密钥路径和Token TTL值
-// validateJWTConfig 验证JWT配置
-// 此函数从Config.validate中提取，用于降低主函数的复杂度
-//
-// 职责:
-//   - 检查JWT密钥路径，如果为空则设置默认值
-//   - 检查Access Token TTL是否为正数
-//   - 检查Refresh Token TTL是否为正数
-//   - 验证Token TTL的合理性（警告过短或不合理的值）
-//
-// 参数:
-//   - c: 配置对象（会被修改以设置默认值）
-//
-// 返回:
-//   - 如果配置有效，返回nil
-//   - 如果Token TTL无效（非正数），返回错误
-//
-// 重构原因: 从Config.validate中提取JWT验证逻辑，降低主函数复杂度（21→<10）
+// validateJWTConfig 验证JWT配置：补全密钥路径默认值，校验 Token TTL 为正数
 func validateJWTConfig(c *Config) error {
 	// 验证JWT密钥路径，如果为空则设置默认值
 	if c.JWTPrivateKeyPath == "" {
@@ -309,25 +274,7 @@ func validateJWTConfig(c *Config) error {
 	return nil
 }
 
-// validateSecurityConfig 验证安全配置
-// 检查bcrypt cost和其他安全参数
-// validateSecurityConfig 验证安全配置
-// 此函数从Config.validate中提取，用于降低主函数的复杂度
-//
-// 职责:
-//   - 检查bcrypt cost是否在推荐范围内（4-31）
-//   - 检查生产环境bcrypt cost是否至少为12
-//   - 检查限流配置是否有效
-//   - 检查登录保护配置是否有效
-//
-// 参数:
-//   - c: 配置对象
-//
-// 返回:
-//   - 如果配置有效，返回nil
-//   - 如果生产环境bcrypt cost过低，返回ErrBcryptCostTooLow
-//
-// 重构原因: 从Config.validate中提取安全验证逻辑，降低主函数复杂度（21→<10）
+// validateSecurityConfig 验证安全配置：bcrypt cost、限流、登录保护
 func validateSecurityConfig(c *Config) error {
 	// 验证bcrypt cost范围
 	if c.BcryptCost < 4 || c.BcryptCost > 31 {
@@ -364,28 +311,8 @@ func validateSecurityConfig(c *Config) error {
 	return nil
 }
 
-// validateProductionConfig 验证生产环境配置
-// 检查生产环境特定的安全要求
-// validateProductionConfig 验证生产环境配置
-// 此函数从Config.validate中提取，用于降低主函数的复杂度
-//
-// 职责:
-//   - 检查CORS配置不包含localhost
-//   - 检查是否使用默认CORS配置
-//   - 检查JWT Issuer是否自定义
-//   - 检查SMTP配置
-//   - 检查Metrics认证配置
-//
-// 参数:
-//   - c: 配置对象
-//
-// 返回:
-//   - 如果不是生产环境，返回nil（跳过验证）
-//   - 如果配置有效，返回nil
-//   - 如果CORS包含localhost或使用默认值，返回错误
-//   - 如果Metrics配置不完整，返回错误
-//
-// 重构原因: 从Config.validate中提取生产环境验证逻辑，降低主函数复杂度（21→<10）
+// validateProductionConfig 验证生产环境配置：CORS、JWT Issuer、SMTP、Metrics 认证等安全要求
+// 非生产环境直接跳过
 func validateProductionConfig(c *Config) error {
 	// 仅在生产环境执行验证
 	if c.Env != "production" {
@@ -440,29 +367,21 @@ func validateProductionConfig(c *Config) error {
 		return fmt.Errorf("生产环境配置了METRICS_USERNAME时必须设置METRICS_PASSWORD")
 	}
 
+	// 检查MFA恢复码HMAC密钥（生产环境强制要求）
+	// 防止攻击者通过数据库泄露推导恢复码，AGENTS.md 硬约束
+	if c.MFARecoveryHMACKey == "" {
+		if lanMode {
+			slog.Warn("生产环境未设置MFA_RECOVERY_HMAC_KEY（LAN部署模式）")
+		} else {
+			slog.Error("生产环境必须设置MFA_RECOVERY_HMAC_KEY")
+			return fmt.Errorf("生产环境必须设置 MFA_RECOVERY_HMAC_KEY")
+		}
+	}
+
 	return nil
 }
 
-// validate 验证配置的有效性
-// 此函数已重构以降低复杂度，通过提取数据库、JWT、安全、生产环境验证逻辑
-//
-// 职责:
-//   - 调用validateDatabaseConfig验证数据库配置
-//   - 调用validateJWTConfig验证JWT配置
-//   - 调用validateSecurityConfig验证安全配置
-//   - 调用validateProductionConfig验证生产环境配置
-//   - 验证环境设置和端口范围
-//
-// 返回:
-//   - 如果所有配置都有效，返回nil
-//   - 如果任何配置无效，返回第一个错误
-//
-// 重构原因: 原始复杂度为21，通过提取数据库、JWT、安全、生产环境验证逻辑，降低到<10
-// 提取的函数:
-//   - validateDatabaseConfig: 验证数据库配置
-//   - validateJWTConfig: 验证JWT配置
-//   - validateSecurityConfig: 验证安全配置
-//   - validateProductionConfig: 验证生产环境配置
+// validate 验证配置有效性：依次执行数据库、JWT、安全、生产环境校验
 func (c *Config) validate() error {
 	// 验证数据库配置
 	if err := validateDatabaseConfig(c); err != nil {
@@ -498,18 +417,31 @@ func (c *Config) validate() error {
 }
 
 // DatabaseURL 构建PostgreSQL数据库连接URL
+// 使用 net/url 对用户名、密码、数据库名进行转义，避免特殊字符破坏连接串
 func (c *Config) DatabaseURL() string {
-	return "postgres://" + c.DBUser + ":" + c.DBPassword +
-		"@" + c.DBHost + ":" + c.DBPort + "/" + c.DBName +
-		"?sslmode=" + c.DBSSLMode
+	u := &url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(c.DBUser, c.DBPassword),
+		Host:   c.DBHost + ":" + c.DBPort,
+		Path:   "/" + c.DBName,
+	}
+	q := u.Query()
+	q.Set("sslmode", c.DBSSLMode)
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // RedisURL 构建Redis连接URL
+// 对密码进行URL转义，避免特殊字符破坏连接串
 func (c *Config) RedisURL() string {
-	if c.RedisPassword != "" {
-		return "redis://:" + c.RedisPassword + "@" + c.RedisHost + ":" + c.RedisPort
+	u := &url.URL{
+		Scheme: "redis",
+		Host:   c.RedisHost + ":" + c.RedisPort,
 	}
-	return "redis://" + c.RedisHost + ":" + c.RedisPort
+	if c.RedisPassword != "" {
+		u.User = url.UserPassword("", c.RedisPassword)
+	}
+	return u.String()
 }
 
 // BaseURL 构建服务基础URL

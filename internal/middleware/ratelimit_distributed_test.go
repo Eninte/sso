@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/middleware"
+	"github.com/example/sso/internal/middleware"
 )
 
 // setupTestRedis 创建测试用的Redis客户端

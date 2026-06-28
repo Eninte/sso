@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	apperrors "github.com/your-org/sso/internal/errors"
-	"github.com/your-org/sso/internal/service"
+	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/service"
 )
 
 // ============================================================================
