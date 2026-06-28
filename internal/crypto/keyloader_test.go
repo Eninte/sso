@@ -289,6 +289,9 @@ func TestLoadPublicKeyFromFile_PermissionTooOpen(t *testing.T) {
 	keyPath2 := filepath.Join(tmpDir, "too_open_pub.pem")
 	err = os.WriteFile(keyPath2, publicKeyPEM, 0666)
 	require.NoError(t, err)
+	// os.WriteFile 受 umask 影响（CI 环境 umask=022 会将 0666 降为 0644），
+	// 显式 Chmod 确保文件权限精确为 0666，以正确测试权限检查逻辑
+	require.NoError(t, os.Chmod(keyPath2, 0666))
 
 	_, err = crypto.LoadPublicKeyFromFile(keyPath2)
 	assert.ErrorIs(t, err, crypto.ErrKeyPermissionOpen, "Public key with 0666 permissions should be rejected")

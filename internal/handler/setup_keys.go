@@ -171,10 +171,13 @@ func ValidateKeyPath(path string) error {
 
 	allowedDirs := getKeyPathWhitelist()
 	for _, allowedDir := range allowedDirs {
-		// 检查路径是否完全匹配或在允许目录的子目录中
+		// 检查路径本身、解析后的目录是否完全匹配或在允许目录的子目录中
+		// cleanPath 检查覆盖「白名单目录本身」的场景（目录可能尚未创建），
+		// dir 检查覆盖「白名单目录内的文件」场景（含符号链接解析后的真实路径）
 		// 添加路径分隔符检查防止前缀匹配绕过
 		// 例如: /app/keys 不应匹配 /app/keys_malicious
-		if dir == allowedDir || strings.HasPrefix(dir, allowedDir+string(filepath.Separator)) {
+		if cleanPath == allowedDir || dir == allowedDir ||
+			strings.HasPrefix(dir, allowedDir+string(filepath.Separator)) {
 			return nil
 		}
 	}
