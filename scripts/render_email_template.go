@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/your-org/sso/internal/service/email"
+	"github.com/example/sso/internal/service/email"
 )
 
 func main() {

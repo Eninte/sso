@@ -14,11 +14,11 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/your-org/sso/internal/crypto"
-	apperrors "github.com/your-org/sso/internal/errors"
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/store"
-	"github.com/your-org/sso/internal/util/serviceutil"
+	"github.com/example/sso/internal/crypto"
+	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/store"
+	"github.com/example/sso/internal/util/serviceutil"
 )
 
 // ============================================================================
@@ -69,7 +69,7 @@ type SocialLoginService struct {
 	store      store.Store
 	jwtSvc     *crypto.JWTService
 	tokenSvc   *TokenService
-	baseURL    string           // 服务基础URL，用于构建固定的回调地址
+	baseURL    string // 服务基础URL，用于构建固定的回调地址
 	providers  map[string]*OAuthProvider
 	httpClient HTTPClient
 	stateCache sync.Map      // 用于存储OAuth state，防止CSRF攻击

@@ -11,10 +11,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/crypto"
-	apperrors "github.com/your-org/sso/internal/errors"
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/store/mock"
+	"github.com/example/sso/internal/crypto"
+	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/store/mock"
 )
 
 // createTestJWTServiceForLoginTest 创建测试用的JWT服务

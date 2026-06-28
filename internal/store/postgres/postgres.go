@@ -8,7 +8,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/your-org/sso/internal/model"
+	"github.com/example/sso/internal/model"
 )
 
 // ============================================================================

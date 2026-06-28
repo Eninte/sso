@@ -12,8 +12,8 @@ import (
 	"net/smtp"
 	"time"
 
-	"github.com/your-org/sso/internal/service/email"
-	"github.com/your-org/sso/internal/util/serviceutil"
+	"github.com/example/sso/internal/service/email"
+	"github.com/example/sso/internal/util/serviceutil"
 )
 
 //go:embed email/templates email/templates/* email/templates/*/*

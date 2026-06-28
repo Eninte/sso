@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/cache"
+	"github.com/example/sso/internal/cache"
 )
 
 // ============================================================================
@@ -82,7 +82,7 @@ func TestSingleflightCache_Do(t *testing.T) {
 	callCount := 0
 
 	// 第一次调用 - 应该执行load函数
-	value, err := sf.Do(ctx, "test-key", 5*time.Minute, func() (interface{}, error) {
+	value, err := sf.Do(ctx, "test-key", 5*time.Minute, func(context.Context) (interface{}, error) {
 		callCount++
 		return "test-value", nil
 	})
@@ -91,7 +91,7 @@ func TestSingleflightCache_Do(t *testing.T) {
 	assert.Equal(t, 1, callCount)
 
 	// 第二次调用 - 应该从缓存获取，不执行load函数
-	value, err = sf.Do(ctx, "test-key", 5*time.Minute, func() (interface{}, error) {
+	value, err = sf.Do(ctx, "test-key", 5*time.Minute, func(context.Context) (interface{}, error) {
 		callCount++
 		return "new-value", nil
 	})
@@ -115,7 +115,7 @@ func TestSingleflightCache_Do_Concurrent(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			value, err := sf.Do(ctx, "concurrent-key", 5*time.Minute, func() (interface{}, error) {
+			value, err := sf.Do(ctx, "concurrent-key", 5*time.Minute, func(context.Context) (interface{}, error) {
 				mu.Lock()
 				callCount++
 				mu.Unlock()
@@ -145,7 +145,7 @@ func TestSingleflightCache_Do_Error(t *testing.T) {
 	ctx := context.Background()
 
 	// load函数返回错误
-	_, err := sf.Do(ctx, "error-key", 5*time.Minute, func() (interface{}, error) {
+	_, err := sf.Do(ctx, "error-key", 5*time.Minute, func(context.Context) (interface{}, error) {
 		return nil, fmt.Errorf("load failed")
 	})
 	require.Error(t, err)
@@ -162,7 +162,7 @@ func TestSingleflightCache_Do_DifferentKeys(t *testing.T) {
 	// 不同key应该独立执行
 	for i := 0; i < 5; i++ {
 		key := fmt.Sprintf("key-%d", i)
-		_, _ = sf.Do(ctx, key, 5*time.Minute, func() (interface{}, error) {
+		_, _ = sf.Do(ctx, key, 5*time.Minute, func(context.Context) (interface{}, error) {
 			callCount++
 			return key, nil
 		})

@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/cache"
+	"github.com/example/sso/internal/cache"
 )
 
 func setupMiniRedis(t *testing.T) (*miniredis.Miniredis, *cache.RedisCache) {
@@ -416,4 +416,157 @@ func TestRedisCache_CloseError(t *testing.T) {
 		err = rc.Set(ctx, "key", "value", 5*time.Minute)
 		assert.Error(t, err)
 	})
+}
+
+// ============================================================================
+// RedisCache.Increment / SetTTL / GetTTL / Client / WithMetrics 测试
+// 覆盖原本 0% 的计数器与 TTL 管理方法
+// ============================================================================
+
+// TestRedisCache_Increment 测试原子递增计数器
+func TestRedisCache_Increment(t *testing.T) {
+	mr, rc := setupMiniRedis(t)
+	ctx := context.Background()
+
+	t.Run("首次递增_返回1", func(t *testing.T) {
+		count, err := rc.Increment(ctx, "counter")
+		require.NoError(t, err)
+		assert.Equal(t, 1, count)
+	})
+
+	t.Run("连续递增_值递增", func(t *testing.T) {
+		key := "seq"
+		var last int
+		for i := 1; i <= 5; i++ {
+			count, err := rc.Increment(ctx, key)
+			require.NoError(t, err)
+			assert.Equal(t, i, count)
+			last = count
+		}
+		assert.Equal(t, 5, last)
+	})
+
+	t.Run("不同key独立计数", func(t *testing.T) {
+		c1, err := rc.Increment(ctx, "k1")
+		require.NoError(t, err)
+		c2, err := rc.Increment(ctx, "k2")
+		require.NoError(t, err)
+		assert.Equal(t, 1, c1)
+		assert.Equal(t, 1, c2, "不同 key 应独立计数")
+	})
+
+	t.Run("miniredis状态一致", func(t *testing.T) {
+		key := "verify"
+		rc.Increment(ctx, key)
+		rc.Increment(ctx, key)
+		// miniredis 维护的真实状态应与返回值一致
+		v, err := mr.Get(key)
+		require.NoError(t, err)
+		assert.Equal(t, "2", v)
+	})
+}
+
+// TestRedisCache_SetTTL 测试设置键过期时间
+func TestRedisCache_SetTTL(t *testing.T) {
+	mr, rc := setupMiniRedis(t)
+	ctx := context.Background()
+
+	t.Run("为已存在key设置TTL", func(t *testing.T) {
+		require.NoError(t, rc.Set(ctx, "k", "v", 5*time.Minute))
+		require.NoError(t, rc.SetTTL(ctx, "k", 10*time.Second))
+		assert.True(t, mr.TTL("k") <= 10*time.Second)
+	})
+
+	t.Run("为不存在的key设置TTL_key仍不存在", func(t *testing.T) {
+		// go-redis 的 Expire 对不存在的 key 返回 nil error（结果为 false）
+		// 此处验证语义：调用不报错，但 key 实际未创建
+		err := rc.SetTTL(ctx, "nonexistent", 10*time.Second)
+		assert.NoError(t, err, "SetTTL 对不存在的 key 不报错（Redis 语义）")
+		assert.False(t, mr.Exists("nonexistent"), "key 不应被创建")
+	})
+
+	t.Run("设置0TTL_永不过期语义", func(t *testing.T) {
+		require.NoError(t, rc.Set(ctx, "persist", "v", 5*time.Minute))
+		// Expire 0 在 Redis 中表示移除 TTL（永久）
+		// 注意：go-redis Expire(0) 实际行为依赖 Redis 版本，miniredis 会返回 false
+		// 此处仅验证调用不 panic
+		_ = rc.SetTTL(ctx, "persist", 0)
+	})
+}
+
+// TestRedisCache_GetTTL 测试获取键剩余过期时间
+func TestRedisCache_GetTTL(t *testing.T) {
+	mr, rc := setupMiniRedis(t)
+	ctx := context.Background()
+
+	t.Run("已设置TTL的key_返回正数", func(t *testing.T) {
+		require.NoError(t, rc.Set(ctx, "k", "v", 60*time.Second))
+		ttl, err := rc.GetTTL(ctx, "k")
+		require.NoError(t, err)
+		assert.True(t, ttl > 0 && ttl <= 60*time.Second, "TTL 应在 (0, 60s] 范围内，实际 %v", ttl)
+	})
+
+	t.Run("不存在的key_返回0", func(t *testing.T) {
+		ttl, err := rc.GetTTL(ctx, "nonexistent")
+		require.NoError(t, err)
+		assert.Equal(t, time.Duration(0), ttl, "不存在的 key 应返回 0（语义：无 TTL 或已过期）")
+	})
+
+	t.Run("TTL随时间递减", func(t *testing.T) {
+		require.NoError(t, rc.Set(ctx, "decay", "v", 10*time.Second))
+		ttl1, _ := rc.GetTTL(ctx, "decay")
+		mr.FastForward(5 * time.Second)
+		ttl2, _ := rc.GetTTL(ctx, "decay")
+		assert.Less(t, ttl2, ttl1, "FastForward 后 TTL 应递减")
+	})
+}
+
+// TestRedisCache_Client 测试获取底层 Redis 客户端
+func TestRedisCache_Client(t *testing.T) {
+	_, rc := setupMiniRedis(t)
+
+	t.Run("返回非nil客户端", func(t *testing.T) {
+		c := rc.Client()
+		assert.NotNil(t, c, "Client() 应返回底层 *redis.Client")
+	})
+
+	t.Run("客户端可直接执行命令", func(t *testing.T) {
+		ctx := context.Background()
+		c := rc.Client()
+		require.NotNil(t, c)
+		require.NoError(t, c.Set(ctx, "direct", "yes", 0).Err())
+		var val string
+		require.NoError(t, c.Get(ctx, "direct").Scan(&val))
+		assert.Equal(t, "yes", val)
+	})
+}
+
+// TestRedisCache_WithMetrics 测试设置指标回调
+func TestRedisCache_WithMetrics(t *testing.T) {
+	_, rc := setupMiniRedis(t)
+	ctx := context.Background()
+
+	hitCount := 0
+	missCount := 0
+
+	// 设置指标回调
+	returned := rc.WithMetrics(
+		func() { hitCount++ },
+		func() { missCount++ },
+	)
+	assert.Same(t, rc, returned, "WithMetrics 应返回缓存实例本身（链式调用）")
+
+	// 触发一次 miss（key 不存在）
+	var v string
+	err := rc.Get(ctx, "missing", &v)
+	assert.Error(t, err)
+	assert.Equal(t, 1, missCount, "未命中应触发 onMiss 回调")
+	assert.Equal(t, 0, hitCount)
+
+	// 设置后触发一次 hit
+	require.NoError(t, rc.Set(ctx, "exists", "value", 5*time.Minute))
+	var got string
+	require.NoError(t, rc.Get(ctx, "exists", &got))
+	assert.Equal(t, "value", got)
+	assert.Equal(t, 1, hitCount, "命中应触发 onHit 回调")
 }

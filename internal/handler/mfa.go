@@ -3,14 +3,13 @@
 package handler
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
-	apperrors "github.com/your-org/sso/internal/errors"
-	"github.com/your-org/sso/internal/middleware"
-	"github.com/your-org/sso/internal/service"
-	"github.com/your-org/sso/internal/util/handlerutil"
+	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/middleware"
+	"github.com/example/sso/internal/service"
+	"github.com/example/sso/internal/util/handlerutil"
 )
 
 // ============================================================================
@@ -26,6 +25,9 @@ type MFAHandler struct {
 func NewMFAHandler(mfaSvc service.MFAServiceInterface) *MFAHandler {
 	return &MFAHandler{mfaSvc: mfaSvc}
 }
+
+// MaxRecoveryCodeCount 单次生成恢复码的最大数量（与服务层限制保持一致）
+const MaxRecoveryCodeCount = 20
 
 // HandleSetupMFA 处理MFA设置请求
 // POST /api/v1/mfa/setup
@@ -161,14 +163,18 @@ func (h *MFAHandler) HandleGenerateRecoveryCodes(w http.ResponseWriter, r *http.
 	var req struct {
 		Count int `json:"count"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		handlerutil.WriteValidationError(w, "body", "invalid request body")
+	if err := decodeJSON(r, &req); err != nil {
+		handleDecodeJSONError(w, r, err)
 		return
 	}
 
 	count := req.Count
 	if count <= 0 {
 		count = 8
+	}
+	if count > MaxRecoveryCodeCount {
+		handlerutil.WriteValidationError(w, "count", getMessage(r, apperrors.ErrCodeBadRequest))
+		return
 	}
 
 	codes, err := h.mfaSvc.GenerateRecoveryCodes(r.Context(), userID, count)
@@ -194,17 +200,17 @@ func (h *MFAHandler) HandleVerifyRecoveryCode(w http.ResponseWriter, r *http.Req
 	var req struct {
 		Code string `json:"code"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		handlerutil.WriteValidationError(w, "body", "invalid request body")
+	if err := decodeJSON(r, &req); err != nil {
+		handleDecodeJSONError(w, r, err)
 		return
 	}
 
 	if req.Code == "" {
-		handlerutil.WriteValidationError(w, "code", "recovery code is required")
+		handlerutil.WriteValidationError(w, "code", getMessage(r, apperrors.ErrCodeMissingVerificationCode))
 		return
 	}
 
-	valid, err := h.mfaSvc.VerifyRecoveryCode(r.Context(), userID, req.Code)
+	valid, err := h.mfaSvc.VerifyRecoveryCode(r.Context(), userID, req.Code, extractClientIP(r))
 	if err != nil {
 		handlerutil.WriteJSONError(w, err)
 		return

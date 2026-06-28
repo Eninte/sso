@@ -3,12 +3,9 @@ package handler
 import (
 	"context"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/subtle"
-	"crypto/x509"
 	_ "embed"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
 	"log/slog"
 	"net"
@@ -17,16 +14,15 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"syscall"
 	"text/template"
 	"time"
 
-	"github.com/your-org/sso/internal/config"
-	apperrors "github.com/your-org/sso/internal/errors"
-	"github.com/your-org/sso/internal/middleware"
-	"github.com/your-org/sso/internal/util/handlerutil"
+	"github.com/example/sso/internal/config"
+	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/middleware"
+	"github.com/example/sso/internal/util/handlerutil"
 )
 
 //go:embed templates/setup.html
@@ -323,6 +319,8 @@ func (h *SetupHandler) testConnections(r *http.Request, dbDSN, redisAddr, redisP
 // HandleSetupTestDB 测试数据库连接
 func (h *SetupHandler) HandleSetupTestDB(w http.ResponseWriter, r *http.Request) {
 	if !isLocalRequest(r) {
+		// nosec G706 -- slog 结构化日志，r.RemoteAddr 作为参数传递不受注入影响
+		slog.Warn("setup test-db 拒绝非本地请求", "remote_addr", r.RemoteAddr)
 		handlerutil.WriteJSONError(w, apperrors.ErrForbidden.WithDetails("配置向导仅允许本地访问"))
 		return
 	}
@@ -335,23 +333,30 @@ func (h *SetupHandler) HandleSetupTestDB(w http.ResponseWriter, r *http.Request)
 		SSLMode  string `json:"ssl_mode"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// nosec G706 -- slog 结构化日志，r.RemoteAddr 作为参数传递不受注入影响
+		slog.Warn("setup test-db 请求体解析失败", "error", err, "remote_addr", r.RemoteAddr)
 		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails("无效的请求格式"))
 		return
 	}
+	// 注意：不在日志中记录密码
+	slog.Info("setup test-db 收到请求", "host", req.Host, "port", req.Port, "database", req.Name, "user", req.User, "ssl_mode", req.SSLMode)
 
 	if req.Host == "" || req.Port == "" || req.Name == "" || req.User == "" {
+		slog.Warn("setup test-db 缺少必填字段", "host", req.Host, "port", req.Port, "database", req.Name, "user_empty", req.User == "")
 		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails("缺少必填字段"))
 		return
 	}
 
 	port, err := strconv.Atoi(req.Port)
 	if err != nil || port < 1 || port > 65535 {
+		slog.Warn("setup test-db 端口非法", "port", req.Port, "parse_err", err)
 		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails("端口号必须为1-65535之间的数字"))
 		return
 	}
 
 	if req.SSLMode == "" {
 		req.SSLMode = "disable"
+		slog.Info("setup test-db ssl_mode 为空，使用默认值 disable")
 	}
 
 	validSSLModes := map[string]bool{
@@ -362,6 +367,7 @@ func (h *SetupHandler) HandleSetupTestDB(w http.ResponseWriter, r *http.Request)
 		"verify-full": true,
 	}
 	if !validSSLModes[req.SSLMode] {
+		slog.Warn("setup test-db ssl_mode 非法", "ssl_mode", req.SSLMode)
 		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails("无效的 ssl_mode，仅支持: disable, require, prefer, verify-ca, verify-full"))
 		return
 	}
@@ -372,12 +378,14 @@ func (h *SetupHandler) HandleSetupTestDB(w http.ResponseWriter, r *http.Request)
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
+	slog.Info("setup test-db 开始连接测试", "host_port", hostPort, "database", req.Name, "ssl_mode", req.SSLMode, "timeout", "10s")
 	if err := testDBConnection(ctx, dsn); err != nil {
-		slog.Error("数据库连接失败", "error", err, "host", req.Host, "port", req.Port, "database", req.Name)
+		slog.Error("setup test-db 数据库连接失败", "error", err, "host", req.Host, "port", req.Port, "database", req.Name, "ssl_mode", req.SSLMode, "user", req.User)
 		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails(err.Error()))
 		return
 	}
 
+	slog.Info("setup test-db 数据库连接成功", "host", req.Host, "port", req.Port, "database", req.Name, "ssl_mode", req.SSLMode)
 	handlerutil.WriteJSONSuccess(w, map[string]string{
 		"message": "数据库连接成功",
 	})
@@ -386,6 +394,8 @@ func (h *SetupHandler) HandleSetupTestDB(w http.ResponseWriter, r *http.Request)
 // HandleSetupTestRedis 测试Redis连接
 func (h *SetupHandler) HandleSetupTestRedis(w http.ResponseWriter, r *http.Request) {
 	if !isLocalRequest(r) {
+		// nosec G706 -- slog 结构化日志，r.RemoteAddr 作为参数传递不受注入影响
+		slog.Warn("setup test-redis 拒绝非本地请求", "remote_addr", r.RemoteAddr)
 		handlerutil.WriteJSONError(w, apperrors.ErrForbidden.WithDetails("配置向导仅允许本地访问"))
 		return
 	}
@@ -396,223 +406,29 @@ func (h *SetupHandler) HandleSetupTestRedis(w http.ResponseWriter, r *http.Reque
 		DB       int    `json:"db"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// nosec G706 -- slog 结构化日志，r.RemoteAddr 作为参数传递不受注入影响
+		slog.Warn("setup test-redis 请求体解析失败", "error", err, "remote_addr", r.RemoteAddr)
 		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails("无效的请求格式"))
 		return
 	}
+	// 注意：不在日志中记录密码
+	slog.Info("setup test-redis 收到请求", "host", req.Host, "port", req.Port, "db", req.DB, "has_password", req.Password != "")
 
 	addr := req.Host + ":" + req.Port
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-
+	slog.Info("setup test-redis 开始连接测试", "addr", addr, "db", req.DB, "timeout", "10s")
 	if err := testRedisConnection(ctx, addr, req.Password, req.DB); err != nil {
+		slog.Error("setup test-redis Redis连接失败", "error", err, "addr", addr, "db", req.DB)
 		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails(err.Error()))
 		return
 	}
 
+	slog.Info("setup test-redis Redis连接成功", "addr", addr, "db", req.DB)
 	handlerutil.WriteJSONSuccess(w, map[string]string{
 		"message": "Redis连接成功",
 	})
 }
 
 // HandleSetupGenerateKeys 生成RSA密钥对
-func (h *SetupHandler) HandleSetupGenerateKeys(w http.ResponseWriter, r *http.Request) {
-	if !isLocalRequest(r) {
-		handlerutil.WriteJSONError(w, apperrors.ErrForbidden.WithDetails("配置向导仅允许本地访问"))
-		return
-	}
-	var req struct {
-		PrivatePath string `json:"private_path"`
-		PublicPath  string `json:"public_path"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails("无效的请求格式"))
-		return
-	}
-
-	if req.PrivatePath == "" || req.PublicPath == "" {
-		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails("密钥路径不能为空"))
-		return
-	}
-
-	// 验证路径安全性（防止路径遍历攻击）
-	if err := ValidateKeyPath(req.PrivatePath); err != nil {
-		slog.Error("私钥路径验证失败", "path", req.PrivatePath, "error", err)
-		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails("私钥路径无效"))
-		return
-	}
-	if err := ValidateKeyPath(req.PublicPath); err != nil {
-		slog.Error("公钥路径验证失败", "path", req.PublicPath, "error", err)
-		handlerutil.WriteJSONError(w, apperrors.ErrBadRequest.WithDetails("公钥路径无效"))
-		return
-	}
-
-	// 确保目录存在（自动创建）
-	privDir := filepath.Dir(req.PrivatePath)
-	if err := os.MkdirAll(privDir, 0755); err != nil {
-		slog.Error("创建私钥目录失败", "dir", privDir, "error", err)
-		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("创建密钥目录失败"))
-		return
-	}
-
-	pubDir := filepath.Dir(req.PublicPath)
-	if pubDir != privDir {
-		if err := os.MkdirAll(pubDir, 0755); err != nil {
-			slog.Error("创建公钥目录失败", "dir", pubDir, "error", err)
-			handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("创建公钥目录失败"))
-			return
-		}
-	}
-
-	// 生成RSA密钥对（3072位，符合当前安全最佳实践）
-	privateKey, err := rsa.GenerateKey(rand.Reader, 3072)
-	if err != nil {
-		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("生成密钥失败"))
-		return
-	}
-
-	// 写入私钥
-	privFile, err := os.Create(req.PrivatePath) // #nosec G304 -- 路径已验证
-	if err != nil {
-		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("创建私钥文件失败"))
-		return
-	}
-	defer privFile.Close()
-	if err := privFile.Chmod(0600); err != nil { // #nosec G302 -- 私钥文件必须限制权限
-		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("设置私钥文件权限失败"))
-		return
-	}
-
-	privPEM := &pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
-	}
-	if err := pem.Encode(privFile, privPEM); err != nil {
-		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("写入私钥失败"))
-		return
-	}
-
-	// 写入公钥
-	pubFile, err := os.Create(req.PublicPath) // #nosec G304 -- 路径已验证
-	if err != nil {
-		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("创建公钥文件失败"))
-		return
-	}
-	defer pubFile.Close()
-	if err := pubFile.Chmod(0644); err != nil { // #nosec G302
-		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("设置公钥文件权限失败"))
-		return
-	}
-
-	pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
-	if err != nil {
-		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("编码公钥失败"))
-		return
-	}
-
-	pubPEM := &pem.Block{
-		Type:  "PUBLIC KEY",
-		Bytes: pubBytes,
-	}
-	if err := pem.Encode(pubFile, pubPEM); err != nil {
-		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("写入公钥失败"))
-		return
-	}
-
-	handlerutil.WriteJSONSuccess(w, map[string]string{
-		"private_path": req.PrivatePath,
-		"public_path":  req.PublicPath,
-	})
-}
-
-// ValidateKeyPath 验证密钥路径安全性
-// 防止路径遍历攻击，确保路径在允许的目录内
-func ValidateKeyPath(path string) error {
-	if path == "" {
-		return fmt.Errorf("路径不能为空")
-	}
-
-	cleanPath := filepath.Clean(path)
-
-	if !filepath.IsAbs(cleanPath) {
-		return fmt.Errorf("必须使用绝对路径")
-	}
-
-	// 检查路径是否包含危险字符或模式
-	if strings.Contains(cleanPath, "..") {
-		return fmt.Errorf("路径不能包含 '..'")
-	}
-
-	// 获取目录路径
-	// 如果路径本身是目录,使用路径本身;否则使用父目录
-	dir := cleanPath
-	if info, err := os.Stat(cleanPath); err == nil && !info.IsDir() {
-		dir = filepath.Dir(cleanPath)
-	} else if err != nil && !os.IsNotExist(err) {
-		// 如果是其他错误(非文件不存在),返回错误
-		return fmt.Errorf("无法访问路径: %w", err)
-	} else if os.IsNotExist(err) {
-		// 如果文件不存在,使用父目录进行检查
-		dir = filepath.Dir(cleanPath)
-	}
-
-	// 检查是否为符号链接，防止绕过白名单
-	fileInfo, err := os.Lstat(dir)
-	if err == nil && fileInfo.Mode()&os.ModeSymlink != 0 {
-		// 如果是符号链接，解析真实路径
-		realPath, err := filepath.EvalSymlinks(dir)
-		if err != nil {
-			return fmt.Errorf("无法解析符号链接: %w", err)
-		}
-		dir = realPath
-	}
-
-	allowedDirs := getKeyPathWhitelist()
-	for _, allowedDir := range allowedDirs {
-		// 检查路径是否完全匹配或在允许目录的子目录中
-		// 添加路径分隔符检查防止前缀匹配绕过
-		// 例如: /app/keys 不应匹配 /app/keys_malicious
-		if dir == allowedDir || strings.HasPrefix(dir, allowedDir+string(filepath.Separator)) {
-			return nil
-		}
-	}
-
-	return fmt.Errorf("路径必须在允许的目录内: %v", allowedDirs)
-}
-
-// getKeyPathWhitelist 获取密钥路径白名单
-// 支持通过环境变量 KEY_PATH_WHITELIST 自定义（逗号分隔）
-// 默认值：/app/keys, /keys, /etc/sso/keys, 当前工作目录/keys
-func getKeyPathWhitelist() []string {
-	// 默认允许的目录
-	defaultDirs := []string{"/app/keys", "/keys", "/etc/sso/keys"}
-
-	// 添加当前工作目录的keys子目录（配置向导友好）
-	if cwd, err := os.Getwd(); err == nil {
-		cwdKeys := filepath.Join(cwd, "keys")
-		defaultDirs = append(defaultDirs, cwdKeys)
-	}
-
-	// 从环境变量读取自定义白名单
-	customDirs := os.Getenv("KEY_PATH_WHITELIST")
-	if customDirs == "" {
-		return defaultDirs
-	}
-
-	// 解析逗号分隔的路径列表
-	dirs := strings.Split(customDirs, ",")
-	result := make([]string, 0, len(dirs))
-	for _, dir := range dirs {
-		dir = strings.TrimSpace(dir)
-		if dir != "" && filepath.IsAbs(dir) {
-			result = append(result, filepath.Clean(dir))
-		}
-	}
-
-	// 如果自定义白名单为空或无效，返回默认值
-	if len(result) == 0 {
-		return defaultDirs
-	}
-
-	return result
-}

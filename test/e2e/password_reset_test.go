@@ -228,3 +228,78 @@ func TestConcurrentForgotPassword(t *testing.T) {
 		<-done
 	}
 }
+
+// ============================================================================
+// 完整密码重置流程测试（覆盖 MarkResetTokenUsed 一次性语义）
+// 该测试通过 DB 探针读取真实 reset token，验证完整链路：
+//   forgot-password → 从 DB 取真实 token → reset-password 成功
+//   → 同 token 再次 reset 失败（验证 MarkResetTokenUsed 生效）
+//   → 新密码登录成功，旧密码登录失败
+// ============================================================================
+
+func TestFullPasswordResetFlow_RealToken(t *testing.T) {
+	email := generateUniqueEmail("resetreal")
+	oldPassword := generateTestPassword()
+	newPassword := "NewSecurePassword456!"
+
+	// 1. 注册并验证邮箱（@example.com 由触发器自动验证）
+	user, err := registerUser(email, oldPassword)
+	require.NoError(t, err)
+	userID, ok := user["user_id"].(string)
+	require.True(t, ok && userID != "", "注册响应应包含 user_id")
+	require.NoError(t, verifyEmail(userID))
+
+	// 2. 旧密码登录验证
+	tokens, err := loginUser(email, oldPassword)
+	require.NoError(t, err)
+	assert.NotEmpty(t, tokens.AccessToken, "旧密码应能登录")
+
+	// 3. 请求密码重置
+	forgotReq := forgotPasswordRequest{Email: email}
+	forgotResp, _, err := doRequest("POST", "/api/v1/forgot-password", forgotReq, "")
+	require.NoError(t, err)
+	assertNotRateLimited(t, forgotResp)
+	require.True(t, forgotResp.StatusCode == http.StatusOK || forgotResp.StatusCode == http.StatusAccepted,
+		"forgot-password 期望 200/202，实际 %d", forgotResp.StatusCode)
+
+	// 4. 从 DB 读取真实重置令牌（邮件链路在 E2E 中不可用）
+	realToken := getResetTokenFromDB(t, userID)
+	require.NotEmpty(t, realToken, "应从 DB 读取到真实重置令牌")
+
+	// 5. 使用真实令牌重置密码成功
+	resetReq := resetPasswordRequest{
+		Token:       realToken,
+		UserID:      userID,
+		NewPassword: newPassword,
+	}
+	resetResp, _, err := doRequest("POST", "/api/v1/reset-password", resetReq, "")
+	require.NoError(t, err)
+	assertNotRateLimited(t, resetResp)
+	require.Equal(t, http.StatusOK, resetResp.StatusCode,
+		"使用有效令牌重置密码应成功，实际 %d", resetResp.StatusCode)
+
+	t.Run("重置后新密码可登录", func(t *testing.T) {
+		newTokens, err := loginUser(email, newPassword)
+		require.NoError(t, err, "新密码应能登录")
+		assert.NotEmpty(t, newTokens.AccessToken)
+	})
+
+	t.Run("重置后旧密码失效", func(t *testing.T) {
+		_, err := loginUser(email, oldPassword)
+		assert.Error(t, err, "旧密码应已失效")
+	})
+
+	t.Run("重置令牌一次性使用_重复使用应失败", func(t *testing.T) {
+		// 用相同令牌再次重置，应被拒绝（MarkResetTokenUsed 生效）
+		reuseReq := resetPasswordRequest{
+			Token:       realToken,
+			UserID:      userID,
+			NewPassword: "AnotherPassword789!",
+		}
+		reuseResp, _, err := doRequest("POST", "/api/v1/reset-password", reuseReq, "")
+		require.NoError(t, err)
+		assertNotRateLimited(t, reuseResp)
+		assert.True(t, reuseResp.StatusCode >= 400,
+			"重复使用已消耗的重置令牌应返回错误，实际 %d", reuseResp.StatusCode)
+	})
+}

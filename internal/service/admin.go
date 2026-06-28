@@ -7,11 +7,32 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/your-org/sso/internal/cache"
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/store"
-	"github.com/your-org/sso/internal/util/serviceutil"
+	"github.com/example/sso/internal/cache"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/store"
+	"github.com/example/sso/internal/util/serviceutil"
 )
+
+// ============================================================================
+// 上下文辅助（用于在不破坏接口的情况下传递请求元数据）
+// ============================================================================
+
+type adminContextKey string
+
+const clientIPContextKey adminContextKey = "admin.client_ip"
+
+// WithClientIP 将客户端 IP 注入上下文，供 AdminService 审计日志使用
+func WithClientIP(ctx context.Context, ip string) context.Context {
+	return context.WithValue(ctx, clientIPContextKey, ip)
+}
+
+// clientIPFromContext 从上下文中获取客户端 IP
+func clientIPFromContext(ctx context.Context) string {
+	if ip, ok := ctx.Value(clientIPContextKey).(string); ok {
+		return ip
+	}
+	return ""
+}
 
 // ============================================================================
 // 管理员服务接口
@@ -55,23 +76,51 @@ type SystemHealthInfo struct {
 type AdminService struct {
 	store     store.Store
 	cache     cache.Cache
+	auditSvc  *AuditService
 	version   string
 	buildTime string
 }
 
-// NewAdminService 创建管理员服务
+// AdminServiceOption AdminService 配置选项
+type AdminServiceOption func(*AdminService)
+
+// WithAdminCache 设置缓存
+func WithAdminCache(cacheSvc cache.Cache) AdminServiceOption {
+	return func(s *AdminService) { s.cache = cacheSvc }
+}
+
+// WithAdminAudit 设置审计服务
+func WithAdminAudit(auditSvc *AuditService) AdminServiceOption {
+	return func(s *AdminService) { s.auditSvc = auditSvc }
+}
+
+// WithAdminVersion 设置版本信息
+func WithAdminVersion(version, buildTime string) AdminServiceOption {
+	return func(s *AdminService) { s.version = version; s.buildTime = buildTime }
+}
+
+// NewAdminServiceWithOptions 创建带选项的管理员服务
+func NewAdminServiceWithOptions(store store.Store, options ...AdminServiceOption) *AdminService {
+	svc := &AdminService{store: store, version: "dev", buildTime: "unknown"}
+	for _, opt := range options {
+		opt(svc)
+	}
+	return svc
+}
+
+// NewAdminService 创建管理员服务（兼容旧调用，等价于 NewAdminServiceWithOptions）
 func NewAdminService(store store.Store) *AdminService {
-	return &AdminService{store: store, version: "dev", buildTime: "unknown"}
+	return NewAdminServiceWithOptions(store)
 }
 
-// NewAdminServiceWithCache 创建带缓存的管理员服务
+// NewAdminServiceWithCache 创建带缓存的管理员服务（兼容旧调用）
 func NewAdminServiceWithCache(store store.Store, cacheSvc cache.Cache) *AdminService {
-	return &AdminService{store: store, cache: cacheSvc, version: "dev", buildTime: "unknown"}
+	return NewAdminServiceWithOptions(store, WithAdminCache(cacheSvc))
 }
 
-// NewAdminServiceWithVersion 创建带版本号的管理员服务
+// NewAdminServiceWithVersion 创建带版本号的管理员服务（兼容旧调用）
 func NewAdminServiceWithVersion(store store.Store, cacheSvc cache.Cache, version string, buildTime string) *AdminService {
-	return &AdminService{store: store, cache: cacheSvc, version: version, buildTime: buildTime}
+	return NewAdminServiceWithOptions(store, WithAdminCache(cacheSvc), WithAdminVersion(version, buildTime))
 }
 
 // ============================================================================
@@ -138,6 +187,11 @@ func (s *AdminService) DisableUser(ctx context.Context, userID string) error {
 		}
 	}
 
+	// 记录管理员操作审计日志（失败不影响主流程）
+	if s.auditSvc != nil {
+		s.auditSvc.LogUserDisabled(ctx, userID, clientIPFromContext(ctx))
+	}
+
 	return nil
 }
 
@@ -165,6 +219,11 @@ func (s *AdminService) EnableUser(ctx context.Context, userID string) error {
 		}
 	}
 
+	// 记录管理员操作审计日志（失败不影响主流程）
+	if s.auditSvc != nil {
+		s.auditSvc.LogUserEnabled(ctx, userID, clientIPFromContext(ctx))
+	}
+
 	return nil
 }
 
@@ -186,6 +245,11 @@ func (s *AdminService) DeleteUser(ctx context.Context, userID string) error {
 		if err := s.cache.Delete(ctx, cacheKey); err != nil {
 			slog.Warn("失效用户缓存失败", "error", err, "user_id", userID)
 		}
+	}
+
+	// 记录管理员操作审计日志（失败不影响主流程）
+	if s.auditSvc != nil {
+		s.auditSvc.LogUserDeleted(ctx, userID, clientIPFromContext(ctx))
 	}
 
 	return nil
@@ -218,5 +282,14 @@ func (s *AdminService) SystemHealth(ctx context.Context) (*SystemHealthInfo, err
 
 // CleanupExpired 清理过期数据
 func (s *AdminService) CleanupExpired(ctx context.Context) error {
-	return s.store.CleanupExpired(ctx)
+	if err := s.store.CleanupExpired(ctx); err != nil {
+		return err
+	}
+
+	// 记录管理员操作审计日志（失败不影响主流程）
+	if s.auditSvc != nil {
+		s.auditSvc.LogSystemCleanup(ctx, clientIPFromContext(ctx))
+	}
+
+	return nil
 }

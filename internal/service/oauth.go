@@ -11,13 +11,14 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/your-org/sso/internal/cache"
-	"github.com/your-org/sso/internal/common"
-	apperrors "github.com/your-org/sso/internal/errors"
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/store"
-	"github.com/your-org/sso/internal/util/auditutil"
-	"github.com/your-org/sso/internal/util/serviceutil"
+	"github.com/example/sso/internal/cache"
+	"github.com/example/sso/internal/common"
+	"github.com/example/sso/internal/crypto"
+	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/store"
+	"github.com/example/sso/internal/util/auditutil"
+	"github.com/example/sso/internal/util/serviceutil"
 )
 
 // ============================================================================
@@ -43,38 +44,57 @@ var (
 // OAuthService OAuth服务
 // 处理OAuth2授权码流程
 type OAuthService struct {
-	store    store.Store   // 数据存储
-	auditSvc *AuditService // 审计服务
-	cache    cache.Cache   // 缓存服务
-	tokenSvc *TokenService // Token生成服务
+	store       store.Store             // 数据存储
+	auditSvc    *AuditService           // 审计服务
+	cache       cache.Cache             // 缓存服务
+	tokenSvc    *TokenService           // Token生成服务
+	passwordSvc *crypto.PasswordService // 密码服务（用于验证机密客户端密钥）
 }
 
-// NewOAuthService 创建OAuth服务
-func NewOAuthService(store store.Store, tokenSvc *TokenService) *OAuthService {
-	return &OAuthService{
+// OAuthServiceOption OAuthService 配置选项
+type OAuthServiceOption func(*OAuthService)
+
+// WithOAuthAudit 设置审计服务
+func WithOAuthAudit(auditSvc *AuditService) OAuthServiceOption {
+	return func(s *OAuthService) { s.auditSvc = auditSvc }
+}
+
+// WithOAuthCache 设置缓存
+func WithOAuthCache(cacheSvc cache.Cache) OAuthServiceOption {
+	return func(s *OAuthService) { s.cache = cacheSvc }
+}
+
+// WithOAuthPassword 设置密码服务（用于验证机密客户端密钥）
+func WithOAuthPassword(passwordSvc *crypto.PasswordService) OAuthServiceOption {
+	return func(s *OAuthService) { s.passwordSvc = passwordSvc }
+}
+
+// NewOAuthServiceWithOptions 创建带选项的OAuth服务
+func NewOAuthServiceWithOptions(store store.Store, tokenSvc *TokenService, options ...OAuthServiceOption) *OAuthService {
+	svc := &OAuthService{
 		store:    store,
 		auditSvc: NewAuditService(store),
 		tokenSvc: tokenSvc,
 	}
+	for _, opt := range options {
+		opt(svc)
+	}
+	return svc
 }
 
-// NewOAuthServiceWithAudit 创建OAuth服务（带审计服务注入）
+// NewOAuthService 创建OAuth服务（兼容旧调用）
+func NewOAuthService(store store.Store, tokenSvc *TokenService, options ...OAuthServiceOption) *OAuthService {
+	return NewOAuthServiceWithOptions(store, tokenSvc, options...)
+}
+
+// NewOAuthServiceWithAudit 创建OAuth服务（带审计服务注入，兼容旧调用）
 func NewOAuthServiceWithAudit(store store.Store, auditSvc *AuditService, tokenSvc *TokenService) *OAuthService {
-	return &OAuthService{
-		store:    store,
-		auditSvc: auditSvc,
-		tokenSvc: tokenSvc,
-	}
+	return NewOAuthServiceWithOptions(store, tokenSvc, WithOAuthAudit(auditSvc))
 }
 
-// NewOAuthServiceWithCache 创建带缓存的OAuth服务
+// NewOAuthServiceWithCache 创建带缓存的OAuth服务（兼容旧调用）
 func NewOAuthServiceWithCache(store store.Store, cacheSvc cache.Cache, tokenSvc *TokenService) *OAuthService {
-	return &OAuthService{
-		store:    store,
-		auditSvc: NewAuditService(store),
-		cache:    cacheSvc,
-		tokenSvc: tokenSvc,
-	}
+	return NewOAuthServiceWithOptions(store, tokenSvc, WithOAuthCache(cacheSvc))
 }
 
 // getClient 获取客户端（带缓存）
@@ -257,7 +277,11 @@ func (s *OAuthService) validateClientSecret(
 	}
 
 	if !client.PublicClient {
-		if !compareClientSecret(client.ClientSecret, clientSecret) {
+		if s.passwordSvc == nil {
+			s.logAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "password_service_not_initialized")
+			return ErrInvalidClient
+		}
+		if err := s.passwordSvc.VerifyPassword(client.ClientSecret, clientSecret); err != nil {
 			s.logAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "invalid_client_secret")
 			return ErrInvalidClient
 		}
@@ -295,7 +319,7 @@ func (s *OAuthService) markAuthorizationCodeUsed(
 	}
 
 	// 使用统一的审计日志工具记录授权码使用事件
-	auditutil.SafeAuditLog(ctx, s.auditSvc, "auth_code_used", authCode.UserID, map[string]interface{}{
+	auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventAuthCodeUsed), authCode.UserID, map[string]interface{}{
 		"client_id": clientID,
 	})
 
@@ -330,7 +354,7 @@ func (s *OAuthService) generateTokenResponse(
 // logAuthCodeInvalid 记录无效授权码审计日志
 func (s *OAuthService) logAuthCodeInvalid(ctx context.Context, userID, clientID, ipAddress, reason string) {
 	// 使用统一的审计日志工具记录无效授权码事件
-	auditutil.SafeAuditLog(ctx, s.auditSvc, "auth_code_invalid", userID, map[string]interface{}{
+	auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventAuthCodeInvalid), userID, map[string]interface{}{
 		"client_id":  clientID,
 		"ip_address": ipAddress,
 		"reason":     reason,
@@ -340,11 +364,13 @@ func (s *OAuthService) logAuthCodeInvalid(ctx context.Context, userID, clientID,
 // RevokeToken 撤销Token
 func (s *OAuthService) RevokeToken(ctx context.Context, token string) error {
 	err := s.store.RevokeToken(ctx, token)
-	if err == nil {
-		// 使用统一的审计日志工具记录Token撤销事件
-		auditutil.SafeAuditLog(ctx, s.auditSvc, "token_revoked", "", map[string]interface{}{})
+	if err != nil {
+		return serviceutil.WrapServiceError("撤销Token", err)
 	}
-	return err
+
+	// 使用统一的审计日志工具记录Token撤销事件
+	auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventTokenRevoke), "", map[string]interface{}{})
+	return nil
 }
 
 // ============================================================================
@@ -372,10 +398,6 @@ func verifyPKCE(challenge, method, verifier string) error {
 	}
 
 	return ErrInvalidCodeChallenge
-}
-
-func compareClientSecret(stored, provided string) bool {
-	return subtle.ConstantTimeCompare([]byte(stored), []byte(provided)) == 1
 }
 
 // GetAccessTokenTTL 获取访问令牌的有效期

@@ -5,7 +5,7 @@ package crypto
 import (
 	"golang.org/x/crypto/bcrypt"
 
-	apperrors "github.com/your-org/sso/internal/errors"
+	apperrors "github.com/example/sso/internal/errors"
 )
 
 // ============================================================================
@@ -29,24 +29,24 @@ type PasswordService struct {
 }
 
 // NormalizeBcryptCost 规范化bcrypt cost值
-// 生产环境强制 cost >= 12，最高 14
-// 返回值范围: 12-14
+// 将 cost 限制在 bcrypt 合法范围内 (MinCost-MaxCost)
+// 生产环境强制 cost >= 12 由 config.validate() 负责，不在此处硬编码
 func NormalizeBcryptCost(cost int) int {
-	if cost < 12 {
-		cost = 12
+	if cost < bcrypt.MinCost {
+		cost = bcrypt.MinCost
 	}
-	if cost > 14 {
-		cost = 14
+	if cost > bcrypt.MaxCost {
+		cost = bcrypt.MaxCost
 	}
 	return cost
 }
 
 // NewPasswordService 创建密码服务
-// cost: bcrypt成本因子，调用者负责确保值合理
+// cost: bcrypt成本因子，内部会调用 NormalizeBcryptCost 归一化
 // 推荐值: 12-14，越高越安全但性能越低
 // 生产环境必须 >= 12（由 config.validate() 强制执行）
 func NewPasswordService(cost int) *PasswordService {
-	return &PasswordService{cost: cost}
+	return &PasswordService{cost: NormalizeBcryptCost(cost)}
 }
 
 // HashPassword 对密码进行哈希

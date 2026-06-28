@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/example/sso/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/your-org/sso/internal/config"
 )
 
 // ============================================================================
@@ -26,17 +26,18 @@ import (
 func setupTestEnv(t *testing.T) func() {
 	// 保存原始环境变量
 	origEnv := map[string]string{
-		"DB_PASSWORD":          os.Getenv("DB_PASSWORD"),
-		"JWT_PRIVATE_KEY_PATH": os.Getenv("JWT_PRIVATE_KEY_PATH"),
-		"JWT_PUBLIC_KEY_PATH":  os.Getenv("JWT_PUBLIC_KEY_PATH"),
-		"SERVER_ENV":           os.Getenv("SERVER_ENV"),
-		"CORS_ALLOWED_ORIGINS": os.Getenv("CORS_ALLOWED_ORIGINS"),
-		"ADMIN_EMAILS":         os.Getenv("ADMIN_EMAILS"),
-		"BCRYPT_COST":          os.Getenv("BCRYPT_COST"),
-		"LAN_DEPLOYMENT":       os.Getenv("LAN_DEPLOYMENT"),
-		"SKIP_ENV_FILE":        os.Getenv("SKIP_ENV_FILE"),
-		"JWT_ISSUER":           os.Getenv("JWT_ISSUER"),
-		"SMTP_HOST":            os.Getenv("SMTP_HOST"),
+		"DB_PASSWORD":           os.Getenv("DB_PASSWORD"),
+		"JWT_PRIVATE_KEY_PATH":  os.Getenv("JWT_PRIVATE_KEY_PATH"),
+		"JWT_PUBLIC_KEY_PATH":   os.Getenv("JWT_PUBLIC_KEY_PATH"),
+		"SERVER_ENV":            os.Getenv("SERVER_ENV"),
+		"CORS_ALLOWED_ORIGINS":  os.Getenv("CORS_ALLOWED_ORIGINS"),
+		"ADMIN_EMAILS":          os.Getenv("ADMIN_EMAILS"),
+		"BCRYPT_COST":           os.Getenv("BCRYPT_COST"),
+		"LAN_DEPLOYMENT":        os.Getenv("LAN_DEPLOYMENT"),
+		"SKIP_ENV_FILE":         os.Getenv("SKIP_ENV_FILE"),
+		"JWT_ISSUER":            os.Getenv("JWT_ISSUER"),
+		"SMTP_HOST":             os.Getenv("SMTP_HOST"),
+		"MFA_RECOVERY_HMAC_KEY": os.Getenv("MFA_RECOVERY_HMAC_KEY"),
 	}
 
 	// 设置测试环境变量
@@ -45,6 +46,8 @@ func setupTestEnv(t *testing.T) func() {
 	os.Setenv("JWT_PUBLIC_KEY_PATH", "/keys/public.pem")
 	os.Setenv("JWT_ISSUER", "test-issuer")
 	os.Setenv("SMTP_HOST", "smtp.example.com")
+	// 设置 MFA 恢复码 HMAC 密钥（生产环境必需，AGENTS.md 硬约束）
+	os.Setenv("MFA_RECOVERY_HMAC_KEY", "test-hmac-key-for-mfa-recovery-codes")
 	// 禁止读取磁盘 .env 文件，保证测试环境完全自包含
 	os.Setenv("SKIP_ENV_FILE", "1")
 	// 默认非 LAN 部署模式，确保生产环境安全校验不被旁路；

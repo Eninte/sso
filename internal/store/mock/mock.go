@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/store"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/store"
 )
 
 // ============================================================================
@@ -37,39 +37,39 @@ type Store struct {
 
 	keys map[string]*model.KeyVersion
 
-	CreateUserErr                error
-	GetUserByIDErr               error
-	GetUserByEmailErr            error
-	UpdateUserErr                error
-	UpdateLoginAttemptsErr       error
-	DeleteUserErr                error
-	ListUsersErr                 error
-	GetClientByClientIDErr       error
-	CreateClientErr              error
-	StoreAuthorizationCodeErr    error
-	GetAuthorizationCodeErr      error
-	MarkAuthorizationCodeUsedErr error
-	StoreTokenErr                error
-	GetTokenByRefreshTokenErr    error
-	GetTokenByAccessTokenErr     error
-	RevokeTokenErr               error
-	RevokeAllUserTokensErr       error
-	CleanupExpiredErr            error
-	StoreVerificationTokenErr    error
-	GetVerificationTokenErr      error
-	DeleteVerificationTokenErr   error
-	StoreResetTokenErr           error
-	GetResetTokenErr             error
-	DeleteResetTokenErr          error
-	StoreAuditLogErr             error
-	StoreKeyErr                  error
-	GetActiveKeyErr              error
-	GetKeyByIDErr                error
-	DeprecateKeyErr              error
-	RevokeKeyErr                 error
-	DeleteKeyErr                 error
-	CloseErr                     error
-	PingErr                      error
+	CreateUserErr              error
+	GetUserByIDErr             error
+	GetUserByEmailErr          error
+	UpdateUserErr              error
+	UpdateLoginAttemptsErr     error
+	DeleteUserErr              error
+	ListUsersErr               error
+	ExistsUserByRoleErr        error
+	GetClientByClientIDErr     error
+	CreateClientErr            error
+	StoreAuthorizationCodeErr  error
+	GetAuthorizationCodeErr    error
+	StoreTokenErr              error
+	GetTokenByRefreshTokenErr  error
+	GetTokenByAccessTokenErr   error
+	RevokeTokenErr             error
+	RevokeAllUserTokensErr     error
+	CleanupExpiredErr          error
+	StoreVerificationTokenErr  error
+	GetVerificationTokenErr    error
+	DeleteVerificationTokenErr error
+	StoreResetTokenErr         error
+	GetResetTokenErr           error
+	DeleteResetTokenErr        error
+	StoreAuditLogErr           error
+	StoreKeyErr                error
+	GetActiveKeyErr            error
+	GetKeyByIDErr              error
+	DeprecateKeyErr            error
+	RevokeKeyErr               error
+	DeleteKeyErr               error
+	CloseErr                   error
+	PingErr                    error
 }
 
 // New 创建Store实例
@@ -291,6 +291,23 @@ func (m *Store) ListUsers(ctx context.Context, offset, limit int) ([]*model.User
 	return allUsers[offset:end], total, nil
 }
 
+// ExistsUserByRole 检查是否存在指定角色的用户
+func (m *Store) ExistsUserByRole(ctx context.Context, role string) (bool, error) {
+	if m.ExistsUserByRoleErr != nil {
+		return false, m.ExistsUserByRoleErr
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, user := range m.users {
+		if user.Role == role {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // ============================================================================
 // 客户端存储实现
 // ============================================================================
@@ -347,6 +364,7 @@ func (m *Store) ValidateRedirectURI(ctx context.Context, clientID string, redire
 // ============================================================================
 
 // StoreAuthorizationCode 存储授权码
+// 存储深拷贝以模拟真实数据库行为，避免调用方修改指针影响存储状态
 func (m *Store) StoreAuthorizationCode(ctx context.Context, code *model.AuthorizationCode) error {
 	if m.StoreAuthorizationCodeErr != nil {
 		return m.StoreAuthorizationCodeErr
@@ -355,11 +373,12 @@ func (m *Store) StoreAuthorizationCode(ctx context.Context, code *model.Authoriz
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.authorizationCodes[code.Code] = code
+	m.authorizationCodes[code.Code] = copyAuthorizationCode(code)
 	return nil
 }
 
 // GetAuthorizationCode 获取授权码
+// 返回深拷贝以模拟真实数据库行为，避免调用方修改影响存储状态
 func (m *Store) GetAuthorizationCode(ctx context.Context, code string) (*model.AuthorizationCode, error) {
 	if m.GetAuthorizationCodeErr != nil {
 		return nil, m.GetAuthorizationCodeErr
@@ -372,32 +391,38 @@ func (m *Store) GetAuthorizationCode(ctx context.Context, code string) (*model.A
 	if !ok {
 		return nil, store.ErrNotFound
 	}
-	return authCode, nil
+	return copyAuthorizationCode(authCode), nil
 }
 
-// MarkAuthorizationCodeUsed 标记授权码已使用
-func (m *Store) MarkAuthorizationCodeUsed(ctx context.Context, code string) error {
-	if m.MarkAuthorizationCodeUsedErr != nil {
-		return m.MarkAuthorizationCodeUsedErr
+// copyAuthorizationCode 深拷贝 AuthorizationCode
+// 防止调用方通过指针修改影响 mock 存储状态，模拟真实数据库的值语义
+func copyAuthorizationCode(src *model.AuthorizationCode) *model.AuthorizationCode {
+	if src == nil {
+		return nil
 	}
+	dst := *src
+	if src.Scopes != nil {
+		dst.Scopes = make([]string, len(src.Scopes))
+		copy(dst.Scopes, src.Scopes)
+	}
+	return &dst
+}
 
+// UpdateAuthorizationCode 原子地标记授权码为已使用
+// 与 Postgres 实现保持一致：如果授权码已被使用，返回 ErrAuthorizationCodeUsed
+func (m *Store) UpdateAuthorizationCode(ctx context.Context, code *model.AuthorizationCode) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	authCode, ok := m.authorizationCodes[code]
+	existing, ok := m.authorizationCodes[code.Code]
 	if !ok {
 		return store.ErrNotFound
 	}
 
-	now := time.Now()
-	authCode.UsedAt = &now
-	return nil
-}
-
-// UpdateAuthorizationCode 更新授权码
-func (m *Store) UpdateAuthorizationCode(ctx context.Context, code *model.AuthorizationCode) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	// 模拟数据库的原子性条件：used_at IS NULL
+	if existing.UsedAt != nil {
+		return store.ErrAuthorizationCodeUsed
+	}
 
 	m.authorizationCodes[code.Code] = code
 	return nil
@@ -921,12 +946,31 @@ func SetMockHMACKey(key []byte) {
 }
 
 // DeleteUsedMFARecoveryCodes 删除已使用的恢复码
+// Mock实现不区分已使用/未使用，直接删除该用户的所有恢复码
 func (m *Store) DeleteUsedMFARecoveryCodes(ctx context.Context, userID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	delete(mfaRecoveryCodes, userID)
 	return nil
+}
+
+// DeleteAllMFARecoveryCodes 删除用户的所有恢复码
+func (m *Store) DeleteAllMFARecoveryCodes(ctx context.Context, userID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	delete(mfaRecoveryCodes, userID)
+	return nil
+}
+
+// DisableMFAAndClearRecoveryCodes 原子地禁用MFA并清除所有恢复码
+// mock 实现不使用真实事务，顺序执行 Update + DeleteAllMFARecoveryCodes
+func (m *Store) DisableMFAAndClearRecoveryCodes(ctx context.Context, user *model.User) error {
+	if err := m.Update(ctx, user); err != nil {
+		return err
+	}
+	return m.DeleteAllMFARecoveryCodes(ctx, user.ID)
 }
 
 // ClearMFARecoveryCodes 清空所有MFA恢复码（测试用）

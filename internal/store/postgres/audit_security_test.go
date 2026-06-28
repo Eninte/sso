@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/model"
+	"github.com/example/sso/internal/model"
 )
 
 // TestListAuditLogs_SQLInjectionPrevention 测试SQL注入防护
@@ -326,5 +326,3 @@ func TestListAuditLogs_Filtering(t *testing.T) {
 		})
 	}
 }
-
-

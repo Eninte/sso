@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/service"
-	"github.com/your-org/sso/internal/store/mock"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/service"
+	"github.com/example/sso/internal/store/mock"
 )
 
 // ============================================================================

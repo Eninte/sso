@@ -14,14 +14,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/cache"
-	"github.com/your-org/sso/internal/captcha"
-	"github.com/your-org/sso/internal/crypto"
-	apperrors "github.com/your-org/sso/internal/errors"
-	"github.com/your-org/sso/internal/handler"
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/service"
-	"github.com/your-org/sso/internal/store/mock"
+	"github.com/example/sso/internal/cache"
+	"github.com/example/sso/internal/captcha"
+	"github.com/example/sso/internal/crypto"
+	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/handler"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/service"
+	"github.com/example/sso/internal/store/mock"
 )
 
 // ============================================================================
@@ -398,7 +398,7 @@ func TestLoginHandler_CaptchaInvalid(t *testing.T) {
 	body := bytes.NewReader([]byte(`{"email":"test@example.com","password":"Password123!"}`))
 	req := httptest.NewRequest("POST", "/api/v1/login", body)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Captcha-ID", "fake-id")
+	req.Header.Set("X-Captcha-Id", "fake-id")
 	req.Header.Set("X-Captcha-Answer", "wrong")
 	req.RemoteAddr = "1.2.3.4:1234"
 	w := httptest.NewRecorder()
@@ -444,7 +444,7 @@ func TestCaptcha_EndToEnd_AdaptiveTrigger(t *testing.T) {
 	body3 := bytes.NewReader([]byte(`{"email":"test@example.com","password":"Password123!"}`))
 	req3 := httptest.NewRequest("POST", "/api/v1/login", body3)
 	req3.Header.Set("Content-Type", "application/json")
-	req3.Header.Set("X-Captcha-ID", captchaID)
+	req3.Header.Set("X-Captcha-Id", captchaID)
 	req3.Header.Set("X-Captcha-Answer", answer)
 	req3.RemoteAddr = "5.6.7.8:1234"
 	w3 := httptest.NewRecorder()
@@ -467,7 +467,7 @@ func TestCaptcha_EndToEnd_OneTimeUse(t *testing.T) {
 	body1 := bytes.NewReader([]byte(`{"email":"test@example.com","password":"Password123!"}`))
 	req1 := httptest.NewRequest("POST", "/api/v1/login", body1)
 	req1.Header.Set("Content-Type", "application/json")
-	req1.Header.Set("X-Captcha-ID", captchaID)
+	req1.Header.Set("X-Captcha-Id", captchaID)
 	req1.Header.Set("X-Captcha-Answer", answer)
 	req1.RemoteAddr = "1.2.3.4:1234"
 	w1 := httptest.NewRecorder()
@@ -480,7 +480,7 @@ func TestCaptcha_EndToEnd_OneTimeUse(t *testing.T) {
 	body2 := bytes.NewReader([]byte(`{"email":"test@example.com","password":"Password123!"}`))
 	req2 := httptest.NewRequest("POST", "/api/v1/login", body2)
 	req2.Header.Set("Content-Type", "application/json")
-	req2.Header.Set("X-Captcha-ID", captchaID)
+	req2.Header.Set("X-Captcha-Id", captchaID)
 	req2.Header.Set("X-Captcha-Answer", answer)
 	req2.RemoteAddr = "1.2.3.4:1234"
 	w2 := httptest.NewRecorder()
@@ -870,7 +870,7 @@ func TestCaptcha_EndToEnd_VerifyTTLNotExtended(t *testing.T) {
 		body := bytes.NewReader([]byte(`{"email":"fix-active@example.com","password":"Password123!"}`))
 		req := httptest.NewRequest("POST", "/api/v1/login", body)
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Captcha-ID", captchaID)
+		req.Header.Set("X-Captcha-Id", captchaID)
 		req.Header.Set("X-Captcha-Answer", "wrong")
 		req.RemoteAddr = ip + ":1234"
 		w := httptest.NewRecorder()
@@ -891,7 +891,7 @@ func TestCaptcha_EndToEnd_VerifyTTLNotExtended(t *testing.T) {
 		body := bytes.NewReader([]byte(`{"email":"fix-active@example.com","password":"Password123!"}`))
 		req := httptest.NewRequest("POST", "/api/v1/login", body)
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Captcha-ID", captchaID)
+		req.Header.Set("X-Captcha-Id", captchaID)
 		req.Header.Set("X-Captcha-Answer", answer)
 		req.RemoteAddr = ip + ":1234"
 		w := httptest.NewRecorder()
@@ -974,7 +974,7 @@ func TestCaptcha_EndToEnd_CredentialErrorFiltering(t *testing.T) {
 		body := bytes.NewReader([]byte(`{"email":"fix-active@example.com","password":"Password123!"}`))
 		req := httptest.NewRequest("POST", "/api/v1/login", body)
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Captcha-ID", captchaID)
+		req.Header.Set("X-Captcha-Id", captchaID)
 		req.Header.Set("X-Captcha-Answer", answer)
 		req.RemoteAddr = ip + ":1234"
 		w := httptest.NewRecorder()

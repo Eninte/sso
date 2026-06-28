@@ -2,19 +2,19 @@ package handler
 
 import (
 	_ "embed"
+	"net"
 	"net/http"
-	"strings"
 	"text/template"
 
-	"github.com/your-org/sso/internal/cache"
-	"github.com/your-org/sso/internal/crypto"
-	apperrors "github.com/your-org/sso/internal/errors"
-	"github.com/your-org/sso/internal/middleware"
-	"github.com/your-org/sso/internal/service"
-	"github.com/your-org/sso/internal/store"
-	"github.com/your-org/sso/internal/util/auditutil"
-	"github.com/your-org/sso/internal/util/handlerutil"
-	"github.com/your-org/sso/internal/util/serviceutil"
+	"github.com/example/sso/internal/cache"
+	"github.com/example/sso/internal/crypto"
+	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/middleware"
+	"github.com/example/sso/internal/service"
+	"github.com/example/sso/internal/store"
+	"github.com/example/sso/internal/util/auditutil"
+	"github.com/example/sso/internal/util/handlerutil"
+	"github.com/example/sso/internal/util/serviceutil"
 )
 
 //go:embed templates/init.html
@@ -191,27 +191,20 @@ func (h *InitHandler) HandleCreateClient(w http.ResponseWriter, r *http.Request)
 // isLocalRequest 检查请求是否来自本地
 // 允许的本地地址：127.0.0.1, ::1, localhost
 func isLocalRequest(r *http.Request) bool {
-	ip := r.RemoteAddr
-
-	if idx := strings.LastIndex(ip, ":"); idx > 0 {
-		if strings.Count(ip, ":") == 1 {
-			ip = ip[:idx]
-		} else if strings.HasPrefix(ip, "[") {
-			if idx := strings.LastIndex(ip, "]"); idx > 0 {
-				ip = ip[1:idx]
-			}
-		}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		// SplitHostPort 失败时（如没有端口），直接使用 RemoteAddr
+		host = r.RemoteAddr
 	}
 
 	localAddresses := []string{
 		"127.0.0.1",
 		"::1",
 		"localhost",
-		"[::1]",
 	}
 
 	for _, local := range localAddresses {
-		if ip == local {
+		if host == local {
 			return true
 		}
 	}

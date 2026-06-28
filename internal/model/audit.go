@@ -57,6 +57,11 @@ const (
 	EventKeyRotated AuditEventType = "key.rotated" // 密钥轮换
 	EventKeyRevoked AuditEventType = "key.revoked" // 密钥撤销
 
+	EventUserDisabled  AuditEventType = "admin.user_disabled"  // 管理员禁用用户
+	EventUserEnabled   AuditEventType = "admin.user_enabled"   // 管理员启用用户
+	EventUserDeleted   AuditEventType = "admin.user_deleted"   // 管理员删除用户
+	EventSystemCleanup AuditEventType = "admin.system_cleanup" // 管理员清理过期数据
+
 	EventSystemStart AuditEventType = "system.start" // 系统启动
 	EventSystemStop  AuditEventType = "system.stop"  // 系统停止
 )

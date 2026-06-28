@@ -5,8 +5,8 @@ package serviceutil
 import (
 	"fmt"
 
-	apperrors "github.com/your-org/sso/internal/errors"
-	"github.com/your-org/sso/internal/store"
+	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/store"
 )
 
 // HandleStoreError 处理store层错误并映射到service层错误

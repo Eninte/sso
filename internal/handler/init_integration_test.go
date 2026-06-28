@@ -18,11 +18,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/crypto"
-	"github.com/your-org/sso/internal/handler"
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/store/postgres"
-	"github.com/your-org/sso/internal/util/auditutil"
+	"github.com/example/sso/internal/crypto"
+	"github.com/example/sso/internal/handler"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/store/postgres"
+	"github.com/example/sso/internal/util/auditutil"
+	"github.com/example/sso/internal/util/testutil"
 )
 
 // mockAuditService 模拟审计服务
@@ -36,14 +37,10 @@ func (m *mockAuditService) Log(ctx context.Context, log *model.AuditLog) {
 
 var _ auditutil.AuditService = (*mockAuditService)(nil)
 
+// setupTestDB 返回已 ping 通的真实 PG 连接（带重试与超时）
+// 复用 testutil.ConnectTestDB，与全仓真实 DB 测试共享重试机制
 func setupTestDB(t *testing.T) (*sql.DB, func()) {
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("DATABASE_URL not set, skipping integration test")
-	}
-
-	db, err := sql.Open("postgres", dbURL)
-	require.NoError(t, err)
+	db := testutil.ConnectTestDB(t)
 
 	// 清理测试数据
 	cleanup := func() {

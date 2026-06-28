@@ -12,13 +12,13 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/your-org/sso/internal/crypto"
-	apperrors "github.com/your-org/sso/internal/errors"
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/store"
-	"github.com/your-org/sso/internal/util/auditutil"
-	"github.com/your-org/sso/internal/util/serviceutil"
-	"github.com/your-org/sso/internal/validator"
+	"github.com/example/sso/internal/crypto"
+	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/store"
+	"github.com/example/sso/internal/util/auditutil"
+	"github.com/example/sso/internal/util/serviceutil"
+	"github.com/example/sso/internal/validator"
 )
 
 // InitServiceInterface 初始化服务接口
@@ -45,27 +45,13 @@ func NewInitService(store store.Store, passwordSvc *crypto.PasswordService, audi
 }
 
 // AdminExists 检查是否已存在管理员用户
-//
-// 注意：由于当前 Store 接口不支持按角色过滤（缺少 GetUserByRole 方法），
-// 此实现需要获取用户列表并在应用层过滤。这在初始化场景下是可接受的，
-// 因为此方法仅在系统首次启动时调用一次。
-//
-// 未来优化建议：扩展 Store 接口添加 GetUserByRole 或 ExistsUserByRole 方法，
-// 使用数据库查询 SELECT EXISTS(SELECT 1 FROM users WHERE role='admin' LIMIT 1)
+// 委托给 Store.ExistsUserByRole，使用数据库 EXISTS 查询，避免全表扫描
 func (s *InitService) AdminExists(ctx context.Context) (bool, error) {
-	// 获取用户列表并检查是否有管理员角色
-	// 限制 10000 条记录，对于初始化场景已足够（通常只有 0-1 个用户）
-	users, _, err := s.store.ListUsers(ctx, 0, 10000)
+	exists, err := s.store.ExistsUserByRole(ctx, model.UserRoleAdmin)
 	if err != nil {
-		return false, serviceutil.WrapServiceError("查询用户列表", err)
+		return false, serviceutil.WrapServiceError("查询管理员状态", err)
 	}
-
-	for _, u := range users {
-		if u.Role == model.UserRoleAdmin {
-			return true, nil
-		}
-	}
-	return false, nil
+	return exists, nil
 }
 
 // CreateAdmin 创建管理员账户

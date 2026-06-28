@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/cache"
+	"github.com/example/sso/internal/cache"
 )
 
 // ============================================================================
@@ -411,5 +411,50 @@ func TestService_RecordFailure_SlidingWindow(t *testing.T) {
 		// 第3次失败达到阈值
 		svc.RecordFailure(ctx, ip)
 		assert.True(t, svc.ShouldRequireCaptcha(ctx, ip))
+	})
+}
+
+// ============================================================================
+// FailThreshold 测试
+// ============================================================================
+
+func TestService_FailThreshold(t *testing.T) {
+	cacheSvc := cache.NewMemoryCache()
+	defer cacheSvc.Close()
+
+	t.Run("默认构造_返回DefaultFailThreshold", func(t *testing.T) {
+		svc := NewService(cacheSvc, true, 5*time.Minute)
+		assert.Equal(t, DefaultFailThreshold, svc.FailThreshold())
+	})
+
+	t.Run("自适应构造_返回自定义阈值", func(t *testing.T) {
+		svc := NewServiceWithAdaptive(cacheSvc, true, 5*time.Minute, 5, 15*time.Minute)
+		assert.Equal(t, 5, svc.FailThreshold())
+	})
+
+	t.Run("自适应构造_阈值0回退默认值", func(t *testing.T) {
+		// failThreshold <= 0 时不覆盖默认值
+		svc := NewServiceWithAdaptive(cacheSvc, true, 5*time.Minute, 0, 15*time.Minute)
+		assert.Equal(t, DefaultFailThreshold, svc.FailThreshold())
+	})
+
+	t.Run("自适应构造_负数阈值回退默认值", func(t *testing.T) {
+		svc := NewServiceWithAdaptive(cacheSvc, true, 5*time.Minute, -1, 15*time.Minute)
+		assert.Equal(t, DefaultFailThreshold, svc.FailThreshold())
+	})
+
+	t.Run("阈值与ShouldRequireCaptcha联动", func(t *testing.T) {
+		// 阈值=2：失败1次不应触发，2次应触发
+		svc := NewServiceWithAdaptive(cacheSvc, true, 5*time.Minute, 2, 15*time.Minute)
+		assert.Equal(t, 2, svc.FailThreshold())
+
+		ctx := context.Background()
+		ip := "192.168.1.1"
+
+		svc.RecordFailure(ctx, ip)
+		assert.False(t, svc.ShouldRequireCaptcha(ctx, ip), "失败1次未达阈值2")
+
+		svc.RecordFailure(ctx, ip)
+		assert.True(t, svc.ShouldRequireCaptcha(ctx, ip), "失败2次达到阈值2")
 	})
 }

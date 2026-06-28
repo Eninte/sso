@@ -10,8 +10,8 @@ import (
 
 	"github.com/lib/pq"
 
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/store"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/store"
 )
 
 // ============================================================================
@@ -70,25 +70,34 @@ func (s *Store) GetAuthorizationCode(ctx context.Context, code string) (*model.A
 	return authCode, nil
 }
 
-// MarkAuthorizationCodeUsed 标记授权码已使用
-func (s *Store) MarkAuthorizationCodeUsed(ctx context.Context, code string) error {
-	query := `UPDATE authorization_codes SET used_at = $2 WHERE code = $1`
-	_, err := s.db.ExecContext(ctx, query, code, time.Now())
-	return err
-}
-
-// UpdateAuthorizationCode 更新授权码
+// UpdateAuthorizationCode 原子地标记授权码为已使用
+// 通过 WHERE used_at IS NULL 条件保证并发安全，防止 TOCTOU 重放攻击
+// 如果授权码已被使用（并发竞争或重复兑换），返回 ErrAuthorizationCodeUsed
 func (s *Store) UpdateAuthorizationCode(ctx context.Context, code *model.AuthorizationCode) error {
 	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 
 	query := `
-		UPDATE authorization_codes 
+		UPDATE authorization_codes
 		SET used_at = $1
-		WHERE code = $2`
+		WHERE code = $2 AND used_at IS NULL`
 
-	_, err := s.db.ExecContext(ctx, query, code.UsedAt, code.Code)
-	return err
+	result, err := s.db.ExecContext(ctx, query, code.UsedAt, code.Code)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		// 授权码不存在或已被使用（并发竞争）
+		return store.ErrAuthorizationCodeUsed
+	}
+
+	return nil
 }
 
 // StoreToken 存储Token记录

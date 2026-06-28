@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	sdk "github.com/your-org/sso/sdks/golang"
+	sdk "github.com/example/sso/sdks/golang"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

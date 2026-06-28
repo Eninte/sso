@@ -11,12 +11,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/crypto"
-	apperrors "github.com/your-org/sso/internal/errors"
-	"github.com/your-org/sso/internal/model"
-	"github.com/your-org/sso/internal/service"
-	"github.com/your-org/sso/internal/store"
-	"github.com/your-org/sso/internal/store/mock"
+	"github.com/example/sso/internal/crypto"
+	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/service"
+	"github.com/example/sso/internal/store"
+	"github.com/example/sso/internal/store/mock"
 )
 
 // ============================================================================
@@ -109,8 +109,8 @@ func TestInitService_AdminExists(t *testing.T) {
 		mockStore.Reset()
 		ctx := context.Background()
 
-		// 注入 ListUsers 错误
-		mockStore.ListUsersErr = errors.New("database error")
+		// 注入 ExistsUserByRole 错误
+		mockStore.ExistsUserByRoleErr = errors.New("database error")
 
 		exists, err := initSvc.AdminExists(ctx)
 
@@ -120,7 +120,7 @@ func TestInitService_AdminExists(t *testing.T) {
 		assert.Contains(t, err.Error(), "database error")
 
 		// 清理
-		mockStore.ListUsersErr = nil
+		mockStore.ExistsUserByRoleErr = nil
 	})
 }
 

@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/your-org/sso/internal/crypto"
-	"github.com/your-org/sso/internal/handler"
+	"github.com/example/sso/internal/crypto"
+	"github.com/example/sso/internal/handler"
 )
 
 // ============================================================================
