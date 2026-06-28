@@ -134,14 +134,15 @@ jobs:
           go-version: '1.26.4'
           cache: true
 
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+
       - name: Run gosec
-        uses: securego/gosec@master
-        with:
-          # G118: 异步 goroutine 有意使用 context.Background()
-          # G201: 表名已通过 validateTableName 验证
-          # G202: 参数化查询，仅 LIMIT/OFFSET 索引使用 fmt.Sprint
-          # G706: slog 结构化日志不受注入影响
-          args: -exclude G118,G201,G202,G706 ./...
+        # G118: 异步 goroutine 有意使用 context.Background()
+        # G201: 表名已通过 validateTableName 验证
+        # G202: 参数化查询，仅 LIMIT/OFFSET 索引使用 fmt.Sprint
+        # G706: slog 结构化日志不受注入影响
+        run: gosec -exclude G118,G201,G202,G706 ./...
 
       - name: Run govulncheck
         run: |
