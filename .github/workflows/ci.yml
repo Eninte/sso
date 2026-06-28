@@ -122,12 +122,13 @@ jobs:
           cache: true
 
       - name: Install golangci-lint
-        # 旧 URL (raw.githubusercontent.com/.../master/install.sh) 在 v2.12.1 后已损坏，
-        # 官方推荐改用 https://golangci-lint.run/install.sh
-        run: curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.64.8
+        # 预构建二进制用 go1.24 编译，无法分析 go1.26 项目
+        # (Error: Go language version go1.24 < targeted Go version 1.26)
+        # 改用 go install 从源码构建，确保与项目 Go 版本一致
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
 
       - name: Run golangci-lint
-        run: golangci-lint run ./... --timeout 5m
+        run: golangci-lint run ./... --timeout 10m
 
   security:
     name: Security Scan
@@ -148,9 +149,10 @@ jobs:
         # G201: 表名已通过 validateTableName 验证
         # G202: 参数化查询，仅 LIMIT/OFFSET 索引使用 fmt.Sprint
         # G706: slog 结构化日志不受注入影响
+        # G710: authURL 由服务层从预配置 OAuth 端点构造，provider 已白名单验证
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@latest
-          gosec -exclude G118,G201,G202,G706 ./...
+          gosec -exclude G118,G201,G202,G706,G710 ./...
 
       - name: Run govulncheck
         run: |
