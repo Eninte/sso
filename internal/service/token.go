@@ -46,7 +46,7 @@ func (s *TokenService) GenerateTokenPair(
 	accessToken, err := s.jwtSvc.GenerateAccessToken(userID, email, role, scopes)
 	if err != nil {
 		slog.Error("GenerateTokenPair: 生成access token失败", "error", err, "userID", userID)
-		return nil, err
+		return nil, serviceutil.WrapServiceError("生成access token", err)
 	}
 	slog.Debug("GenerateTokenPair: access token生成成功", "length", len(accessToken))
 
@@ -54,7 +54,7 @@ func (s *TokenService) GenerateTokenPair(
 	refreshToken, err := s.jwtSvc.GenerateRefreshToken()
 	if err != nil {
 		slog.Error("GenerateTokenPair: 生成refresh token失败", "error", err, "userID", userID)
-		return nil, err
+		return nil, serviceutil.WrapServiceError("生成refresh token", err)
 	}
 	slog.Debug("GenerateTokenPair: refresh token生成成功", "length", len(refreshToken))
 

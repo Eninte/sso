@@ -304,7 +304,7 @@ func TestTestDBConnection(t *testing.T) {
 		defer cancel()
 		err := testDBConnection(ctx, "postgres://u:p@127.0.0.1:1/nonexistent?sslmode=disable")
 		assert.Error(t, err, "连接不存在的 DB 应返回错误")
-		assert.Contains(t, err.Error(), "数据库", "错误消息应包含提示")
+		assert.Contains(t, err.Error(), "database", "错误消息应包含提示")
 	})
 
 	t.Run("超时上下文_返回错误", func(t *testing.T) {
@@ -322,7 +322,7 @@ func TestTestRedisConnection(t *testing.T) {
 		defer cancel()
 		err := testRedisConnection(ctx, "127.0.0.1:1", "", 0)
 		assert.Error(t, err, "连接不存在的 Redis 应返回错误")
-		assert.Contains(t, err.Error(), "Redis", "错误消息应包含提示")
+		assert.Contains(t, err.Error(), "redis", "错误消息应包含提示")
 	})
 
 	t.Run("超时上下文_返回错误", func(t *testing.T) {

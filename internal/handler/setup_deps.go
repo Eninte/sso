@@ -36,12 +36,12 @@ func newRedisClient(addr, password string, db int) *redis.Client {
 func testDBConnection(ctx context.Context, dsn string) error {
 	db, err := openDB(dsn)
 	if err != nil {
-		return fmt.Errorf("数据库连接失败，请检查主机、端口、用户名和密码")
+		return fmt.Errorf("database connection failed, please check host, port, username and password")
 	}
 	defer db.Close()
 
 	if err := db.PingContext(ctx); err != nil {
-		return fmt.Errorf("数据库连接测试失败，请检查网络和凭据")
+		return fmt.Errorf("database connection test failed, please check network and credentials")
 	}
 	return nil
 }
@@ -51,7 +51,7 @@ func testRedisConnection(ctx context.Context, addr, password string, db int) err
 	defer client.Close()
 
 	if err := client.Ping(ctx).Err(); err != nil {
-		return fmt.Errorf("Redis连接失败，请检查主机和端口")
+		return fmt.Errorf("redis connection failed, please check host and port")
 	}
 	return nil
 }

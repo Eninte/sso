@@ -168,24 +168,24 @@ func (s *InitService) CreateOAuthClient(ctx context.Context, name, redirectURI s
 // validateRedirectURI 验证重定向URI格式
 func validateRedirectURI(rawURI string) error {
 	if rawURI == "" {
-		return fmt.Errorf("重定向URI不能为空")
+		return fmt.Errorf("redirect URI cannot be empty")
 	}
 
 	parsed, err := url.Parse(rawURI)
 	if err != nil {
-		return fmt.Errorf("URI格式无效: %w", err)
+		return fmt.Errorf("invalid URI format: %w", err)
 	}
 
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return fmt.Errorf("仅支持http或https协议")
+		return fmt.Errorf("only http or https protocols are supported")
 	}
 
 	if parsed.Host == "" {
-		return fmt.Errorf("URI必须包含主机名")
+		return fmt.Errorf("URI must contain a hostname")
 	}
 
 	if parsed.Fragment != "" {
-		return fmt.Errorf("重定向URI不能包含片段（#）")
+		return fmt.Errorf("redirect URI must not contain a fragment (#)")
 	}
 
 	return nil

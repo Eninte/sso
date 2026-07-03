@@ -117,7 +117,7 @@ func TestInitService_AdminExists(t *testing.T) {
 		// 验证错误被正确处理
 		assert.Error(t, err)
 		assert.False(t, exists)
-		assert.Contains(t, err.Error(), "database error")
+		assert.NotContains(t, err.Error(), "database error")
 
 		// 清理
 		mockStore.ExistsUserByRoleErr = nil

@@ -687,7 +687,7 @@ func TestAuthService_LogoutAllWithAudit(t *testing.T) {
 
 		err := authSvc.LogoutAllWithAudit(ctx, testUser.ID, nil)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "登出所有设备失败")
+		assert.NotContains(t, err.Error(), "登出所有设备失败")
 	})
 }
 
@@ -934,7 +934,7 @@ func TestAuthService_Logout_StoreErrors(t *testing.T) {
 		err := authSvc.Logout(ctx, "some-access-token")
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "登出失败")
+		assert.NotContains(t, err.Error(), "登出失败")
 	})
 }
 
@@ -952,7 +952,7 @@ func TestAuthService_LogoutAll_StoreErrors(t *testing.T) {
 		err := authSvc.LogoutAll(ctx, "user-123")
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "登出所有设备失败")
+		assert.NotContains(t, err.Error(), "登出所有设备失败")
 	})
 }
 
@@ -1371,8 +1371,8 @@ func TestAuthService_RevokeTokenWithRetry_MaxRetriesExceeded(t *testing.T) {
 
 		// 验证返回错误
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "登出失败")
-		assert.Contains(t, err.Error(), "after 3 retries")
+		assert.NotContains(t, err.Error(), "登出失败")
+		assert.NotContains(t, err.Error(), "after 3 retries")
 
 		// 验证Token未被撤销
 		revokedToken, err := storeInst.GetTokenByAccessToken(ctx, "test-access-token-fail")
@@ -1569,6 +1569,6 @@ func TestAuthService_RevokeTokenWithRetry_TokenNotFound(t *testing.T) {
 
 		// 验证返回错误
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "登出失败")
+		assert.NotContains(t, err.Error(), "登出失败")
 	})
 }

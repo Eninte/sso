@@ -27,11 +27,11 @@ func (c *CORSConfig) Validate(env string) error {
 	if env == "production" {
 		for _, origin := range c.AllowedOrigins {
 			if origin == "*" {
-				return fmt.Errorf("生产环境禁止使用CORS通配符(*)，请配置具体的域名")
+				return fmt.Errorf("CORS wildcard '*' is forbidden in production, please configure specific domains")
 			}
 			// 检查是否包含localhost（生产环境不应该允许）
 			if strings.Contains(strings.ToLower(origin), "localhost") || strings.Contains(origin, "127.0.0.1") {
-				return fmt.Errorf("生产环境禁止使用localhost或127.0.0.1作为CORS源")
+				return fmt.Errorf("localhost or 127.0.0.1 is forbidden as a CORS origin in production")
 			}
 		}
 	}

@@ -217,11 +217,11 @@ func validateSetupConfig(filtered map[string]string) error {
 		key string
 		msg string
 	}{
-		{"DB_PASSWORD", "数据库密码不能为空"},
-		{"DB_HOST", "数据库主机不能为空"},
-		{"DB_PORT", "数据库端口不能为空"},
-		{"DB_NAME", "数据库名称不能为空"},
-		{"DB_USER", "数据库用户不能为空"},
+		{"DB_PASSWORD", "DB password cannot be empty"},
+		{"DB_HOST", "DB host cannot be empty"},
+		{"DB_PORT", "DB port cannot be empty"},
+		{"DB_NAME", "DB name cannot be empty"},
+		{"DB_USER", "DB user cannot be empty"},
 	}
 	for _, r := range requiredKeys {
 		if filtered[r.key] == "" {
@@ -234,24 +234,24 @@ func validateSetupConfig(filtered map[string]string) error {
 			"disable": true, "prefer": true, "require": true, "verify-ca": true, "verify-full": true,
 		}
 		if !validSSLModes[sslMode] {
-			return fmt.Errorf("无效的 DB_SSL_MODE")
+			return fmt.Errorf("invalid DB_SSL_MODE")
 		}
 	}
 
 	if costStr := filtered["BCRYPT_COST"]; costStr != "" {
 		if cost, err := strconv.Atoi(costStr); err != nil || cost < 4 || cost > 31 {
-			return fmt.Errorf("BCRYPT_COST 必须为 4-31 之间的整数")
+			return fmt.Errorf("BCRYPT_COST must be an integer between 4 and 31")
 		}
 	}
 
 	if portStr := filtered["SERVER_PORT"]; portStr != "" {
 		if port, err := strconv.Atoi(portStr); err != nil || port < 1 || port > 65535 {
-			return fmt.Errorf("SERVER_PORT 必须为 1-65535 之间的整数")
+			return fmt.Errorf("SERVER_PORT must be an integer between 1 and 65535")
 		}
 	}
 
 	if env := filtered["SERVER_ENV"]; env != "" && env != "development" && env != "production" {
-		return fmt.Errorf("SERVER_ENV 必须为 development 或 production")
+		return fmt.Errorf("SERVER_ENV must be 'development' or 'production'")
 	}
 
 	return nil
@@ -278,7 +278,7 @@ func buildDSNs(filtered map[string]string) (dbDSN, redisAddr, redisPassword stri
 			redisPort = "6379"
 		} else {
 			if p, err := strconv.Atoi(redisPort); err != nil || p < 1 || p > 65535 {
-				return "", "", "", 0, fmt.Errorf("REDIS_PORT 必须为 1-65535 之间的整数")
+				return "", "", "", 0, fmt.Errorf("REDIS_PORT must be an integer between 1 and 65535")
 			}
 		}
 		redisPassword = filtered["REDIS_PASSWORD"]

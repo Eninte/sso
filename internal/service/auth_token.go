@@ -22,6 +22,8 @@ func (s *AuthService) revokeTokenWithRetry(ctx context.Context, accessToken stri
 
 	return retryutil.ExponentialBackoffRetry(ctx, func(ctx context.Context) error {
 		if err := s.store.RevokeToken(ctx, accessToken); err != nil {
+			// 重试循环内不包装错误，避免与retryutil的警告日志重复记录
+			// 最终错误由调用方通过WrapServiceError统一包装
 			return err
 		}
 
@@ -166,7 +168,7 @@ func maskToken(token string) string {
 func (s *AuthService) ValidateToken(ctx context.Context, accessToken string) (*crypto.AccessTokenClaims, error) {
 	claims, err := s.jwtSvc.ValidateAccessToken(accessToken)
 	if err != nil {
-		return nil, err
+		return nil, serviceutil.WrapServiceError("验证access token", err)
 	}
 
 	// 检查缓存
@@ -219,6 +221,7 @@ func (s *AuthService) generateTokenPair(
 	resp, err := s.tokenSvc.GenerateTokenPair(ctx, userID, email, role, scopes, clientID)
 	if err != nil {
 		logger.Error("generateTokenPair失败", "error", err, "userID", userID)
+		return nil, serviceutil.WrapServiceError("生成Token对", err)
 	}
-	return resp, err
+	return resp, nil
 }

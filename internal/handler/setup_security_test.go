@@ -47,7 +47,7 @@ func TestValidateKeyPath_PrefixBypass(t *testing.T) {
 		maliciousPath := filepath.Join(maliciousDir, "evil.pem")
 		err := ValidateKeyPath(maliciousPath)
 		assert.Error(t, err, "前缀匹配但不在白名单内的路径应该被拒绝")
-		assert.Contains(t, err.Error(), "路径必须在允许的目录内")
+		assert.Contains(t, err.Error(), "path must be within allowed directories")
 	})
 
 	t.Run("拒绝白名单目录的兄弟目录", func(t *testing.T) {
@@ -72,13 +72,13 @@ func TestValidateKeyPath_ErrorMessageSafety(t *testing.T) {
 		err := ValidateKeyPath("")
 		require.Error(t, err)
 		// 错误消息应该是通用的，不泄露内部细节
-		assert.Equal(t, "路径不能为空", err.Error())
+		assert.Equal(t, "path cannot be empty", err.Error())
 	})
 
 	t.Run("相对路径错误消息", func(t *testing.T) {
 		err := ValidateKeyPath("relative/path.pem")
 		require.Error(t, err)
-		assert.Equal(t, "必须使用绝对路径", err.Error())
+		assert.Equal(t, "absolute path is required", err.Error())
 	})
 
 	t.Run("路径遍历错误消息", func(t *testing.T) {
@@ -86,14 +86,14 @@ func TestValidateKeyPath_ErrorMessageSafety(t *testing.T) {
 		require.Error(t, err)
 		// filepath.Clean会规范化路径,所以".."会被处理掉
 		// 但路径/etc/passwd不在白名单内,所以会返回白名单错误
-		assert.Contains(t, err.Error(), "路径必须在允许的目录内")
+		assert.Contains(t, err.Error(), "path must be within allowed directories")
 	})
 
 	t.Run("白名单外路径错误消息", func(t *testing.T) {
 		err := ValidateKeyPath("/unauthorized/path/key.pem")
 		require.Error(t, err)
 		// 错误消息应该包含白名单信息，但不泄露具体的失败原因
-		assert.Contains(t, err.Error(), "路径必须在允许的目录内")
+		assert.Contains(t, err.Error(), "path must be within allowed directories")
 	})
 }
 

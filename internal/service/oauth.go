@@ -337,7 +337,7 @@ func (s *OAuthService) generateTokenResponse(
 	}
 
 	if s.tokenSvc == nil {
-		return nil, fmt.Errorf("token服务未初始化")
+		return nil, fmt.Errorf("token service is not initialized")
 	}
 
 	clientID := &authCode.ClientID

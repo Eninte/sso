@@ -21,14 +21,14 @@ func TestCORSConfig_Validate_Production(t *testing.T) {
 			allowedOrigins: []string{"*"},
 			env:            "production",
 			expectError:    true,
-			errorContains:  "通配符",
+			errorContains:  "wildcard",
 		},
 		{
 			name:           "生产环境_包含通配符_应该失败",
 			allowedOrigins: []string{"https://example.com", "*"},
 			env:            "production",
 			expectError:    true,
-			errorContains:  "通配符",
+			errorContains:  "wildcard",
 		},
 		{
 			name:           "生产环境_localhost_应该失败",

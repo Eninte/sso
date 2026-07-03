@@ -134,7 +134,7 @@ func (s *MFAService) DisableMFA(ctx context.Context, userID, code string) error 
 func (s *MFAService) GetMFAStatus(ctx context.Context, userID string) (*model.MFAStatusResponse, error) {
 	user, err := s.store.GetByID(ctx, userID)
 	if err != nil {
-		return nil, err
+		return nil, serviceutil.WrapServiceError("查询用户MFA状态", err)
 	}
 
 	return &model.MFAStatusResponse{

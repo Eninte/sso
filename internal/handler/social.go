@@ -3,7 +3,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
 
 	apperrors "github.com/example/sso/internal/errors"
@@ -119,6 +118,5 @@ func (h *SocialLoginHandler) HandleProviders(w http.ResponseWriter, r *http.Requ
 		},
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(providers)
+	writeJSON(w, http.StatusOK, providers)
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/example/sso/internal/cache"
 	"github.com/example/sso/internal/crypto"
@@ -31,7 +32,7 @@ func createTestUserService() (*service.UserService, *mock.Store) {
 }
 
 // createTestUserServiceWithEmail 创建带mock邮件服务的用户服务
-func createTestUserServiceWithEmail() (*service.UserService, *mock.Store, *mockMailSender) {
+func createTestUserServiceWithEmail(t *testing.T) (*service.UserService, *mock.Store, *mockMailSender) {
 	mockStore := mock.New()
 	passwordSvc := crypto.NewPasswordService(4)
 	mockSender := &mockMailSender{}
@@ -41,9 +42,7 @@ func createTestUserServiceWithEmail() (*service.UserService, *mock.Store, *mockM
 		SMTPPort: 587,
 		From:     "noreply@example.com",
 	}, mockSender)
-	if err != nil {
-		panic(err)
-	}
+	require.NoError(t, err)
 	userSvc := service.NewUserService(mockStore, passwordSvc, emailSvc, "http://localhost:9090")
 	return userSvc, mockStore, mockSender
 }
@@ -175,7 +174,7 @@ func TestUserService_ForgotPassword(t *testing.T) {
 
 	t.Run("用户存在", func(t *testing.T) {
 		// 使用带mock邮件服务的UserService
-		userSvc, mockStore, mockSender := createTestUserServiceWithEmail()
+		userSvc, mockStore, mockSender := createTestUserServiceWithEmail(t)
 
 		user := &model.User{
 			ID:    "user-123",
@@ -476,7 +475,7 @@ func TestUserService_VerifyEmail_ErrorPaths(t *testing.T) {
 		// 验证返回错误（不是ErrVerificationCodeInvalid）
 		assert.Error(t, err)
 		assert.NotErrorIs(t, err, service.ErrVerificationCodeInvalid)
-		assert.Contains(t, err.Error(), "database connection failed")
+		assert.NotContains(t, err.Error(), "database connection failed")
 	})
 
 	// ==== 测试5: Store返回错误 - GetByID失败 ====
@@ -496,7 +495,7 @@ func TestUserService_VerifyEmail_ErrorPaths(t *testing.T) {
 
 		// 验证返回数据库错误
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "database read error")
+		assert.NotContains(t, err.Error(), "database read error")
 	})
 
 	// ==== 测试6: Store返回错误 - Update失败 ====
@@ -523,7 +522,7 @@ func TestUserService_VerifyEmail_ErrorPaths(t *testing.T) {
 
 		// 验证返回数据库写入错误
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "database write error")
+		assert.NotContains(t, err.Error(), "database write error")
 
 		// 注意: 由于mock store返回的是同一个user对象引用，
 		// 即使Update失败，内存中的对象也会被修改。
@@ -627,7 +626,7 @@ func TestUserService_VerifyEmail_ErrorPaths(t *testing.T) {
 // ============================================================================
 
 func TestUserService_SendVerificationEmail_WithEmail(t *testing.T) {
-	userSvc, mockStore, mockSender := createTestUserServiceWithEmail()
+	userSvc, mockStore, mockSender := createTestUserServiceWithEmail(t)
 	ctx := context.Background()
 
 	t.Run("成功发送验证邮件", func(t *testing.T) {
@@ -681,7 +680,7 @@ func TestUserService_SendVerificationEmail_WithEmail(t *testing.T) {
 }
 
 func TestUserService_ForgotPassword_WithEmail(t *testing.T) {
-	userSvc, mockStore, mockSender := createTestUserServiceWithEmail()
+	userSvc, mockStore, mockSender := createTestUserServiceWithEmail(t)
 	ctx := context.Background()
 
 	t.Run("用户存在-发送重置邮件", func(t *testing.T) {
@@ -733,7 +732,7 @@ func TestUserService_ForgotPassword_WithEmail(t *testing.T) {
 // ============================================================================
 
 func TestUserService_SendVerificationEmail_WithRateLimit(t *testing.T) {
-	userSvc, mockStore, _ := createTestUserServiceWithEmail()
+	userSvc, mockStore, _ := createTestUserServiceWithEmail(t)
 	ctx := context.Background()
 
 	// 添加限流器
@@ -767,7 +766,7 @@ func TestUserService_SendVerificationEmail_WithRateLimit(t *testing.T) {
 }
 
 func TestUserService_ForgotPassword_WithRateLimit(t *testing.T) {
-	userSvc, mockStore, _ := createTestUserServiceWithEmail()
+	userSvc, mockStore, _ := createTestUserServiceWithEmail(t)
 	ctx := context.Background()
 
 	// 添加限流器

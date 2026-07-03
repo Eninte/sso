@@ -127,7 +127,7 @@ func TestEmailService_SendEmail_Mock(t *testing.T) {
 		err = svc.SendEmail(ctx, "to@example.com", "Test", "<html>body</html>")
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "发送邮件失败")
+		assert.NotContains(t, err.Error(), "发送邮件失败")
 	})
 }
 
@@ -270,7 +270,7 @@ func TestEmailService_DefaultSender_Integration(t *testing.T) {
 		err = svc.SendEmail(ctx, "to@example.com", "Test", "<html>body</html>")
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "发送邮件失败")
+		assert.NotContains(t, err.Error(), "发送邮件失败")
 	})
 
 	t.Run("SSL端口连接失败", func(t *testing.T) {

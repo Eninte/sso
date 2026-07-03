@@ -45,9 +45,7 @@ func TestMFAService_SetupMFA_ErrorPaths(t *testing.T) {
 		// 验证返回错误
 		assert.Error(t, err)
 
-		// TODO: 需求 8.7 - 当前实现直接返回store错误
-		// 未来应该包装错误，不暴露内部数据库错误详情
-		assert.Contains(t, err.Error(), "database connection failed")
+		assert.NotContains(t, err.Error(), "database connection failed")
 	})
 
 	// ==== 测试2: Store.Update返回数据库错误 ====
@@ -75,8 +73,7 @@ func TestMFAService_SetupMFA_ErrorPaths(t *testing.T) {
 
 		// 验证返回错误
 		assert.Error(t, err)
-		// TODO: 需求 8.7 - 当前实现直接返回store错误
-		assert.Contains(t, err.Error(), "database write failed")
+		assert.NotContains(t, err.Error(), "database write failed")
 	})
 
 	// ==== 测试3: 验证不暴露内部错误详情 ====
@@ -94,10 +91,11 @@ func TestMFAService_SetupMFA_ErrorPaths(t *testing.T) {
 		// 验证返回错误
 		require.Error(t, err)
 
-		// TODO: 需求 8.7 - 当前实现暴露了内部错误详情
-		// 未来应该包装错误，隐藏敏感信息
 		errorMsg := err.Error()
-		assert.Contains(t, errorMsg, "SQL error", "当前实现暴露了SQL错误详情")
+		assert.NotContains(t, errorMsg, "SQL error", "不应暴露SQL错误详情")
+		assert.NotContains(t, errorMsg, "secret", "不应暴露数据库密码")
+		assert.NotContains(t, errorMsg, "postgres://", "不应暴露数据库连接字符串")
+		assert.NotContains(t, errorMsg, "admin", "不应暴露数据库用户名")
 	})
 }
 
@@ -116,7 +114,7 @@ func TestMFAService_VerifyAndEnableMFA_ErrorPaths(t *testing.T) {
 		err := mfaSvc.VerifyAndEnableMFA(ctx, "test-user-id", "123456")
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "database connection failed")
+		assert.NotContains(t, err.Error(), "database connection failed")
 	})
 
 	// ==== 测试2: Store.Update返回数据库错误 ====
@@ -164,7 +162,7 @@ func TestMFAService_DisableMFA_ErrorPaths(t *testing.T) {
 		err := mfaSvc.DisableMFA(ctx, "test-user-id", "123456")
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "database connection failed")
+		assert.NotContains(t, err.Error(), "database connection failed")
 	})
 
 	// ==== 测试2: Store.Update返回数据库错误 ====
@@ -211,7 +209,7 @@ func TestMFAService_GetMFAStatus_ErrorPaths(t *testing.T) {
 		_, err := mfaSvc.GetMFAStatus(ctx, "test-user-id")
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "database connection failed")
+		assert.NotContains(t, err.Error(), "database connection failed")
 	})
 
 	// ==== 测试2: 用户不存在 ====
@@ -311,7 +309,7 @@ func TestAuthService_RefreshToken_ComprehensiveErrorPaths(t *testing.T) {
 
 		// 验证返回错误（撤销失败）
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "撤销旧Token失败")
+		assert.NotContains(t, err.Error(), "撤销旧Token失败")
 	})
 
 	// ==== 测试3: StoreToken失败 ====
@@ -354,7 +352,7 @@ func TestAuthService_RefreshToken_ComprehensiveErrorPaths(t *testing.T) {
 
 		// 验证返回错误
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "database write failed")
+		assert.NotContains(t, err.Error(), "database write failed")
 	})
 
 	// ==== 测试4: 验证不暴露内部错误详情 ====
@@ -385,9 +383,10 @@ func TestAuthService_RefreshToken_ComprehensiveErrorPaths(t *testing.T) {
 		assert.ErrorIs(t, err, service.ErrInvalidToken)
 		// 验证错误消息不包含敏感信息
 		errorMsg := err.Error()
-		assert.NotContains(t, errorMsg, "secret")
-		assert.NotContains(t, errorMsg, "postgres://")
-		assert.NotContains(t, errorMsg, "admin")
+		assert.NotContains(t, errorMsg, "SQL error", "不应暴露SQL错误详情")
+		assert.NotContains(t, errorMsg, "secret", "不应暴露数据库密码")
+		assert.NotContains(t, errorMsg, "postgres://", "不应暴露数据库连接字符串")
+		assert.NotContains(t, errorMsg, "admin", "不应暴露数据库用户名")
 	})
 }
 
@@ -418,8 +417,8 @@ func TestAuthService_Logout_ComprehensiveErrorPaths(t *testing.T) {
 
 		// 验证返回错误
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "登出失败")
-		assert.Contains(t, err.Error(), "operation failed after 3 retries")
+		assert.NotContains(t, err.Error(), "登出失败")
+		assert.NotContains(t, err.Error(), "operation failed after 3 retries")
 	})
 
 	// ==== 测试2: 验证不暴露内部错误详情 ====
@@ -446,10 +445,11 @@ func TestAuthService_Logout_ComprehensiveErrorPaths(t *testing.T) {
 		// 验证返回错误
 		require.Error(t, err)
 
-		// TODO: 需求 8.7 - 当前实现暴露了内部错误详情
-		// 未来应该包装错误，隐藏敏感信息
 		errorMsg := err.Error()
-		assert.Contains(t, errorMsg, "SQL error", "当前实现暴露了SQL错误详情")
+		assert.NotContains(t, errorMsg, "SQL error", "不应暴露SQL错误详情")
+		assert.NotContains(t, errorMsg, "secret", "不应暴露数据库密码")
+		assert.NotContains(t, errorMsg, "postgres://", "不应暴露数据库连接字符串")
+		assert.NotContains(t, errorMsg, "admin", "不应暴露数据库用户名")
 	})
 }
 
@@ -479,7 +479,7 @@ func TestAuthService_LogoutAll_ComprehensiveErrorPaths(t *testing.T) {
 
 		// 验证返回错误
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "登出所有设备失败")
+		assert.NotContains(t, err.Error(), "登出所有设备失败")
 	})
 
 	// ==== 测试2: 验证不暴露内部错误详情 ====
@@ -506,10 +506,11 @@ func TestAuthService_LogoutAll_ComprehensiveErrorPaths(t *testing.T) {
 		// 验证返回错误
 		require.Error(t, err)
 
-		// TODO: 需求 8.7 - 当前实现暴露了内部错误详情
-		// 未来应该包装错误，隐藏敏感信息
 		errorMsg := err.Error()
-		assert.Contains(t, errorMsg, "SQL error", "当前实现暴露了SQL错误详情")
+		assert.NotContains(t, errorMsg, "SQL error", "不应暴露SQL错误详情")
+		assert.NotContains(t, errorMsg, "secret", "不应暴露数据库密码")
+		assert.NotContains(t, errorMsg, "postgres://", "不应暴露数据库连接字符串")
+		assert.NotContains(t, errorMsg, "admin", "不应暴露数据库用户名")
 	})
 }
 
@@ -631,7 +632,7 @@ func TestUserService_SendVerificationEmail_ErrorPaths(t *testing.T) {
 		err := userSvc.SendVerificationEmail(ctx, "test-user-id")
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "database connection failed")
+		assert.NotContains(t, err.Error(), "database connection failed")
 	})
 
 	// ==== 测试2: Store.StoreVerificationToken返回错误 ====
@@ -658,7 +659,7 @@ func TestUserService_SendVerificationEmail_ErrorPaths(t *testing.T) {
 		err := userSvc.SendVerificationEmail(ctx, "test-user-id")
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "database write failed")
+		assert.NotContains(t, err.Error(), "database write failed")
 	})
 
 	// ==== 测试3: 邮箱已验证 ====
@@ -703,7 +704,7 @@ func TestUserService_VerifyEmail_ComprehensiveErrorPaths(t *testing.T) {
 
 		// 验证返回错误（不是ErrNotFound）
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "database connection failed")
+		assert.NotContains(t, err.Error(), "database connection failed")
 	})
 
 	// ==== 测试2: Store.GetByID返回数据库错误 ====
@@ -724,7 +725,7 @@ func TestUserService_VerifyEmail_ComprehensiveErrorPaths(t *testing.T) {
 		err = userSvc.VerifyEmail(ctx, "test-user-id", "valid-token")
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "database connection failed")
+		assert.NotContains(t, err.Error(), "database connection failed")
 	})
 
 	// ==== 测试3: Store.Update返回数据库错误 ====
@@ -755,7 +756,7 @@ func TestUserService_VerifyEmail_ComprehensiveErrorPaths(t *testing.T) {
 		err = userSvc.VerifyEmail(ctx, "test-user-id", "valid-token")
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "database write failed")
+		assert.NotContains(t, err.Error(), "database write failed")
 	})
 }
 
@@ -776,7 +777,7 @@ func TestUserService_ResetPassword_ErrorPaths(t *testing.T) {
 
 		// 验证返回错误（不是ErrNotFound）
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "database connection failed")
+		assert.NotContains(t, err.Error(), "database connection failed")
 	})
 
 	// ==== 测试2: Store.GetByID返回数据库错误 ====
@@ -797,7 +798,7 @@ func TestUserService_ResetPassword_ErrorPaths(t *testing.T) {
 		err = userSvc.ResetPassword(ctx, "test-user-id", "valid-token", "NewPassword123!")
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "database connection failed")
+		assert.NotContains(t, err.Error(), "database connection failed")
 	})
 
 	// ==== 测试3: Store.Update返回数据库错误 ====
@@ -828,7 +829,7 @@ func TestUserService_ResetPassword_ErrorPaths(t *testing.T) {
 		err = userSvc.ResetPassword(ctx, "test-user-id", "valid-token", "NewPassword123!")
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "database write failed")
+		assert.NotContains(t, err.Error(), "database write failed")
 	})
 }
 
@@ -848,7 +849,7 @@ func TestUserService_ChangePassword_ErrorPaths(t *testing.T) {
 		err := userSvc.ChangePassword(ctx, "test-user-id", "OldPassword123!", "NewPassword123!")
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "database connection failed")
+		assert.NotContains(t, err.Error(), "database connection failed")
 	})
 
 	// ==== 测试2: 旧密码错误 ====
@@ -905,7 +906,7 @@ func TestUserService_ChangePassword_ErrorPaths(t *testing.T) {
 		err = userSvc.ChangePassword(ctx, "test-user-id", "OldPassword123!", "NewPassword123!")
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "database write failed")
+		assert.NotContains(t, err.Error(), "database write failed")
 	})
 
 	// ==== 测试4: 新密码验证失败 ====

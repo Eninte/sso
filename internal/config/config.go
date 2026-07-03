@@ -232,7 +232,7 @@ func validateDatabaseConfig(c *Config) error {
 			slog.Warn("生产环境数据库未启用SSL（LAN部署模式）", "ssl_mode", c.DBSSLMode)
 		} else {
 			slog.Error("生产环境数据库必须启用SSL", "ssl_mode", c.DBSSLMode)
-			return fmt.Errorf("生产环境DB_SSL_MODE不能为disable，请设置为require或更高模式")
+			return fmt.Errorf("DB_SSL_MODE cannot be 'disable' in production, please set to 'require' or higher")
 		}
 	}
 
@@ -254,11 +254,11 @@ func validateJWTConfig(c *Config) error {
 	// 验证Token TTL值为正数
 	if c.AccessTokenTTL <= 0 {
 		slog.Error("Access Token TTL 必须为正数", "ttl", c.AccessTokenTTL)
-		return fmt.Errorf("access token TTL 必须为正数")
+		return fmt.Errorf("access token TTL must be positive")
 	}
 	if c.RefreshTokenTTL <= 0 {
 		slog.Error("Refresh Token TTL 必须为正数", "ttl", c.RefreshTokenTTL)
-		return fmt.Errorf("refresh token TTL 必须为正数")
+		return fmt.Errorf("refresh token TTL must be positive")
 	}
 
 	// 验证Token TTL合理性
@@ -291,7 +291,7 @@ func validateSecurityConfig(c *Config) error {
 	if c.RateLimitRequests <= 0 {
 		if c.Env == "production" && !c.LANDeployment {
 			slog.Error("生产环境限流请求数必须为正数", "requests", c.RateLimitRequests)
-			return fmt.Errorf("生产环境RATE_LIMIT_REQUESTS必须为正数，当前值: %d", c.RateLimitRequests)
+			return fmt.Errorf("RATE_LIMIT_REQUESTS must be positive in production, current value: %d", c.RateLimitRequests)
 		}
 		slog.Warn("限流请求数应为正数", "requests", c.RateLimitRequests)
 	}
@@ -300,7 +300,7 @@ func validateSecurityConfig(c *Config) error {
 	if c.MaxLoginAttempts <= 0 {
 		if c.Env == "production" && !c.LANDeployment {
 			slog.Error("生产环境最大登录尝试次数必须为正数", "attempts", c.MaxLoginAttempts)
-			return fmt.Errorf("生产环境MAX_LOGIN_ATTEMPTS必须为正数，当前值: %d", c.MaxLoginAttempts)
+			return fmt.Errorf("MAX_LOGIN_ATTEMPTS must be positive in production, current value: %d", c.MaxLoginAttempts)
 		}
 		slog.Warn("最大登录尝试次数应为正数", "attempts", c.MaxLoginAttempts)
 	}
@@ -327,7 +327,7 @@ func validateProductionConfig(c *Config) error {
 			slog.Warn("生产环境CORS配置包含localhost（LAN部署模式）", "cors_origins", c.CORSAllowedOrigins)
 		} else {
 			slog.Error("生产环境CORS配置不能包含localhost", "cors_origins", c.CORSAllowedOrigins)
-			return fmt.Errorf("生产环境CORS_ALLOWED_ORIGINS不能包含localhost")
+			return fmt.Errorf("CORS_ALLOWED_ORIGINS cannot contain 'localhost' in production")
 		}
 	}
 
@@ -337,7 +337,7 @@ func validateProductionConfig(c *Config) error {
 			slog.Warn("生产环境使用默认CORS配置（LAN部署模式）")
 		} else {
 			slog.Error("生产环境不能使用默认CORS配置")
-			return fmt.Errorf("生产环境必须设置 CORS_ALLOWED_ORIGINS")
+			return fmt.Errorf("CORS_ALLOWED_ORIGINS must be set in production")
 		}
 	}
 
@@ -347,7 +347,7 @@ func validateProductionConfig(c *Config) error {
 			slog.Warn("生产环境使用默认JWT Issuer（LAN部署模式）")
 		} else {
 			slog.Error("生产环境不能使用默认JWT Issuer")
-			return fmt.Errorf("生产环境必须设置 JWT_ISSUER，不能使用默认值 'sso'")
+			return fmt.Errorf("JWT_ISSUER must be set in production, cannot use default value 'sso'")
 		}
 	}
 
@@ -357,14 +357,14 @@ func validateProductionConfig(c *Config) error {
 			slog.Warn("生产环境使用localhost作为SMTP服务器（LAN部署模式）")
 		} else {
 			slog.Error("生产环境不能使用localhost作为SMTP服务器")
-			return fmt.Errorf("生产环境必须设置 SMTP_HOST，不能为 localhost")
+			return fmt.Errorf("SMTP_HOST must be set in production, cannot be 'localhost'")
 		}
 	}
 
 	// 检查Metrics认证配置
 	if c.MetricsUsername != "" && c.MetricsPassword == "" {
 		slog.Error("生产环境配置了METRICS_USERNAME但未设置METRICS_PASSWORD")
-		return fmt.Errorf("生产环境配置了METRICS_USERNAME时必须设置METRICS_PASSWORD")
+		return fmt.Errorf("METRICS_PASSWORD must be set when METRICS_USERNAME is configured in production")
 	}
 
 	// 检查MFA恢复码HMAC密钥（生产环境强制要求）
@@ -374,7 +374,7 @@ func validateProductionConfig(c *Config) error {
 			slog.Warn("生产环境未设置MFA_RECOVERY_HMAC_KEY（LAN部署模式）")
 		} else {
 			slog.Error("生产环境必须设置MFA_RECOVERY_HMAC_KEY")
-			return fmt.Errorf("生产环境必须设置 MFA_RECOVERY_HMAC_KEY")
+			return fmt.Errorf("MFA_RECOVERY_HMAC_KEY must be set in production")
 		}
 	}
 

@@ -57,10 +57,8 @@ func TestAuthService_Login_ErrorPaths(t *testing.T) {
 		// 验证返回错误
 		assert.Error(t, err)
 
-		// TODO: 需求 8.7 - 当前实现直接返回store错误，暴露了内部详情
-		// 未来应该包装错误，不暴露内部数据库错误详情
-		// 当前行为：直接返回原始错误
-		assert.Contains(t, err.Error(), "database connection failed")
+		// 需求 8.7 - 不暴露内部数据库错误详情
+		assert.NotContains(t, err.Error(), "database connection failed")
 	})
 
 	// ==== 测试2: 账户被锁定场景 ====
@@ -278,19 +276,12 @@ func TestAuthService_Login_ErrorPaths(t *testing.T) {
 		// 验证返回错误
 		require.Error(t, err)
 
-		// TODO: 需求 8.7 - 当前实现暴露了内部错误详情
-		// 未来应该包装错误，隐藏敏感信息
-		// 当前行为：直接返回原始错误（包含敏感信息）
+		// 需求 8.7 - 不暴露内部错误详情
 		errorMsg := err.Error()
-
-		// 记录当前行为：确实暴露了敏感信息
-		assert.Contains(t, errorMsg, "SQL error", "当前实现暴露了SQL错误详情")
-
-		// 期望行为（未来实现）：
-		// assert.NotContains(t, errorMsg, "secret", "不应暴露数据库密码")
-		// assert.NotContains(t, errorMsg, "postgres://", "不应暴露数据库连接字符串")
-		// assert.NotContains(t, errorMsg, "admin", "不应暴露数据库用户名")
-		// assert.NotContains(t, errorMsg, "SQL error", "不应暴露SQL错误详情")
+		assert.NotContains(t, errorMsg, "secret", "不应暴露数据库密码")
+		assert.NotContains(t, errorMsg, "postgres://", "不应暴露数据库连接字符串")
+		assert.NotContains(t, errorMsg, "admin", "不应暴露数据库用户名")
+		assert.NotContains(t, errorMsg, "SQL error", "不应暴露SQL错误详情")
 	})
 
 	// ==== 测试6: 用户不存在返回通用错误 ====
@@ -490,10 +481,8 @@ func TestAuthService_Register_ErrorPaths(t *testing.T) {
 		// 验证返回错误
 		assert.Error(t, err)
 
-		// TODO: 需求 8.7 - 当前实现直接返回store错误，暴露了内部详情
-		// 未来应该包装错误，不暴露内部数据库错误详情
-		// 当前行为：直接返回原始错误
-		assert.Contains(t, err.Error(), "database connection failed")
+		// 需求 8.7 - 不暴露内部数据库错误详情
+		assert.NotContains(t, err.Error(), "database connection failed")
 	})
 
 	// ==== 测试5: Store返回数据库错误 - Create失败 ====
@@ -524,9 +513,8 @@ func TestAuthService_Register_ErrorPaths(t *testing.T) {
 		// 验证返回错误
 		assert.Error(t, err)
 
-		// TODO: 需求 8.7 - 当前实现直接返回store错误
-		// 未来应该包装错误，不暴露内部数据库错误详情
-		assert.Contains(t, err.Error(), "database write failed")
+		// 需求 8.7 - 不暴露内部数据库错误详情
+		assert.NotContains(t, err.Error(), "database write failed")
 	})
 
 	// ==== 测试6: 重复邮箱 ====
@@ -703,18 +691,11 @@ func TestAuthService_Register_ErrorPaths(t *testing.T) {
 		// 验证返回错误
 		require.Error(t, err)
 
-		// TODO: 需求 8.7 - 当前实现暴露了内部错误详情
-		// 未来应该包装错误，隐藏敏感信息
-		// 当前行为：直接返回原始错误（包含敏感信息）
+		// 需求 8.7 - 不暴露内部错误详情
 		errorMsg := err.Error()
-
-		// 记录当前行为：确实暴露了敏感信息
-		assert.Contains(t, errorMsg, "SQL error", "当前实现暴露了SQL错误详情")
-
-		// 期望行为（未来实现）：
-		// assert.NotContains(t, errorMsg, "secret", "不应暴露数据库密码")
-		// assert.NotContains(t, errorMsg, "postgres://", "不应暴露数据库连接字符串")
-		// assert.NotContains(t, errorMsg, "admin", "不应暴露数据库用户名")
-		// assert.NotContains(t, errorMsg, "SQL error", "不应暴露SQL错误详情")
+		assert.NotContains(t, errorMsg, "secret", "不应暴露数据库密码")
+		assert.NotContains(t, errorMsg, "postgres://", "不应暴露数据库连接字符串")
+		assert.NotContains(t, errorMsg, "admin", "不应暴露数据库用户名")
+		assert.NotContains(t, errorMsg, "SQL error", "不应暴露SQL错误详情")
 	})
 }

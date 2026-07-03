@@ -36,25 +36,25 @@ func TestValidateKeyPath(t *testing.T) {
 	t.Run("空路径", func(t *testing.T) {
 		err := ValidateKeyPath("")
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "路径不能为空")
+		assert.Contains(t, err.Error(), "path cannot be empty")
 	})
 
 	t.Run("相对路径", func(t *testing.T) {
 		err := ValidateKeyPath("keys/private.pem")
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "必须使用绝对路径")
+		assert.Contains(t, err.Error(), "absolute path is required")
 	})
 
 	t.Run("不在白名单内的路径", func(t *testing.T) {
 		err := ValidateKeyPath("/tmp/keys/private.pem")
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "路径必须在允许的目录内")
+		assert.Contains(t, err.Error(), "path must be within allowed directories")
 	})
 
 	t.Run("路径遍历攻击", func(t *testing.T) {
 		err := ValidateKeyPath("/app/keys/../../../etc/passwd")
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "路径必须在允许的目录内")
+		assert.Contains(t, err.Error(), "path must be within allowed directories")
 	})
 
 	t.Run("白名单目录本身", func(t *testing.T) {

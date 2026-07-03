@@ -263,17 +263,18 @@ func (s *SocialLoginService) HandleCallback(ctx context.Context, provider, code,
 
 	accessToken, err := s.exchangeCode(p, code, redirectURI)
 	if err != nil {
-		return nil, err
+		// 外部OAuth调用失败，映射为具体错误码而非ErrInternal
+		return nil, apperrors.Wrap(apperrors.ErrCodeOAuthCodeExchangeFailed, "OAuth授权码交换失败", 400, err)
 	}
 
 	userInfo, err := s.getUserInfo(p, accessToken)
 	if err != nil {
-		return nil, err
+		return nil, apperrors.Wrap(apperrors.ErrCodeSocialLoginFailed, "社交登录失败", 400, err)
 	}
 
 	user, err := s.findOrCreateUser(ctx, provider, userInfo)
 	if err != nil {
-		return nil, err
+		return nil, serviceutil.WrapServiceError("查找或创建用户", err)
 	}
 
 	return s.generateTokenPair(ctx, user)

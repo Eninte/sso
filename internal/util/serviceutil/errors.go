@@ -4,6 +4,7 @@ package serviceutil
 
 import (
 	"fmt"
+	"log/slog"
 
 	apperrors "github.com/example/sso/internal/errors"
 	"github.com/example/sso/internal/store"
@@ -19,7 +20,8 @@ import (
 // 返回:
 //   - 如果err为nil，返回nil
 //   - 如果err是store.ErrNotFound，返回notFoundErr
-//   - 否则返回原始错误（保持错误语义）
+//   - 如果err已经是AppError，保持其语义
+//   - 否则映射为ErrInternal，不暴露原始数据库错误详情（原始错误仅记录日志）
 //
 // 示例:
 //
@@ -37,8 +39,15 @@ func HandleStoreError(err error, notFoundErr error) error {
 		return notFoundErr
 	}
 
-	// 保持原始错误语义
-	return err
+	// 如果已经是AppError，保持其语义
+	var appErr *apperrors.AppError
+	if apperrors.As(err, &appErr) {
+		return err
+	}
+
+	// 非预期的Store错误，记录原始错误用于调试，返回不包含内部详情的ErrInternal
+	slog.Error("internal store error", "error", err)
+	return apperrors.New(apperrors.ErrCodeInternal, "internal service error", 500)
 }
 
 // WrapServiceError 包装service层错误，添加操作上下文
@@ -50,8 +59,8 @@ func HandleStoreError(err error, notFoundErr error) error {
 //
 // 返回:
 //   - 如果err为nil，返回nil
-//   - 如果err是AppError，保持其错误码和HTTP状态，只添加上下文
-//   - 否则包装为通用错误
+//   - 如果err是AppError，保持其错误码和HTTP状态，附加操作上下文
+//   - 否则映射为ErrInternal，不暴露原始数据库错误详情（原始错误仅记录日志）
 //
 // 示例:
 //
@@ -63,13 +72,13 @@ func WrapServiceError(operation string, err error) error {
 		return nil
 	}
 
-	// 如果是AppError，保持其错误语义
+	// 如果是AppError，保持其错误码和HTTP状态，附加操作上下文
 	var appErr *apperrors.AppError
 	if apperrors.As(err, &appErr) {
-		// 保持原始错误码和HTTP状态，只添加操作上下文
-		return fmt.Errorf("%s失败: %w", operation, err)
+		return fmt.Errorf("%s: %w", operation, err)
 	}
 
-	// 对于非AppError，包装为通用错误
-	return fmt.Errorf("%s失败: %w", operation, err)
+	// 非预期的非AppError错误，记录原始错误用于调试，返回不包含内部详情的ErrInternal
+	slog.Error("internal service error", "operation", operation, "error", err)
+	return apperrors.New(apperrors.ErrCodeInternal, "internal service error", 500)
 }

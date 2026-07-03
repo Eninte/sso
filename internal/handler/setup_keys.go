@@ -131,18 +131,18 @@ func (h *SetupHandler) HandleSetupGenerateKeys(w http.ResponseWriter, r *http.Re
 // 防止路径遍历攻击，确保路径在允许的目录内
 func ValidateKeyPath(path string) error {
 	if path == "" {
-		return fmt.Errorf("路径不能为空")
+		return fmt.Errorf("path cannot be empty")
 	}
 
 	cleanPath := filepath.Clean(path)
 
 	if !filepath.IsAbs(cleanPath) {
-		return fmt.Errorf("必须使用绝对路径")
+		return fmt.Errorf("absolute path is required")
 	}
 
 	// 检查路径是否包含危险字符或模式
 	if strings.Contains(cleanPath, "..") {
-		return fmt.Errorf("路径不能包含 '..'")
+		return fmt.Errorf("path must not contain '..'")
 	}
 
 	// 获取目录路径
@@ -152,7 +152,7 @@ func ValidateKeyPath(path string) error {
 		dir = filepath.Dir(cleanPath)
 	} else if err != nil && !os.IsNotExist(err) {
 		// 如果是其他错误(非文件不存在),返回错误
-		return fmt.Errorf("无法访问路径: %w", err)
+		return fmt.Errorf("unable to access path: %w", err)
 	} else if os.IsNotExist(err) {
 		// 如果文件不存在,使用父目录进行检查
 		dir = filepath.Dir(cleanPath)
@@ -164,7 +164,7 @@ func ValidateKeyPath(path string) error {
 	if _, statErr := os.Stat(dir); statErr == nil {
 		realPath, err := filepath.EvalSymlinks(dir)
 		if err != nil {
-			return fmt.Errorf("无法解析符号链接: %w", err)
+			return fmt.Errorf("unable to resolve symlinks: %w", err)
 		}
 		dir = realPath
 	}
@@ -182,7 +182,7 @@ func ValidateKeyPath(path string) error {
 		}
 	}
 
-	return fmt.Errorf("路径必须在允许的目录内: %v", allowedDirs)
+	return fmt.Errorf("path must be within allowed directories: %v", allowedDirs)
 }
 
 // getKeyPathWhitelist 获取密钥路径白名单
