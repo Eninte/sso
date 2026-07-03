@@ -85,7 +85,7 @@ jobs:
         run: |
           PACKAGES=$(go list ./... | grep -v '/internal/app' | grep -v '/store/mock' | tr '\n' ' ')
           gotestsum --junitfile test-results.xml --format pkgname --rerun-fails=2 --packages="$PACKAGES" -- \
-            -race -p 1 -timeout 180s -coverprofile=coverage.out $PACKAGES
+            -race -p 1 -timeout 180s -tags=integration -coverprofile=coverage.out $PACKAGES
 
       - name: Upload test report
         uses: actions/upload-artifact@v4
