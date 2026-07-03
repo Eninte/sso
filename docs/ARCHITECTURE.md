@@ -71,16 +71,40 @@ sso/
 │       └── main.go             # 主程序入口
 │
 ├── internal/                   # 私有代码（不可外部导入）
+│   ├── app/                    # 组合根（composition root）
+│   │   ├── services.go         # 依赖装配：初始化所有服务和存储
+│   │   ├── router.go           # 路由注册：中间件链 + 路由分组
+│   │   └── server.go           # HTTP服务器生命周期管理
+│   │
+│   ├── audit/                  # 审计子系统
+│   │   ├── compliance/         # 合规性检查
+│   │   ├── configaudit/        # 配置审计
+│   │   ├── depscan/            # 依赖扫描
+│   │   ├── monitor/            # 安全监控
+│   │   ├── pentest/            # 渗透测试
+│   │   ├── perftest/           # 性能测试
+│   │   ├── scanner/            # 漏洞扫描
+│   │   └── report/             # 审计报告生成
+│   │
 │   ├── cache/                  # 缓存层
-│   │   ├── redis.go            # Redis客户端
+│   │   ├── redis.go            # Redis客户端实现
+│   │   ├── memory.go           # 内存缓存回退
+│   │   ├── lru.go              # LRU淘汰策略
 │   │   └── redis_test.go
+│   │
+│   ├── captcha/                # 验证码服务
+│   │   └── captcha.go          # 验证码生成与验证
+│   │
+│   ├── common/                 # 公共工具
+│   │   ├── language.go         # 语言检测
+│   │   └── random.go           # 随机数生成
 │   │
 │   ├── config/                 # 配置管理
 │   │   └── config.go           # 配置加载和验证
 │   │
 │   ├── crypto/                 # 加密工具
-│   │   ├── jwt.go              # JWT服务
-│   │   ├── password.go         # 密码哈希
+│   │   ├── jwt.go              # JWT服务（支持密钥轮换）
+│   │   ├── password.go         # 密码哈希（bcrypt）
 │   │   ├── keyloader.go        # 密钥加载
 │   │   └── *_test.go
 │   │
@@ -115,7 +139,8 @@ sso/
 │   │   ├── logging.go          # 日志中间件
 │   │   ├── security.go         # 安全头中间件（含CSP nonce）
 │   │   ├── requestid.go        # 请求ID中间件
-│   │   ├── ratelimit.go        # 限流中间件
+│   │   ├── ratelimit.go        # 限流中间件（分片锁优化）
+│   │   ├── ratelimit_distributed.go # Redis分布式限流
 │   │   ├── language.go         # 语言中间件
 │   │   └── middleware_test.go
 │   │
@@ -128,6 +153,9 @@ sso/
 │   ├── service/                # 业务逻辑层
 │   │   ├── interfaces.go       # Service接口定义
 │   │   ├── auth.go             # 认证服务
+│   │   ├── auth_login.go       # 登录逻辑（含业务层限流）
+│   │   ├── login_ratelimit.go  # 登录限流（Redis, per IP）
+│   │   ├── email_ratelimit.go  # 邮件限流（per email）
 │   │   ├── oauth.go            # OAuth服务
 │   │   ├── user.go             # 用户服务
 │   │   ├── email.go            # 邮件服务
@@ -144,12 +172,23 @@ sso/
 │   │   │   ├── user.go
 │   │   │   ├── token.go
 │   │   │   └── postgres_test.go
-│   │   └── mock/               # Mock实现（测试用）
+│   │   ├── memory/             # 内存存储实现（开发/测试）
+│   │   └── mock/               # Mock实现（单元测试）
 │   │       └── mock.go
+│   │
+│   ├── util/                   # 工具模块
+│   │   ├── auditutil/          # 审计日志工具
+│   │   ├── handlerutil/        # Handler响应工具
+│   │   ├── serviceutil/        # Service错误处理工具
+│   │   ├── retryutil/          # 重试工具
+│   │   └── testutil/           # 测试辅助工具
 │   │
 │   └── validator/              # 输入验证
 │       ├── validator.go        # 验证函数
 │       └── validator_test.go
+│
+├── test/                       # E2E测试
+│   └── e2e/                    # 端到端测试（//go:build e2e）
 │
 ├── migrations/                 # 数据库迁移
 │   ├── 000001_init.up.sql
@@ -162,8 +201,9 @@ sso/
 │
 ├── scripts/                    # 工具脚本
 │   ├── generate-keys.sh
-│   ├── backup.sh
-│   └── restore.sh
+│   ├── prepare-e2e-test.sh     # E2E测试数据准备
+│   ├── cleanup-e2e-test.sh     # E2E测试数据清理
+│   └── run_e2e_no_ratelimit.sh # E2E服务启动（处理限流）
 │
 ├── keys/                       # RSA密钥（不提交）
 │   ├── private.pem
@@ -172,6 +212,8 @@ sso/
 ├── static/                     # 静态资源
 ├── templates/                  # 模板文件
 ├── testdata/                   # 测试数据
+├── sdks/                       # SDK客户端（Go, JS, Python, Rust）
+├── loadtest/                   # 压力测试（k6脚本）
 └── docs/                       # 文档
 ```
 

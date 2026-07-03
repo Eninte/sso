@@ -10,14 +10,30 @@
 2. **服务运行中**：SSO服务必须在 `localhost:9090` 运行
 3. **数据库可访问**：PostgreSQL测试数据库可连接
 4. **Redis可访问**：Redis缓存服务可连接
-5. **限流已禁用**：服务必须以 `RATE_LIMIT_REQUESTS=0` 启动
+5. **限流已禁用**：服务必须以正确方式启动（见下方说明）
 
 ## 快速开始
 
-### 方法1：完整测试流程（推荐）
+### 方法1：使用 E2E 启动脚本（推荐）
 
 ```bash
-# 1. 启动服务（禁用限流）
+# 1. 启动服务（自动处理所有限流层）
+./scripts/run_e2e_no_ratelimit.sh
+
+# 2. 在另一个终端准备测试数据
+make test-e2e-prepare
+
+# 3. 运行E2E测试
+make test-e2e
+
+# 4. 清理（禁用触发器）
+make test-e2e-cleanup
+```
+
+### 方法2：手动启动
+
+```bash
+# 1. 启动服务（禁用全局HTTP限流 + 敏感端点限流）
 RATE_LIMIT_REQUESTS=0 make run &
 
 # 2. 准备测试数据（启用自动验证触发器）
@@ -100,15 +116,30 @@ RATE_LIMIT_REQUESTS=0
 
 ### 服务启动
 
-测试前必须启动服务并禁用限流：
+测试前必须启动服务并禁用限流。推荐使用 `run_e2e_no_ratelimit.sh` 脚本，它会自动处理所有限流层：
 
 ```bash
-# 方法1：使用环境变量
-RATE_LIMIT_REQUESTS=0 make run
+# 推荐：使用E2E启动脚本（自动处理所有限流层）
+./scripts/run_e2e_no_ratelimit.sh
 
-# 方法2：加载.env.test并覆盖限流配置
-set -a && source .env.test && export RATE_LIMIT_REQUESTS=0 && set +a && go run cmd/server/main.go
+# 或手动启动（仅禁用全局HTTP限流和敏感端点限流）
+RATE_LIMIT_REQUESTS=0 make run
 ```
+
+#### 限流机制说明
+
+SSO服务有4层独立限流，`RATE_LIMIT_REQUESTS=0` 仅禁用前两层：
+
+| 限流层 | 作用域 | `RATE_LIMIT_REQUESTS=0` 能禁用？ |
+|--------|--------|-------------------------------|
+| 全局HTTP中间件 | 所有路由 | ✅ 是 |
+| 敏感端点中间件 | register/login/forgot/reset | ✅ 是（已修复） |
+| 业务层登录限流 | login, per IP（硬编码20/10min） | ❌ 需要脚本处理 |
+| 业务层邮件限流 | email, per address（硬编码5/hour） | ❌ 需要脚本处理 |
+
+`run_e2e_no_ratelimit.sh` 脚本会：
+- 用大 `RATE_LIMIT_REQUESTS` 值启动服务（等效无限）
+- 后台守护进程定期清理 Redis 中的 `login:ratelimit:*` key
 
 ## 测试结果
 
@@ -158,7 +189,10 @@ RATE_LIMIT_REQUESTS=0 make run
 
 ### Q: 测试失败提示"429 Too Many Requests"
 
-**A:** 限流未禁用。必须以 `RATE_LIMIT_REQUESTS=0` 启动服务。
+**A:** 可能是业务层登录限流触发（硬编码20次/10分钟）。推荐使用 `run_e2e_no_ratelimit.sh` 脚本启动服务，它会自动清理 Redis 中的限流计数器：
+```bash
+./scripts/run_e2e_no_ratelimit.sh
+```
 
 ### Q: 测试失败提示"401 Unauthorized"
 

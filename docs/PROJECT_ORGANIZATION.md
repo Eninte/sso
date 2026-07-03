@@ -38,19 +38,41 @@
 │   ├── review/         # 代码审查
 │   └── superpowers/    # 高级功能文档
 ├── internal/            # 内部代码（不可导入）
+│   ├── app/            # 组合根（依赖装配、路由注册、服务器管理）
+│   ├── audit/          # 审计子系统（合规检查、漏洞扫描、报告生成）
+│   ├── cache/          # 缓存层（Redis实现、内存回退、LRU淘汰）
+│   ├── captcha/        # 验证码服务
+│   ├── common/         # 公共工具（语言检测、随机数生成）
+│   ├── config/         # 配置管理
+│   ├── crypto/         # 加密工具（JWT、密码哈希、密钥加载）
+│   ├── errors/         # 统一错误定义
 │   ├── handler/        # HTTP 处理器
-│   ├── service/        # 业务逻辑
-│   ├── store/          # 数据访问层
+│   ├── logging/        # 日志工具（结构化日志、敏感信息脱敏）
+│   ├── metrics/        # Prometheus 指标收集
+│   ├── middleware/      # HTTP 中间件（认证、限流、CORS、安全头）
 │   ├── model/          # 数据模型
-│   ├── middleware/     # 中间件
-│   ├── errors/         # 错误定义
-│   └── util/           # 工具模块
+│   ├── service/        # 业务逻辑层
+│   ├── store/          # 数据访问层
+│   │   ├── postgres/   # PostgreSQL 实现
+│   │   ├── memory/     # 内存存储实现（开发/测试）
+│   │   └── mock/       # Mock 实现（单元测试）
+│   ├── util/           # 工具模块
+│   │   ├── auditutil/  # 审计日志工具
+│   │   ├── handlerutil/# Handler 响应工具
+│   │   ├── serviceutil/# Service 错误处理工具
+│   │   ├── retryutil/  # 重试工具（指数退避）
+│   │   └── testutil/   # 测试辅助工具（DB/Redis 连接）
+│   └── validator/      # 输入验证
 ├── keys/                # JWT 密钥（.pem 文件在 .gitignore）
-├── loadtest/            # 压力测试
+├── loadtest/            # 压力测试（k6 脚本）
 ├── migrations/          # 数据库迁移
 ├── scripts/             # 工具脚本
-├── sdks/                # SDK 客户端
+│   ├── prepare-e2e-test.sh     # E2E 测试数据准备
+│   ├── cleanup-e2e-test.sh     # E2E 测试数据清理
+│   └── run_e2e_no_ratelimit.sh # E2E 服务启动（处理限流）
+├── sdks/                # SDK 客户端（Go, JS, Python, Rust）
 ├── test/                # 测试文件
+│   └── e2e/            # E2E 端到端测试（//go:build e2e）
 ├── testdata/            # 测试数据
 ├── .env.example         # 环境配置模板
 ├── .gitignore           # Git 忽略规则

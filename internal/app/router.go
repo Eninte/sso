@@ -121,16 +121,25 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 	api := router.PathPrefix("/api/v1").Subrouter()
 
 	// 创建敏感端点独立限流器（更严格的限额：全局限额的1/10，窗口1分钟）
+	// RATE_LIMIT_REQUESTS <= 0 时返回 nil，表示不限流
 	sensitiveLimiter := newEndpointRateLimiter(svc.Cache, cfg.RateLimitRequests/10, 1*time.Minute, "ratelimit:sensitive")
 
 	// 公开端点 (不需要认证)
-	// 敏感端点使用独立的更严格限流器
-	sensitive := api.PathPrefix("").Subrouter()
-	sensitive.Use(sensitiveLimiter.Middleware)
-	sensitive.HandleFunc("/register", registerHandler.Handle).Methods("POST")
-	sensitive.HandleFunc("/login", loginHandler.Handle).Methods("POST")
-	sensitive.HandleFunc("/forgot-password", userHandler.HandleForgotPassword).Methods("POST")
-	sensitive.HandleFunc("/reset-password", userHandler.HandleResetPassword).Methods("POST")
+	if sensitiveLimiter != nil {
+		// 敏感端点使用独立的更严格限流器
+		sensitive := api.PathPrefix("").Subrouter()
+		sensitive.Use(sensitiveLimiter.Middleware)
+		sensitive.HandleFunc("/register", registerHandler.Handle).Methods("POST")
+		sensitive.HandleFunc("/login", loginHandler.Handle).Methods("POST")
+		sensitive.HandleFunc("/forgot-password", userHandler.HandleForgotPassword).Methods("POST")
+		sensitive.HandleFunc("/reset-password", userHandler.HandleResetPassword).Methods("POST")
+	} else {
+		// 无限流时直接注册到 api 路由器
+		api.HandleFunc("/register", registerHandler.Handle).Methods("POST")
+		api.HandleFunc("/login", loginHandler.Handle).Methods("POST")
+		api.HandleFunc("/forgot-password", userHandler.HandleForgotPassword).Methods("POST")
+		api.HandleFunc("/reset-password", userHandler.HandleResetPassword).Methods("POST")
+	}
 
 	// 一般公开端点（使用全局限流）
 	api.HandleFunc("/captcha", captchaHandler.Handle).Methods("GET")
@@ -200,9 +209,10 @@ func probeDispatcher(probe, main http.Handler) http.Handler {
 
 // newEndpointRateLimiter 创建端点级限流器
 // Redis可用时使用分布式限流器，否则使用本地限流器
+// limit <= 0 时表示不限流，返回 nil
 func newEndpointRateLimiter(cacheSvc cache.Cache, limit int, window time.Duration, keyPrefix string) middleware.RateLimitMiddleware {
 	if limit <= 0 {
-		limit = 10
+		return nil
 	}
 	if rc, ok := cacheSvc.(*cache.RedisCache); ok {
 		return middleware.NewDistributedRateLimiter(rc.Client(), limit, window, keyPrefix)
