@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/example/sso/internal/cache"
 	"github.com/example/sso/internal/crypto"
 	"github.com/example/sso/internal/handler"
 	"github.com/example/sso/internal/middleware"
@@ -347,6 +348,52 @@ func TestUserInfoHandler_Handle(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "user-123", resp["sub"])
 		assert.Equal(t, "user@example.com", resp["email"])
+	})
+
+	t.Run("缓存命中-直接返回缓存数据", func(t *testing.T) {
+		c := cache.NewMemoryCache()
+		hWithCache := handler.NewUserInfoHandler(store, c)
+
+		// 预热缓存
+		userID := "cached-user"
+		cacheKey := "userinfo:" + userID
+		cachedUser := model.User{ID: userID, Email: "cached@example.com", EmailVerified: true}
+		err := c.Set(context.Background(), cacheKey, cachedUser, 5*time.Minute)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest("GET", "/api/v1/userinfo", nil)
+		ctx := context.WithValue(req.Context(), middleware.UserIDKey, userID)
+		ctx = context.WithValue(ctx, middleware.UserEmailKey, "cached@example.com")
+		ctx = context.WithValue(ctx, middleware.UserScopesKey, []string{"openid"})
+		w := httptest.NewRecorder()
+
+		hWithCache.Handle(w, req.WithContext(ctx))
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]interface{}
+		err = json.Unmarshal(w.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		assert.Equal(t, userID, resp["sub"])
+		assert.Equal(t, "cached@example.com", resp["email"])
+		assert.Equal(t, true, resp["email_verified"])
+	})
+
+	t.Run("DB查询失败-回退到上下文数据", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v1/userinfo", nil)
+		ctx := context.WithValue(req.Context(), middleware.UserIDKey, "nonexistent-user")
+		ctx = context.WithValue(ctx, middleware.UserEmailKey, "fallback@example.com")
+		ctx = context.WithValue(ctx, middleware.UserScopesKey, []string{"openid"})
+		w := httptest.NewRecorder()
+
+		h.Handle(w, req.WithContext(ctx))
+
+		// DB查询失败时回退返回200（使用上下文中的数据）
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		assert.Equal(t, "nonexistent-user", resp["sub"])
+		assert.Equal(t, "fallback@example.com", resp["email"])
 	})
 }
 

@@ -128,6 +128,50 @@ type MFARecoveryCodeStore interface {
 }
 
 // ============================================================================
+// QualityMetricsStore 质量指标存储接口
+// ============================================================================
+
+type QualityMetricsStore interface {
+	StoreMetrics(ctx context.Context, m *QualityMetrics) error
+	GetLatestMetrics(ctx context.Context) (*QualityMetrics, error)
+	GetMetricsRange(ctx context.Context, from, to time.Time) ([]QualityMetrics, error)
+	GetWeeklyComparison(ctx context.Context) (*WeeklyComparison, error)
+}
+
+// QualityMetrics 质量指标数据
+type QualityMetrics struct {
+	ID                string                 `json:"id"`
+	RecordedAt        time.Time              `json:"recorded_at"`
+	GitCommitSHA      string                 `json:"git_commit_sha,omitempty"`
+	CoveragePercent   float64                `json:"coverage_percent"`
+	TestPassRate      float64                `json:"test_pass_rate"`
+	TotalTests        int                    `json:"total_tests"`
+	PassedTests       int                    `json:"passed_tests"`
+	FailedTests       int                    `json:"failed_tests"`
+	LintViolations    int                    `json:"lint_violations"`
+	GosecViolations   int                    `json:"gosec_violations"`
+	GocycloViolations int                    `json:"gocyclo_violations"`
+	QualityScore      float64                `json:"quality_score"`
+	Metadata          map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt         time.Time              `json:"created_at"`
+}
+
+// WeeklyComparison 周对比数据
+type WeeklyComparison struct {
+	Current  *QualityMetrics `json:"current"`
+	Previous *QualityMetrics `json:"previous,omitempty"`
+	Delta    *QualityDelta   `json:"delta,omitempty"`
+}
+
+// QualityDelta 质量指标变化
+type QualityDelta struct {
+	CoverageDelta float64 `json:"coverage_delta"`
+	PassRateDelta float64 `json:"pass_rate_delta"`
+	ScoreDelta    float64 `json:"score_delta"`
+	LintDelta     int     `json:"lint_delta"`
+}
+
+// ============================================================================
 // 辅助类型
 // ============================================================================
 

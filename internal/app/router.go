@@ -178,6 +178,10 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 	admin.HandleFunc("/users/{id}", adminHandler.HandleDeleteUser).Methods("DELETE")
 	admin.HandleFunc("/audit-logs", adminHandler.HandleAuditLogs).Methods("GET")
 
+	// 质量仪表盘API端点
+	admin.HandleFunc("/quality/api/metrics", svc.Dashboard.HandleMetricsAPI).Methods("GET")
+	admin.HandleFunc("/quality/api/report/weekly", svc.Dashboard.HandleWeeklyReportAPI).Methods("GET")
+
 	// ==== 探针端点（独立路由器，绕过限流和metrics中间件） ====
 	// k8s liveness/readiness 探针频繁请求，若经过限流/metrics会干扰业务指标
 	// 并可能在限流收紧时导致探针失败、Pod被误驱逐

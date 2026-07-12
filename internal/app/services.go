@@ -14,27 +14,29 @@ import (
 	"github.com/example/sso/internal/config"
 	"github.com/example/sso/internal/crypto"
 	"github.com/example/sso/internal/metrics"
+	"github.com/example/sso/internal/quality/dashboard"
 	"github.com/example/sso/internal/service"
 	"github.com/example/sso/internal/store/postgres"
 )
 
 // Services 包含所有服务实例
 type Services struct {
-	Store    *postgres.Store
-	Cache    cache.Cache
-	Password *crypto.PasswordService
-	JWT      *crypto.JWTService
-	Email    *service.EmailService
-	Metrics  *metrics.Service
-	Token    *service.TokenService
-	User     *service.UserService
-	Auth     *service.AuthService
-	OAuth    *service.OAuthService
-	Audit    *service.AuditService
-	MFA      *service.MFAService
-	Admin    *service.AdminService
-	Social   *service.SocialLoginService
-	Captcha  *captcha.Service
+	Store     *postgres.Store
+	Cache     cache.Cache
+	Password  *crypto.PasswordService
+	JWT       *crypto.JWTService
+	Email     *service.EmailService
+	Metrics   *metrics.Service
+	Token     *service.TokenService
+	User      *service.UserService
+	Auth      *service.AuthService
+	OAuth     *service.OAuthService
+	Audit     *service.AuditService
+	MFA       *service.MFAService
+	Admin     *service.AdminService
+	Social    *service.SocialLoginService
+	Captcha   *captcha.Service
+	Dashboard *dashboard.Server
 }
 
 // initServices 初始化所有业务服务
@@ -134,18 +136,31 @@ func initServices(cfg *config.Config, version, buildTime string) (*Services, *sq
 	tokenSvc := service.NewTokenService(jwtSvc, store)
 
 	// ==== 初始化业务服务（带缓存） ====
-	userSvc := service.NewUserService(store, passwordSvc, emailSvc, cfg.BaseURL()).
-		WithEmailRateLimit(service.NewEmailRateLimiter(cacheSvc))
+	userSvc := service.NewUserService(store, passwordSvc, emailSvc, cfg.BaseURL())
+	// 仅在限流启用时配置邮件限流器（RATE_LIMIT_REQUESTS <= 0 表示禁用所有限流）
+	if cfg.RateLimitRequests > 0 {
+		userSvc.WithEmailRateLimit(service.NewEmailRateLimiter(cacheSvc))
+	}
+	// 仅在限流启用时配置登录限流器
+	var loginRateLimitOpt service.AuthServiceOption
+	if cfg.RateLimitRequests > 0 {
+		loginRateLimitOpt = service.WithLoginRateLimit(service.NewLoginRateLimiter(cacheSvc))
+	}
+	authSvcOpts := []service.AuthServiceOption{
+		service.WithCache(cacheSvc),
+		service.WithMetrics(metricsSvc),
+		service.WithUserService(userSvc),
+	}
+	if loginRateLimitOpt != nil {
+		authSvcOpts = append(authSvcOpts, loginRateLimitOpt)
+	}
 	authSvc := service.NewAuthServiceWithOptions(
 		store,
 		passwordSvc,
 		jwtSvc,
 		cfg.MaxLoginAttempts,
 		cfg.LockoutDuration,
-		service.WithCache(cacheSvc),
-		service.WithMetrics(metricsSvc),
-		service.WithUserService(userSvc),
-		service.WithLoginRateLimit(service.NewLoginRateLimiter(cacheSvc)),
+		authSvcOpts...,
 	)
 	oauthSvc := service.NewOAuthServiceWithOptions(store, tokenSvc, service.WithOAuthCache(cacheSvc), service.WithOAuthPassword(passwordSvc))
 	auditSvc := service.NewAuditService(store)
@@ -173,23 +188,27 @@ func initServices(cfg *config.Config, version, buildTime string) (*Services, *sq
 		slog.Info("验证码服务已禁用")
 	}
 
+	// ==== 初始化质量仪表盘 ====
+	dashboardSvc := dashboard.NewServer(store, slog.Default())
+
 	// ==== 返回所有服务 ====
 	return &Services{
-		Store:    store,
-		Cache:    cacheSvc,
-		Password: passwordSvc,
-		JWT:      jwtSvc,
-		Email:    emailSvc,
-		Metrics:  metricsSvc,
-		Token:    tokenSvc,
-		User:     userSvc,
-		Auth:     authSvc,
-		OAuth:    oauthSvc,
-		Audit:    auditSvc,
-		MFA:      mfaSvc,
-		Admin:    adminSvc,
-		Social:   socialSvc,
-		Captcha:  captchaSvc,
+		Store:     store,
+		Cache:     cacheSvc,
+		Password:  passwordSvc,
+		JWT:       jwtSvc,
+		Email:     emailSvc,
+		Metrics:   metricsSvc,
+		Token:     tokenSvc,
+		User:      userSvc,
+		Auth:      authSvc,
+		OAuth:     oauthSvc,
+		Audit:     auditSvc,
+		MFA:       mfaSvc,
+		Admin:     adminSvc,
+		Social:    socialSvc,
+		Captcha:   captchaSvc,
+		Dashboard: dashboardSvc,
 	}, db, nil
 }
 

@@ -196,7 +196,8 @@ func findMatchingTimeStep(secret, code string) (uint64, bool) {
 		if i < 0 {
 			// 安全处理负偏移，防止整数下溢
 			offset := uint64(-i)
-			if baseTimeStep < int64(offset) { // #nosec G115 -- 安全的比较，baseTimeStep已验证为非负
+			// #nosec G115 -- 安全的比较，baseTimeStep已验证为非负
+			if baseTimeStep < int64(offset) {
 				// 会发生下溢，跳过该时间窗口
 				continue
 			}
