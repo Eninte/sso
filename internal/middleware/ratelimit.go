@@ -107,6 +107,7 @@ type RateLimiter struct {
 	limit      int           // 每个时间窗口的请求数
 	window     time.Duration // 时间窗口
 	done       chan struct{} // 停止cleanup goroutine
+	stopOnce   sync.Once     // 确保 Stop 只执行一次
 	metricFunc func()        // 限流触发时的指标回调
 }
 
@@ -159,9 +160,11 @@ func (rl *RateLimiter) WithMetrics(metricFunc func()) *RateLimiter {
 }
 
 // Stop 停止限流器的后台清理goroutine
-// 应在服务关闭时调用
+// 应在服务关闭时调用，可安全地多次调用
 func (rl *RateLimiter) Stop() {
-	close(rl.done)
+	rl.stopOnce.Do(func() {
+		close(rl.done)
+	})
 }
 
 // ============================================================================

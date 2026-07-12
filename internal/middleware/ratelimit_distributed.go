@@ -4,6 +4,8 @@ package middleware
 
 import (
 	"context"
+	"fmt"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"time"
@@ -14,6 +16,34 @@ import (
 // ============================================================================
 // DistributedRateLimiter 分布式限流器
 // ============================================================================
+
+// rateLimitScript 使用Lua脚本实现原子的滑动窗口限流
+// 返回 {allowed(0/1), remaining}
+var rateLimitScript = redis.NewScript(`
+local key = KEYS[1]
+local now = ARGV[1]
+local window_start = ARGV[2]
+local limit = tonumber(ARGV[3])
+local window_ttl_ms = tonumber(ARGV[4])
+local member = ARGV[5]
+
+-- 移除窗口外的记录
+redis.call('ZREMRANGEBYSCORE', key, '0', window_start)
+
+-- 获取当前窗口内的请求数
+local count = redis.call('ZCARD', key)
+
+-- 检查是否超过限制
+if count >= limit then
+    return {0, 0}
+end
+
+-- 添加当前请求记录
+redis.call('ZADD', key, now, member)
+redis.call('PEXPIRE', key, window_ttl_ms)
+
+return {1, limit - count - 1}
+`)
 
 // DistributedRateLimiter 基于Redis的分布式限流器
 // 使用滑动窗口算法实现精确限流
@@ -69,7 +99,7 @@ func (drl *DistributedRateLimiter) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// Allow 检查是否允许请求
+// Allow 检查是否允许请求（使用Lua脚本实现原子操作）
 // 返回: allowed, remaining, resetTime, error
 func (drl *DistributedRateLimiter) Allow(ctx context.Context, clientIP string) (bool, int, time.Time, error) {
 	// limit <= 0 表示禁用限流
@@ -81,47 +111,39 @@ func (drl *DistributedRateLimiter) Allow(ctx context.Context, clientIP string) (
 	key := drl.buildKey(clientIP)
 	windowStart := now.Add(-drl.window)
 
-	// 使用Redis事务实现原子操作
-	pipe := drl.redisClient.TxPipeline()
+	// 生成唯一 member，避免同纳秒请求的 ZAdd 覆盖
+	member := fmt.Sprintf("%d:%d", now.UnixNano(), rand.Int63())
 
-	// 移除窗口外的记录
-	pipe.ZRemRangeByScore(ctx, key, "0", strconv.FormatInt(windowStart.UnixNano(), 10))
-
-	// 获取当前窗口内的请求数
-	pipe.ZCard(ctx, key)
-
-	// 执行管道命令
-	results, err := pipe.Exec(ctx)
-	if err != nil && err != redis.Nil {
-		return true, 0, time.Time{}, err
+	// 使用 Lua 脚本原子执行：清理过期记录 → 检查计数 → 添加记录
+	// TTL 使用毫秒（PEXPIRE），支持亚秒级窗口
+	ttlMs := int64(drl.window*2) / int64(time.Millisecond)
+	if ttlMs < 1 {
+		ttlMs = 1
 	}
-
-	// 获取当前请求数
-	cardResult := results[1].(*redis.IntCmd)
-	currentCount := int(cardResult.Val())
-
-	// 检查是否超过限制
-	if currentCount >= drl.limit {
-		resetTime := now.Add(drl.window)
-		return false, 0, resetTime, nil
-	}
-
-	// 添加当前请求记录
-	pipe = drl.redisClient.TxPipeline()
-	pipe.ZAdd(ctx, key, redis.Z{
-		Score:  float64(now.UnixNano()),
-		Member: strconv.FormatInt(now.UnixNano(), 10),
-	})
-	pipe.Expire(ctx, key, drl.window*2)
-	_, err = pipe.Exec(ctx)
+	result, err := rateLimitScript.Run(ctx, drl.redisClient,
+		[]string{key},
+		strconv.FormatInt(now.UnixNano(), 10),
+		strconv.FormatInt(windowStart.UnixNano(), 10),
+		drl.limit,
+		ttlMs,
+		member,
+	).Result()
 	if err != nil {
+		// Redis错误时fail-open，允许请求通过
 		return true, 0, time.Time{}, err
 	}
 
-	remaining := drl.limit - currentCount - 1
+	// 解析 Lua 返回的 {allowed, remaining}
+	vals, ok := result.([]interface{})
+	if !ok || len(vals) < 2 {
+		return true, 0, time.Time{}, nil
+	}
+
+	allowed, _ := vals[0].(int64)
+	remaining, _ := vals[1].(int64)
 	resetTime := now.Add(drl.window)
 
-	return true, remaining, resetTime, nil
+	return allowed == 1, int(remaining), resetTime, nil
 }
 
 // buildKey 构建Redis键

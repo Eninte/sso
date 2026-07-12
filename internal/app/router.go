@@ -121,8 +121,12 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 	api := router.PathPrefix("/api/v1").Subrouter()
 
 	// 创建敏感端点独立限流器（更严格的限额：全局限额的1/10，窗口1分钟）
-	// RATE_LIMIT_REQUESTS <= 0 时返回 nil，表示不限流
-	sensitiveLimiter := newEndpointRateLimiter(svc.Cache, cfg.RateLimitRequests/10, 1*time.Minute, "ratelimit:sensitive")
+	// 确保至少为1，防止全局限流配置过低时敏感端点完全无限流
+	sensitiveLimit := cfg.RateLimitRequests / 10
+	if sensitiveLimit < 1 && cfg.RateLimitRequests > 0 {
+		sensitiveLimit = 1
+	}
+	sensitiveLimiter := newEndpointRateLimiter(svc.Cache, sensitiveLimit, 1*time.Minute, "ratelimit:sensitive")
 
 	// 公开端点 (不需要认证)
 	if sensitiveLimiter != nil {

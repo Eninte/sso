@@ -18,6 +18,7 @@ import (
 	apperrors "github.com/example/sso/internal/errors"
 	"github.com/example/sso/internal/model"
 	"github.com/example/sso/internal/store"
+	"github.com/example/sso/internal/util/auditutil"
 	"github.com/example/sso/internal/util/serviceutil"
 )
 
@@ -69,11 +70,18 @@ type SocialLoginService struct {
 	store      store.Store
 	jwtSvc     *crypto.JWTService
 	tokenSvc   *TokenService
-	baseURL    string // 服务基础URL，用于构建固定的回调地址
+	auditSvc   *AuditService // 审计日志服务（可选）
+	baseURL    string        // 服务基础URL，用于构建固定的回调地址
 	providers  map[string]*OAuthProvider
 	httpClient HTTPClient
 	stateCache sync.Map      // 用于存储OAuth state，防止CSRF攻击
 	stopChan   chan struct{} // 用于停止清理goroutine
+	stopOnce   sync.Once     // 确保 Close 只执行一次
+}
+
+// SetAuditService 设置审计日志服务
+func (s *SocialLoginService) SetAuditService(auditSvc *AuditService) {
+	s.auditSvc = auditSvc
 }
 
 func NewSocialLoginService(
@@ -182,7 +190,9 @@ func (s *SocialLoginService) cleanupExpiredStates() {
 
 // Close 关闭服务，停止后台清理goroutine
 func (s *SocialLoginService) Close() {
-	close(s.stopChan)
+	s.stopOnce.Do(func() {
+		close(s.stopChan)
+	})
 }
 
 // ============================================================================
@@ -277,7 +287,21 @@ func (s *SocialLoginService) HandleCallback(ctx context.Context, provider, code,
 		return nil, serviceutil.WrapServiceError("查找或创建用户", err)
 	}
 
-	return s.generateTokenPair(ctx, user)
+	// Token 生成成功后记录社交登录审计日志
+	// 避免生成失败时审计中留下假阳性的登录成功事件
+	resp, err := s.generateTokenPair(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.auditSvc != nil {
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventUserLogin), user.ID, map[string]interface{}{
+			"provider": provider,
+			"email":    user.Email,
+		})
+	}
+
+	return resp, nil
 }
 
 // ============================================================================
@@ -386,6 +410,14 @@ func (s *SocialLoginService) findOrCreateUser(ctx context.Context, provider stri
 
 		if err := s.store.Create(ctx, user); err != nil {
 			return nil, serviceutil.WrapServiceError("创建用户", err)
+		}
+
+		// 记录新用户注册审计日志
+		if s.auditSvc != nil {
+			auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventUserRegister), user.ID, map[string]interface{}{
+				"provider": provider,
+				"email":    user.Email,
+			})
 		}
 	}
 

@@ -12,8 +12,6 @@ import (
 )
 
 func TestMFAService_GenerateRecoveryCodes(t *testing.T) {
-	t.Cleanup(mock.ClearMFARecoveryCodes)
-
 	t.Run("默认生成8个恢复码", func(t *testing.T) {
 		m := mock.New()
 		svc := NewMFAService(m)
@@ -60,13 +58,11 @@ func TestMFAService_GenerateRecoveryCodes(t *testing.T) {
 }
 
 func TestMFAService_VerifyRecoveryCode(t *testing.T) {
-	t.Cleanup(mock.ClearMFARecoveryCodes)
-
 	hmacKey := []byte("test-hmac-key-32-bytes-long-xxxx")
 
 	t.Run("验证成功", func(t *testing.T) {
 		m := mock.New()
-		mock.SetMockHMACKey(hmacKey)
+		m.SetMockHMACKey(hmacKey)
 		svc := NewMFAService(m)
 		svc.SetHMACKey(hmacKey)
 
@@ -80,7 +76,7 @@ func TestMFAService_VerifyRecoveryCode(t *testing.T) {
 
 	t.Run("无效码", func(t *testing.T) {
 		m := mock.New()
-		mock.SetMockHMACKey(hmacKey)
+		m.SetMockHMACKey(hmacKey)
 		svc := NewMFAService(m)
 		svc.SetHMACKey(hmacKey)
 
@@ -94,7 +90,7 @@ func TestMFAService_VerifyRecoveryCode(t *testing.T) {
 
 	t.Run("已使用的码", func(t *testing.T) {
 		m := mock.New()
-		mock.SetMockHMACKey(hmacKey)
+		m.SetMockHMACKey(hmacKey)
 		svc := NewMFAService(m)
 		svc.SetHMACKey(hmacKey)
 
@@ -111,7 +107,7 @@ func TestMFAService_VerifyRecoveryCode(t *testing.T) {
 
 	t.Run("限流触发", func(t *testing.T) {
 		m := mock.New()
-		mock.SetMockHMACKey(hmacKey)
+		m.SetMockHMACKey(hmacKey)
 		svc := NewMFAService(m)
 		svc.SetHMACKey(hmacKey)
 
@@ -126,7 +122,7 @@ func TestMFAService_VerifyRecoveryCode(t *testing.T) {
 
 	t.Run("成功后清除尝试记录", func(t *testing.T) {
 		m := mock.New()
-		mock.SetMockHMACKey(hmacKey)
+		m.SetMockHMACKey(hmacKey)
 		svc := NewMFAService(m)
 		svc.SetHMACKey(hmacKey)
 
@@ -146,14 +142,11 @@ func TestMFAService_VerifyRecoveryCode(t *testing.T) {
 }
 
 func TestMFAService_GetRecoveryCodeStatus(t *testing.T) {
-	mock.ClearMFARecoveryCodes()
-	t.Cleanup(mock.ClearMFARecoveryCodes)
-
 	hmacKey := []byte("test-hmac-key-32-bytes-long-xxxx")
 
 	t.Run("返回剩余数量", func(t *testing.T) {
 		m := mock.New()
-		mock.SetMockHMACKey(hmacKey)
+		m.SetMockHMACKey(hmacKey)
 		svc := NewMFAService(m)
 		svc.SetHMACKey(hmacKey)
 
@@ -174,7 +167,7 @@ func TestMFAService_GetRecoveryCodeStatus(t *testing.T) {
 
 	t.Run("无恢复码返回0", func(t *testing.T) {
 		m := mock.New()
-		mock.SetMockHMACKey(hmacKey)
+		m.SetMockHMACKey(hmacKey)
 		svc := NewMFAService(m)
 		svc.SetHMACKey(hmacKey)
 
@@ -185,8 +178,6 @@ func TestMFAService_GetRecoveryCodeStatus(t *testing.T) {
 }
 
 func TestMFAService_checkRecoveryRateLimit(t *testing.T) {
-	t.Cleanup(mock.ClearMFARecoveryCodes)
-
 	t.Run("新用户未锁定", func(t *testing.T) {
 		m := mock.New()
 		svc := NewMFAService(m)

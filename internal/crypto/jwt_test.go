@@ -544,3 +544,44 @@ func TestJWTService_LoadKeysFromStore(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+// ============================================================================
+// Issuer 校验测试
+// ============================================================================
+
+func TestJWTService_ValidateAccessToken_RejectsWrongIssuer(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	// 用 issuer-A 生成 token
+	svcA := crypto.NewJWTService(
+		privateKey,
+		&privateKey.PublicKey,
+		"issuer-A",
+		15*time.Minute,
+		7*24*time.Hour,
+	)
+	token, err := svcA.GenerateAccessToken("user-123", "test@example.com", "user", []string{"openid"})
+	require.NoError(t, err)
+
+	// 用 issuer-B 验证，应被拒绝（同一密钥但 issuer 不同）
+	svcB := crypto.NewJWTService(
+		privateKey,
+		&privateKey.PublicKey,
+		"issuer-B",
+		15*time.Minute,
+		7*24*time.Hour,
+	)
+	_, err = svcB.ValidateAccessToken(token)
+	assert.ErrorIs(t, err, crypto.ErrInvalidToken)
+}
+
+func TestJWTService_ValidateAccessToken_AcceptsCorrectIssuer(t *testing.T) {
+	svc := createTestJWTService(t) // issuer = "test-issuer"
+	token, err := svc.GenerateAccessToken("user-123", "test@example.com", "user", []string{"openid"})
+	require.NoError(t, err)
+
+	claims, err := svc.ValidateAccessToken(token)
+	require.NoError(t, err)
+	assert.Equal(t, "test-issuer", claims.RegisteredClaims.Issuer)
+}

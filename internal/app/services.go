@@ -158,6 +158,7 @@ func initServices(cfg *config.Config, version, buildTime string) (*Services, *sq
 
 	// ==== 初始化第三方登录服务 ====
 	socialSvc := service.NewSocialLoginService(store, jwtSvc, cfg.BaseURL(), cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GitHubClientID, cfg.GitHubClientSecret)
+	socialSvc.SetAuditService(auditSvc)
 	if cfg.GoogleClientID != "" && cfg.GoogleClientSecret != "" {
 		slog.Info("Google第三方登录已启用")
 	}

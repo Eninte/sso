@@ -11,6 +11,7 @@ import (
 	"github.com/example/sso/internal/model"
 	"github.com/example/sso/internal/store"
 	"github.com/example/sso/internal/util/auditutil"
+	"github.com/example/sso/internal/util/safego"
 	"github.com/example/sso/internal/util/serviceutil"
 	"github.com/example/sso/internal/validator"
 )
@@ -116,16 +117,16 @@ func (s *AuthService) handleLoginSuccess(ctx context.Context, user *model.User, 
 	// 使用 context.WithoutCancel 避免请求返回后 ctx 被取消导致 DB 调用失败
 	bgCtx := context.WithoutCancel(ctx)
 	wg.Add(1)
-	go func() {
+	safego.Go(logging.WithContext(bgCtx).With("component", "auth"), "重置登录尝试次数", func() {
 		defer wg.Done()
 		if err := s.store.ResetLoginAttempts(bgCtx, user.ID); err != nil {
 			logging.WithContext(bgCtx).Warn("重置登录尝试次数失败", "error", err, "user_id", user.ID)
 		}
-	}()
+	})
 
 	// 异步记录审计日志
 	wg.Add(1)
-	go func() {
+	safego.Go(logging.WithContext(bgCtx).With("component", "auth"), "登录审计日志", func() {
 		defer wg.Done()
 		if auditCtx != nil {
 			auditutil.SafeAuditLog(bgCtx, s.auditSvc, string(model.EventUserLogin), user.ID, map[string]interface{}{
@@ -134,7 +135,7 @@ func (s *AuthService) handleLoginSuccess(ctx context.Context, user *model.User, 
 				"user_agent": auditCtx.UserAgent,
 			})
 		}
-	}()
+	})
 
 	// 记录登录成功指标（轻量操作，无需异步）
 	s.incrementMetric("auth_login_total")

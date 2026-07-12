@@ -1,340 +1,472 @@
-# Git 未提交更改审查报告
+# Git 未提交更改分析与审查报告
 
-**审查时间:** 2026-04-20  
-**审查范围:** main分支所有暂存更改  
-**审查类型:** 代码质量与安全审查
-
----
-
-## 📋 变更概览
-
-| 类别 | 文件数 | 新增行数 | 修改行数 |
-|------|--------|---------|---------|
-| 核心代码修改 | 3 | 131 | 5 |
-| 新增Handler层 | 3 | 628 | 0 |
-| 新增Service层 | 1 | 215 | 0 |
-| 新增HTML模板 | 2 | 655 | 0 |
-| 新增测试代码 | 4 | 1596 | 0 |
-| 新增文档 | 6 | 1573 | 0 |
-| **合计** | **19** | **4798** | **5** |
+**审查日期**: 2026-04-21
+**审查范围**: 暂存区 (staged) 未提交更改
+**修复日期**: 2026-04-21
+**修复状态**: ✅ 所有高/中优先级问题已修复
 
 ---
 
-## 🎯 功能概述
+## 🎯 修复状态摘要
 
-本次变更为SSO服务新增了两个核心功能：
+| 优先级 | 问题总数 | 已修复 | 未修复 | 修复率 |
+|--------|---------|--------|--------|--------|
+| 🔴 高优先级 | 1 | 1 | 0 | 100% |
+| 🟡 中优先级 | 3 | 2 | 1 | 67% |
+| 🟢 低优先级 | 3 | 0 | 3 | 0% |
+| **总计** | **7** | **3** | **4** | **43%** |
 
-1. **配置向导 (Setup Wizard)** — 当 `config.Load()` 失败时（如首次启动缺少 `.env` 文件），启动一个轻量HTTP服务，提供Web界面引导用户完成数据库、Redis、JWT密钥等配置，并写入 `.env` 文件。
+### ✅ 已修复的问题
 
-2. **初始化面板 (Init Panel)** — 服务正常运行后，提供系统状态查看、管理员创建、OAuth客户端创建的Web界面，仅允许本地访问。
+1. **🔴 高优先级**: `calculateJitter` panic 风险 → 添加边界检查 `if maxJitterInt < 1`
+2. **🟡 中优先级**: 错误消息使用中文 → 统一改为英文
+3. **🟡 中优先级**: 邮件渲染方法代码重复 → 提取 `renderEmailTemplate` 通用方法
 
----
+### ⚠️ 未修复的问题（建议后续处理）
 
-## 🔍 逐文件详细审查
+4. **🟡 中优先级**: 邮件模板文件重复（3,000+ 行）→ 需大规模重构，建议独立任务
+5. **🟢 低优先级**: 测试代码样板重复 → 不影响功能
+6. **🟢 低优先级**: MockCache 实现简化 → 不影响功能
+7. **🟢 低优先级**: 时间敏感测试容差 → CI 环境可能需调整
 
-### 1. `cmd/server/main.go` — 修改
+### 📊 修复验证
 
-**变更内容：**
-- 配置加载失败时不再直接 `os.Exit(1)`，而是调用 `startSetupWizard()` 启动配置向导
-- 新增 `startSetupWizard()` 函数，启动独立的轻量HTTP服务
-- 在正常路由中注册 `/init` 和 `/api/v1/init/*` 端点
+```bash
+✅ go test -v ./internal/util/retryutil/...     # PASS (2.875s)
+✅ go test -v ./internal/service/email/...      # PASS (0.015s)
+✅ go test -v ./internal/service -run "Retry"   # PASS (1.134s)
+✅ make lint                                     # 通过
+```
 
-**✅ 优点：**
-- 配置向导有独立的限流（10请求/分钟），比主服务更严格
-- 使用了 `SecurityHeaders`、`RequestID`、`Logger` 中间件
-- 根路径自动重定向到 `/setup`
-
-**⚠️ 问题：**
-
-| 严重度 | 问题 | 位置 | 说明 |
-|--------|------|------|------|
-| **高** | 配置向导无本地访问限制 | `startSetupWizard()` | 与 `InitHandler` 不同，Setup Wizard 没有本地访问检查。虽然它有 token 保护，但 token 是通过页面 HTML 明文嵌入的，任何能访问该端口的人都能获取。如果服务暴露在公网，攻击者可以写入任意 `.env` 配置 |
-| **中** | 监听地址取自环境变量 | `startSetupWizard()` 第629行 | `addr := os.Getenv("SERVER_HOST") + ":" + os.Getenv("SERVER_PORT")`，如果这些环境变量不存在，默认值 `0.0.0.0:9090` 会监听所有接口，增加了攻击面 |
-| **低** | 配置向导缺少优雅关闭 | `startSetupWizard()` | 正常服务有 `gracefulShutdown`，但配置向导没有 |
-
----
-
-### 2. `internal/config/config.go` — 修改
-
-**变更内容：**
-- 新增 `LANDeployment` 字段，从 `LAN_DEPLOYMENT` 环境变量加载
-- 将 `validateProductionConfig` 中的 `os.Getenv("LAN_DEPLOYMENT")` 替换为 `c.LANDeployment`
-- 新增 `GetEnvPath()` 函数
-- 新增 `escapeEnvValue()` 函数，转义 `.env` 文件值中的特殊字符
-- 新增 `WriteEnvFile()` 函数，将配置写入 `.env` 文件
-
-**✅ 优点：**
-- `LANDeployment` 字段统一管理，不再散落 `os.Getenv` 调用
-- `escapeEnvValue()` 处理了换行、引号、反斜杠、`$`、`#`、空格等特殊字符，防止注入
-- `WriteEnvFile()` 使用固定顺序写入，便于阅读
-- 文件权限设置为 `0600`，安全合理
-
-**⚠️ 问题：**
-
-| 严重度 | 问题 | 位置 | 说明 |
-|--------|------|------|------|
-| **低** | `escapeEnvValue` 重复注释 | 第540-541行 | `// escapeEnvValue 转义.env文件值中的特殊字符` 出现了两次 |
-| **低** | `WriteEnvFile` 非原子写入 | 第596行 | 使用 `os.WriteFile` 直接写入，如果中途失败会留下不完整的 `.env` 文件。建议先写临时文件再 rename |
+**详细修复文档**: 📄 [code-review-fixes-summary.md](./code-review-fixes-summary.md)
 
 ---
 
-### 3. `internal/crypto/keyloader.go` — 修改
+## 📋 更改概览
 
-**变更内容：**
-- 将 `STRICT_KEY_PERMISSIONS` 环境变量控制改为自动检测 `/.dockerenv` 判断是否在容器中运行
-- 容器内跳过密钥文件权限检查
+本次暂存区共包含 **15 个文件**，总计 **+4,230 行 / -22 行**，涉及以下功能模块：
 
-**✅ 优点：**
-- 自动检测容器环境，用户不再需要手动设置 `STRICT_KEY_PERMISSIONS=true`
-- 使用 `os.Stat` 检测 `/.dockerenv`，这是 Docker 容器的标准标识
-
-**⚠️ 问题：**
-
-| 严重度 | 问题 | 位置 | 说明 |
-|--------|------|------|------|
-| **中** | 容器检测方式不够健壮 | 第169-172行 | 仅检查 `/.dockerenv`，在 Kubernetes (podman 等) 容器中可能不存在此文件。之前通过 `STRICT_KEY_PERMISSIONS` 环境变量控制更灵活。建议保留环境变量作为覆盖选项 |
-| **低** | `isContainer` 作为包级变量 | 第169行 | 每次调用 `validateKeyPath` 都会执行 `os.Stat`，虽然开销小，但作为闭包变量定义在函数内部略显不直观 |
+| 类别 | 文件数 | 说明 |
+|------|--------|------|
+| 修改 | 3 | `setup_test.go`、`auth.go`、`auth_test.go` |
+| 新增 | 12 | 邮件模板引擎、重试工具、HTML模板 |
 
 ---
 
-### 4. `internal/handler/init.go` — 新增
+## 🔍 逐文件变更分析
 
-**变更内容：**
-- `InitHandler` 结构体及构造函数
-- `HandleInitPage` — 渲染初始化页面（仅本地访问，管理员不存在时）
-- `HandleSystemStatus` — 返回系统状态JSON
-- `HandleCreateAdmin` — 创建管理员
-- `HandleCreateClient` — 创建OAuth客户端
-- `isLocalRequest` — 检查请求是否来自本地
+### 1. `internal/handler/setup_test.go`（-1 行）
 
-**✅ 优点：**
-- 所有端点都有本地访问检查，安全设计合理
-- 管理员存在后拒绝访问，防止重复创建
-- 正确使用 `handlerutil`、`serviceutil`、`auditutil` 工具模块
-- 使用 `embed` 嵌入HTML模板
+**变更内容**：
+- 移除空行，代码格式微调
 
-**⚠️ 问题：**
-
-| 严重度 | 问题 | 位置 | 说明 |
-|--------|------|------|------|
-| **高** | `isLocalRequest` 信任 `X-Forwarded-For` 头 | 第196-205行 | 攻击者可以伪造 `X-Forwarded-For: 127.0.0.1` 头来绕过本地访问限制。在反向代理后面时应该只信任最后一跳，而不是第一个IP。应该优先使用 `r.RemoteAddr`，只在确认有可信代理时才使用转发头 |
-| **中** | `HandleSystemStatus` 暴露数据库错误信息 | 第98行 | `status["db"] = map[string]string{"status": "error", "message": err.Error()}` — 数据库错误信息可能包含主机名、端口等内部信息。虽然限制了本地访问，但仍不符合"禁止在响应中暴露内部错误详情"的规范 |
-| **中** | `HandleSystemStatus` 使用类型断言 | 第103行 | `h.cache.(*cache.RedisCache)` — 类型断言如果缓存实现不是 `RedisCache`，则跳过 Redis 状态检查。这种硬编码类型断言违反了接口隔离原则 |
-| **低** | `InitHandler` 中 `store` 和 `auditSvc` 字段冗余 | 第31-32行 | `store` 和 `auditSvc` 在 `InitHandler` 中保存但仅用于 `HandleSystemStatus` 的 `Ping` 和类型断言，而 `initSvc` 内部已经持有这些依赖 |
+**审查意见**：✅ 纯代码风格修正，无风险。
 
 ---
 
-### 5. `internal/handler/setup.go` — 新增
+### 2. `internal/service/auth.go`（-11 行，重构）
 
-**变更内容：**
-- `SetupHandler` 结构体，包含一次性 setup token
-- `HandleSetupPage` — 渲染配置向导页面
-- `HandleSetupSave` — 保存配置到 `.env` 文件
-- `HandleSetupTestDB` — 测试数据库连接
-- `HandleSetupTestRedis` — 测试Redis连接
-- `HandleSetupGenerateKeys` — 生成RSA密钥对
-- `ValidateKeyPath` — 验证密钥路径安全性
-- `getKeyPathWhitelist` — 获取密钥路径白名单
+**变更内容**：
+- 移除本地定义的 `maxRevokeRetries` 和 `revokeRetryBaseDelay` 常量
+- 将 `revokeTokenWithRetry` 方法中的手写重试循环替换为 `retryutil.ExponentialBackoffRetry`
+- 新增 `maskToken` 调用，在日志中掩码化 Token
+- 移除 `fmt` 包导入，新增 `retryutil` 包导入
 
-**✅ 优点：**
-- 一次性 token 机制防止重复写入配置
-- `ssl_mode` 白名单验证防止 DSN 注入
-- `ValidateKeyPath` 防止路径遍历攻击，支持符号链接检测
-- 密钥路径白名单支持环境变量自定义
-- RSA 密钥使用 3072 位，符合安全最佳实践
-- 私钥文件权限 `0600`，公钥 `0644`
-- `#nosec` 注释解释了 gosec 误报
-- 数据库连接错误不暴露具体信息
-
-**⚠️ 问题：**
-
-| 严重度 | 问题 | 位置 | 说明 |
-|--------|------|------|------|
-| **高** | Token 比较存在时序攻击风险 | 第71行 | `reqToken == *tokenPtr` 使用简单字符串比较，攻击者可通过时序侧信道逐字节猜测 token。应使用 `crypto/subtle.ConstantTimeCompare` |
-| **高** | Setup 向导无本地访问限制 | 整个文件 | 与 `InitHandler` 不同，`SetupHandler` 的所有端点都没有本地访问检查。仅靠 token 保护，而 token 嵌入在页面 HTML 中，任何能访问端口的人都能获取 |
-| **中** | Token 通过 URL 查询参数传递 | 第69行 | `r.URL.Query().Get("token")` — token 可能出现在服务器日志、浏览器历史记录和代理日志中 |
-| **中** | `HandleSetupTestDB` 中 DSN 构建方式 | 第156行 | 虽然使用了 `url.PathEscape`，但 `net.JoinHostPort` 没有验证端口号是否为数字。恶意端口号可能被注入到连接字符串中 |
-| **中** | `HandleSetupSave` 无输入验证 | 第96-119行 | 直接将用户提交的 `map[string]string` 传给 `WriteEnvFile`，没有验证键名白名单。攻击者可以注入任意环境变量（如 `PATH=/malicious`） |
-| **低** | `HandleSetupGenerateKeys` 错误信息泄露路径 | 第228-232行 | `"私钥路径无效: "+err.Error()` 将内部路径验证错误暴露给客户端 |
+**审查意见**：
+- ✅ **代码复用**：将重试逻辑提取到通用工具包，符合 DRY 原则
+- ✅ **安全性提升**：`maskToken(accessToken)` 防止敏感信息泄露到日志
+- ✅ **符合规范**：错误消息使用英文
 
 ---
 
-### 6. `internal/handler/setup_deps.go` — 新增
+### 3. `internal/service/auth_test.go`（+433 行）
 
-**✅ 优点：**
-- 独立文件管理数据库和Redis连接依赖
-- 连接池限制合理（MaxOpenConns=1, MaxIdleConns=0, ConnMaxLifetime=5s）
+**变更内容**：
 
-**无问题。**
+新增 6 个测试函数，覆盖 `revokeTokenWithRetry` 的集成测试：
 
----
+| 测试函数 | 验证场景 |
+|---------|---------|
+| `TestAuthService_RevokeTokenWithRetry_SuccessAfterRetry` | 重试成功 + 缓存清除失败不影响主流程 |
+| `TestAuthService_RevokeTokenWithRetry_MaxRetriesExceeded` | 最大重试次数超限 |
+| `TestAuthService_RevokeTokenWithRetry_CacheCleared` | 缓存精确清除验证 |
+| `TestAuthService_RevokeTokenWithRetry_WithoutCache` | 无缓存场景 |
+| `TestAuthService_RevokeTokenWithRetry_ContextCancellation` | 上下文取消 |
+| `TestAuthService_RevokeTokenWithRetry_TokenNotFound` | Token 不存在 |
 
-### 7. `internal/service/init.go` — 新增
+**新增辅助类型**：`MockCache` 实现了缓存接口，用于测试
 
-**变更内容：**
-- `InitServiceInterface` 接口定义
-- `AdminExists` — 检查管理员是否存在
-- `CreateAdmin` — 创建管理员账户
-- `CreateOAuthClient` — 创建OAuth客户端
-- `validateRedirectURI` — 验证重定向URI
-- `generateRandomHex` — 生成随机hex字符串
-
-**✅ 优点：**
-- 定义了 `InitServiceInterface` 接口，便于测试和解耦
-- `AdminExists` 先检查再操作，防止重复创建
-- `CreateAdmin` 处理了并发场景下的竞态条件（数据库唯一约束）
-- 正确使用 `serviceutil.WrapServiceError` 和 `auditutil.SafeAuditLog`
-- `validateRedirectURI` 验证了协议、主机名、片段
-- 管理员创建时 `EmailVerified: true`，合理
-
-**⚠️ 问题：**
-
-| 严重度 | 问题 | 位置 | 说明 |
-|--------|------|------|------|
-| **中** | `AdminExists` 性能问题 | 第55-68行 | 使用 `ListUsers(ctx, 0, 10000)` 获取所有用户再过滤，效率低。代码注释已承认此问题并建议未来优化。对于初始化场景可接受，但 10000 条的硬编码上限可能在极端情况下不够 |
-| **中** | `CreateOAuthClient` 不检查客户端是否已存在 | 第129-180行 | 可以创建多个同名 OAuth 客户端，可能导致混淆 |
-| **低** | `validateRedirectURI` 允许 `http` 协议 | 第193行 | 对于生产环境，应该只允许 `https`。当前允许 `http` 在开发环境合理，但缺少环境感知 |
+**审查意见**：
+- ✅ 测试覆盖全面，包含正常路径、错误路径、边界条件
+- ⚠️ `MockCache.Get` 中的类型断言逻辑过于简单（`dest.(*interface{})`），如果实际缓存使用 JSON 反序列化到具体结构体，此 Mock 可能无法完全模拟真实行为
+- ⚠️ 每个测试子用例都重复了创建 `AuthService` 的样板代码（约 15 行），可考虑提取为辅助函数以减少重复
 
 ---
 
-### 8. HTML 模板
+### 4. `internal/util/retryutil/retry.go`（+193 行，新增）
 
-**`internal/handler/templates/init.html` 和 `internal/handler/templates/setup.html`**
+**变更内容**：
 
-**✅ 优点：**
-- 使用 CSP nonce (`{{.Nonce}}`) 防止 XSS
-- 内联 CSS 和 JS，无外部依赖
-- 响应式设计
-- 前端密码确认验证
+通用重试工具包，核心功能：
 
-**⚠️ 问题：**
+- `RetryConfig`：可配置最大重试次数、基础延迟、最大延迟、抖动因子
+- `ExponentialBackoffRetry`：指数退避 + 随机抖动重试算法
+- `calculateDelay` / `calculateJitter`：延迟计算辅助函数
+- 支持 `context.Context` 取消
 
-| 严重度 | 问题 | 位置 | 说明 |
-|--------|------|------|------|
-| **中** | `init.html` 中 `statusRow` 函数存在 XSS 风险 | 第155-157行 | `statusRow` 函数直接拼接 HTML，如果服务器返回的 `message` 包含恶意脚本，会被注入到页面中。应使用 `textContent` 而非 `innerHTML` |
-| **中** | `setup.html` 中 `showResult` 使用 `textContent` | 第316行 | 这里的实现是安全的，但与 `init.html` 的 `statusRow` 不一致 |
-| **低** | `setup.html` 中 `generateKeys` 的响应消息不完整 | 第371行 | `json.message` 可能不存在，应该检查 `json.data` 中的信息 |
+**审查意见**：
+- ✅ 设计良好，配置与执行分离
+- ✅ 使用 `crypto/rand` 生成安全随机数，优于 `math/rand`
+- ✅ 日志记录每次重试的尝试次数和延迟
+- ✅ **已修复**: `calculateJitter` panic 风险已通过边界检查解决
+- ✅ **已修复**: 错误消息已改为英文（"operation failed after %d retries"）
 
----
+**修复的代码片段**：
+```go
+func calculateJitter(delay time.Duration, jitterFactor float64) time.Duration {
+    if jitterFactor <= 0 {
+        return 0
+    }
+    maxJitter := float64(delay) * jitterFactor
+    maxJitterInt := int64(maxJitter)
 
-### 9. 测试代码
+    // ✅ 修复：添加边界检查，避免 panic
+    if maxJitterInt < 1 {
+        return 0
+    }
 
-**覆盖情况：**
-- `internal/handler/init_test.go` — 302行，覆盖 InitHandler 的主要路径
-- `internal/handler/setup_test.go` — 429行，覆盖 ValidateKeyPath、getKeyPathWhitelist、HandleSetupGenerateKeys
-- `internal/handler/init_integration_test.go` — 312行，集成测试
-- `internal/service/init_test.go` — 553行，覆盖 Service 层
-
-**✅ 优点：**
-- 测试覆盖面广，包含正常路径和错误路径
-- 集成测试使用 build tag `integration` 隔离
-- 边界条件测试（大量用户、并发创建、特殊字符URI）
-- 密钥文件权限验证
-
-**⚠️ 问题：**
-
-| 严重度 | 问题 | 位置 | 说明 |
-|--------|------|------|------|
-| **中** | `init_test.go` 中 `mockInitService` 未被使用 | 第286-302行 | 定义了 `mockInitService` 但测试中直接使用 `mock.Store`，这个 mock 是死代码 |
-| **中** | `setup_test.go` 缺少 `HandleSetupSave` 测试 | — | 没有测试配置保存功能（核心功能之一） |
-| **中** | `setup_test.go` 缺少 `HandleSetupTestDB` 和 `HandleSetupTestRedis` 测试 | — | 只测试了辅助函数，没有测试 HTTP handler |
-| **中** | `init_test.go` 缺少非本地访问测试 | — | 没有测试远程IP访问被拒绝的场景 |
-| **低** | `service/init_test.go` 中 `AdminExists` 存储错误测试被跳过 | 第106-114行 | `t.Skip("Mock Store 的 ListUsers 不支持错误注入")` — 应该扩展 mock 支持错误注入 |
+    randomValue, err := rand.Int(rand.Reader, big.NewInt(maxJitterInt))
+    if err != nil {
+        return 0
+    }
+    return time.Duration(randomValue.Int64())
+}
+```
 
 ---
 
-### 10. `docs/review/` 目录 — 新增
+### 5. `internal/util/retryutil/retry_test.go`（+673 行，新增）
 
-6个文档文件共 1573 行，包含提交消息、完成总结、最终审查、修复总结、快速参考、测试覆盖率报告。
+**变更内容**：
 
-**⚠️ 问题：** 这些文档文件不应该提交到代码仓库中。它们是开发过程中的临时产物，应加入 `.gitignore`。
+非常全面的单元测试，覆盖：
 
----
+- 指数退避延迟计算（含抖动验证）
+- 最大重试次数限制
+- 成功立即返回
+- 上下文取消/超时
+- 边界条件（零基础延迟、超大 MaxDelay）
+- 并发安全
+- 错误消息格式
 
-## 🚨 严重问题汇总
-
-### 🔴 高危问题
-
-1. **`isLocalRequest` 信任 `X-Forwarded-For` 头** — 攻击者可伪造 `X-Forwarded-For: 127.0.0.1` 绕过本地访问限制，从而在远程创建管理员账户和OAuth客户端。`internal/handler/init.go:196-205`
-
-2. **Setup 向导无本地访问限制** — 整个 Setup Wizard 暴露在网络中，仅靠嵌入页面的 token 保护。如果服务绑定在 `0.0.0.0`，任何网络可达的攻击者都能修改配置。`internal/handler/setup.go`
-
-3. **Token 比较存在时序攻击** — `validateSetupToken` 使用 `==` 比较 token，应使用 `crypto/subtle.ConstantTimeCompare`。`internal/handler/setup.go:71`
-
-### 🟡 中危问题
-
-4. **`HandleSetupSave` 无输入键名验证** — 用户可以注入任意环境变量。
-5. **`HandleSystemStatus` 暴露数据库错误详情** — 违反项目错误处理规范。
-6. **`init.html` 中 `statusRow` 存在 XSS 风险** — 使用 `innerHTML` 拼接未转义的服务器消息。
-7. **Setup 向导默认监听 `0.0.0.0`** — 增加攻击面。
-8. **`HandleSetupTestDB` 未验证端口号格式** — 可能被注入恶意连接参数。
-9. **容器检测方式不够健壮** — 仅检查 `/.dockerenv`，Kubernetes 环境可能不适用。
-10. **测试覆盖不足** — 缺少 `HandleSetupSave`、`HandleSetupTestDB`、`HandleSetupTestRedis`、非本地访问拒绝等关键测试。
-
-### 🟢 低危问题
-
-11. `escapeEnvValue` 重复注释
-12. `WriteEnvFile` 非原子写入
-13. `mockInitService` 死代码
-14. `docs/review/` 临时文档不应提交
-15. `HandleSetupGenerateKeys` 错误信息泄露路径
+**审查意见**：
+- ✅ 测试质量高，使用 `time.Now()` 测量实际延迟，容差设计合理
+- ✅ 并发测试验证了线程安全
+- ⚠️ 时间敏感测试在 CI 环境中可能偶发失败（如 `tolerance := 50 * time.Millisecond` 在负载高的 runner 上可能不够），建议增加更宽松的回退容差
 
 ---
 
-## 📊 总体评估
+### 6. `internal/service/email/engine.go`（+294 行，新增）
 
-| 维度 | 评分 | 说明 |
+**变更内容**：
+
+邮件模板引擎，支持：
+
+- 加载目录下的 HTML 模板文件
+- 验证邮件 / 密码重置邮件渲染
+- 多语言支持（zh/en）+ 语言回退机制
+- 默认数据填充（Logo、公司名、支持邮箱）
+
+**审查意见**：
+- ✅ 使用 `html/template` 自动防止 XSS
+- ✅ 并发安全：`sync.RWMutex` 保护模板映射
+- ✅ **已修复**: 错误消息已改为英文（"template directory cannot be empty" 等）
+- ✅ **已修复**: 提取通用方法 `renderEmailTemplate`，消除约 80 行重复代码
+- ⚠️ `loadTemplates` 中 `template.ParseFiles(path)` 每次只解析单个文件，无法利用 Go template 的 `{{define}}` / `{{template}}` 继承机制。`components/` 中的 define 块未被 engine 引用，存在冗余
+
+**重构后的代码结构**：
+```go
+// ✅ 新增：通用渲染方法
+func (e *TemplateEngine) renderEmailTemplate(
+    templateType string,
+    lang string,
+    data TemplateData,
+    defaultSubjectEN string,
+    defaultSubjectZH string,
+) (subject, htmlBody string, err error) {
+    // 统一处理：默认语言、默认数据、模板选择、语言回退、渲染、主题设置
+}
+
+// ✅ 简化后的方法（从 ~40 行减少到 ~5 行）
+func (e *TemplateEngine) RenderVerificationEmail(lang string, data TemplateData) (subject, htmlBody string, err error) {
+    return e.renderEmailTemplate("verification", lang, data,
+        "Verify Your Email - SSO Service", "验证您的邮箱 - SSO服务")
+}
+
+func (e *TemplateEngine) RenderPasswordResetEmail(lang string, data TemplateData) (subject, htmlBody string, err error) {
+    return e.renderEmailTemplate("password_reset", lang, data,
+        "Reset Your Password - SSO Service", "重置您的密码 - SSO服务")
+}
+```
+
+---
+
+### 7. `internal/service/email/engine_test.go`（+533 行，新增）
+
+**变更内容**：
+
+邮件引擎测试，覆盖：
+
+- 成功创建引擎
+- 空目录/不存在目录/默认语言
+- 中英文验证/密码重置邮件渲染
+- 语言回退机制
+- 默认数据填充
+- XSS 防护验证
+- 并发访问安全
+
+**审查意见**：
+- ✅ 测试覆盖完整，XSS 测试验证了自动转义
+- ✅ 并发测试使用 10 个 goroutine 验证线程安全
+- ⚠️ `createTestTemplateDir` 中创建的 `base.html` 未在测试中实际使用（因为引擎按独立文件解析），与 `engine.go` 中提到的组件化设计存在不一致
+
+---
+
+### 8. 邮件模板文件（8 个 HTML 文件，共 +3,284 行）
+
+**文件列表**：
+
+| 文件 | 行数 | 说明 |
 |------|------|------|
-| **架构设计** | ⭐⭐⭐⭐ | 分层清晰，接口定义合理，正确使用工具模块 |
-| **安全设计** | ⭐⭐⭐ | 有安全意识（CSP nonce、路径白名单、token机制），但存在高危漏洞 |
-| **代码质量** | ⭐⭐⭐⭐ | 遵循项目规范，错误处理得当，代码组织清晰 |
-| **测试覆盖** | ⭐⭐⭐ | Service层测试充分，Handler层缺少关键端点测试 |
-| **文档** | ⭐⭐ | 临时文档不应提交，代码注释合理 |
+| `base.html` | 400 | 基础模板（实际未被使用） |
+| `components/button.html` | 14 | 按钮组件（实际未被使用） |
+| `components/footer.html` | 35 | 页脚组件（实际未被使用） |
+| `components/header.html` | 8 | 头部组件（实际未被使用） |
+| `verification/verification_en.html` | 409 | 英文验证邮件（独立完整模板） |
+| `verification/verification_zh.html` | 409 | 中文验证邮件（独立完整模板） |
+| `password_reset/password_reset_en.html` | 409 | 英文密码重置邮件（独立完整模板） |
+| `password_reset/password_reset_zh.html` | 409 | 中文密码重置邮件（独立完整模板） |
+
+**审查意见**：
+- ⚠️ **严重冗余**：`base.html` 和 `components/*.html` 与各个语言模板文件内容高度重复。每个语言模板都是完整的独立 HTML 文档，包含了 `base.html` 中几乎所有的 CSS 和结构
+- ⚠️ **维护困难**：如果需修改样式，需要同步修改 4 个完整 HTML 文件（`base.html` 实际上未被使用）
+- 💡 **建议**：应使用 Go template 的 `{{template}}` 机制，让各语言模板继承 `base.html`，只覆盖内容区域，避免 400+ 行 CSS 的重复
+
+**重复代码示例**：
+每个语言模板都包含以下完全相同的 CSS：
+```css
+body {
+    margin: 0;
+    padding: 0;
+    min-width: 100% !important;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', ...;
+    font-size: 16px;
+    line-height: 1.5;
+    color: #333333;
+    background-color: #ffffff;
+}
+/* 以及约 300 行的其他样式 */
+```
 
 ---
 
-## ✅ 结论
+## 🚨 发现的问题汇总
 
-本次变更实现了完整的配置向导和初始化面板功能，架构设计和代码质量整体良好。但存在 **3个高危安全问题**（`X-Forwarded-For` 伪造绕过、Setup向导无本地访问限制、Token时序攻击），建议在合并前必须修复。
+### 🔴 高优先级（必须修复）
 
----
+| 问题 | 位置 | 影响 | 状态 |
+|------|------|------|------|
+| `calculateJitter` 中 `maxJitter` 为 0 时会导致 panic | `retryutil/retry.go:L158` | 程序崩溃 | ✅ **已修复** |
 
-## 🔧 修复建议（按优先级排序）
+**修复详情**: 添加边界检查 `if maxJitterInt < 1 { return 0 }`，避免传入 0 导致 `rand.Int` panic。
 
-### 必须修复（合并前）
+### 🟡 中优先级（建议修复）
 
-1. **修复 `isLocalRequest` 伪造绕过**
-   - 优先使用 `r.RemoteAddr`
-   - 只在配置明确指定信任代理时，才检查 `X-Forwarded-For` 等转发头
-   - 或者移除转发头检查，仅信任 `r.RemoteAddr`
+| 问题 | 位置 | 影响 | 状态 |
+|------|------|------|------|
+| 错误消息使用中文，违反项目规范 | `retryutil/retry.go`、`email/engine.go` | 一致性 | ✅ **已修复** |
+| `RenderVerificationEmail` 与 `RenderPasswordResetEmail` 代码重复 | `email/engine.go` | DRY原则 | ✅ **已修复** |
+| 邮件模板存在大量重复代码（3,000+ 行） | `email/templates/` | 可维护性 | ⚠️ **未修复** |
 
-2. **为 Setup 向导添加本地访问限制**
-   - 复制 `isLocalRequest` 函数到 `setup.go`（修复后版本）
-   - 所有 Setup 端点在检查 token 之前先检查本地访问
+**修复详情**:
+- ✅ 所有错误消息已改为英文（如 "operation failed after 3 retries"）
+- ✅ 提取通用方法 `renderEmailTemplate`，消除约 80 行重复代码
+- ⚠️ 邮件模板文件重复需要大规模重构（8 个文件），建议作为独立任务
 
-3. **使用常量时间比较 token**
-   - 将 `reqToken == *tokenPtr` 改为 `subtle.ConstantTimeCompare([]byte(reqToken), []byte(*tokenPtr)) == 1`
+### 🟢 低优先级（可选优化）
 
-### 强烈建议修复
+| 问题 | 位置 | 影响 | 状态 |
+|------|------|------|------|
+| `auth_test.go` 中创建服务的样板代码重复 | `auth_test.go` | 代码简洁 | ⚠️ **未修复** |
+| `MockCache.Get` 实现过于简化 | `auth_test.go` | 测试准确性 | ⚠️ **未修复** |
+| 时间敏感测试的容差可能不够 | `retry_test.go` | CI稳定性 | ⚠️ **未修复** |
 
-4. **验证 `HandleSetupSave` 的输入键名**
-   - 维护一个允许的环境变量白名单，拒绝白名单外的键
-
-5. **修复 `init.html` 的 XSS 风险**
-   - 使用 DOM API 创建元素并设置 `textContent`，而非拼接 HTML
-
-6. **补充缺失的测试**
-   - 添加非本地访问拒绝测试
-   - 添加 `HandleSetupSave`、`HandleSetupTestDB`、`HandleSetupTestRedis` 测试
-
-### 可选修复
-
-7. **移除或忽略 `docs/review/` 目录**
-   - 添加到 `.gitignore` 并不提交到版本控制
-
-8. **改进容器检测**
-   - 保留 `STRICT_KEY_PERMISSIONS` 环境变量作为覆盖选项
+**说明**: 低优先级问题不影响功能，建议在后续重构时处理。
 
 ---
 
-*报告生成完成*
+---
+
+## 📊 修复验证
+
+### 测试结果
+
+```bash
+# retryutil 测试
+✅ go test -v ./internal/util/retryutil/...
+   PASS (2.875s) - 所有测试通过
+
+# email 引擎测试
+✅ go test -v ./internal/service/email/...
+   PASS (0.015s) - 所有测试通过
+
+# auth 服务测试
+✅ go test -v ./internal/service -run "TestAuthService_RevokeTokenWithRetry"
+   PASS (1.134s) - 所有测试通过
+
+# 代码质量检查
+✅ make lint
+   通过（仅有预存在的 revive 警告，与本次修复无关）
+```
+
+### 修复统计
+
+| 指标 | 数值 |
+|------|------|
+| 修改文件数 | 7 |
+| 新增代码行数 | +73 |
+| 删除代码行数 | -78 |
+| 净减少代码行数 | -5 |
+| 测试通过率 | 100% |
+| 高优先级问题修复率 | 100% |
+| 中优先级问题修复率 | 67% (2/3) |
+
+---
+
+## ✅ 优点总结
+
+1. **模块化设计**：`retryutil` 提取为通用工具，可被其他模块复用
+2. **安全性**：Token 掩码化、XSS 自动转义、`crypto/rand` 使用、✅ panic 风险已消除
+3. **并发安全**：`sync.RWMutex`、并发测试验证
+4. **上下文感知**：重试逻辑支持 `context.Context` 取消
+5. **代码质量**：✅ 消除重复代码、✅ 错误消息统一英文、符合项目规范
+6. **测试覆盖**：新增约 1,639 行测试代码，覆盖多种场景
+6. **符合规范**：错误消息使用英文，代码风格一致
+
+---
+
+## 📊 统计
+
+| 指标 | 数值 |
+|------|------|
+| 新增文件 | 12 |
+| 修改文件 | 3 |
+| 新增代码行 | ~4,230 |
+| 删除代码行 | ~22 |
+| 新增测试行 | ~1,639 |
+| 测试/代码比 | 约 1:1.6 |
+
+---
+
+## 📝 结论
+
+本次更改**整体质量良好**，引入了有用的通用工具（`retryutil`）和邮件模板功能。
+
+### 主要亮点：
+- ✅ 代码复用性高，符合 DRY 原则
+- ✅ 安全性考虑周到
+- ✅ 测试覆盖全面
+- ✅ 符合项目规范
+
+### 需要关注的问题：
+1. **建议修复**：邮件模板应消除重复代码，考虑使用 Go template 的继承机制
+2. **可选优化**：`base.html` 和 `components/*.html` 当前未被使用，可以考虑移除或实现组件化模板
+
+**建议**：可以提交，邮件模板的优化可作为后续迭代任务。
+
+
+---
+
+## 📝 后续建议
+
+### 1. 邮件模板重构（低优先级）
+
+**问题**: 邮件模板文件存在约 3,000 行重复代码
+
+**建议方案**:
+```html
+<!-- base.html -->
+{{define "base"}}
+<!DOCTYPE html>
+<html lang="{{.Language}}">
+<head>
+    <!-- 共同的 CSS 和 meta 标签（约 400 行） -->
+</head>
+<body>
+    {{template "content" .}}
+    {{template "footer" .}}
+</body>
+</html>
+{{end}}
+
+<!-- verification_zh.html -->
+{{define "content"}}
+    <h1>验证您的邮箱</h1>
+    <!-- 仅中文特定内容 -->
+{{end}}
+```
+
+**预期收益**:
+- 消除 3,000+ 行重复代码
+- 样式修改只需改一处
+- 提高可维护性
+
+**工作量**: 约 4-6 小时（重构 8 个模板文件 + 更新测试）
+
+### 2. 测试代码优化（低优先级）
+
+**问题**: `auth_test.go` 中创建服务的样板代码重复
+
+**建议**: 提取辅助函数 `createTestAuthService`
+
+**工作量**: 约 1-2 小时
+
+### 3. 持续改进
+
+- ✅ 定期运行 `make lint` 检查代码质量
+- ✅ 确保新代码遵循项目规范（错误消息使用英文）
+- ✅ 关注 CI/CD 中的测试覆盖率
+- ✅ 边界条件测试（如本次发现的 `maxJitter < 1` 场景）
+
+---
+
+## 🎯 总结
+
+### 修复成果
+
+✅ **所有高优先级问题已修复**
+- 消除了严重的 panic 风险
+- 提高了系统稳定性
+
+✅ **大部分中优先级问题已修复**
+- 统一了错误消息语言
+- 重构了重复代码
+- 提高了可维护性
+
+⚠️ **低优先级问题已记录**
+- 邮件模板重构建议作为独立任务
+- 测试代码优化可在后续重构时处理
+
+### 代码质量提升
+
+| 维度 | 改进 |
+|------|------|
+| **安全性** | 消除 panic 风险，边界检查完善 |
+| **可维护性** | 消除 80 行重复代码，提取通用方法 |
+| **一致性** | 错误消息统一英文，符合项目规范 |
+| **测试覆盖** | 100% 测试通过，包含边界条件 |
+
+### 详细修复文档
+
+完整的修复说明、代码对比和验证结果请参见：
+📄 **[code-review-fixes-summary.md](./code-review-fixes-summary.md)**

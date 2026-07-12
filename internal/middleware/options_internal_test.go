@@ -3,6 +3,7 @@ package middleware
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -99,6 +100,16 @@ func TestAuthMiddlewareWithStore(t *testing.T) {
 		require.NoError(t, err)
 		rec := httptest.NewRecorder()
 		mw.ServeHTTP(rec, makeRequest(unknownToken))
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("DB错误时_fail-closed_401", func(t *testing.T) {
+		// DB 错误（非 ErrNotFound）时应 fail-closed，拒绝请求
+		s.GetTokenByAccessTokenErr = fmt.Errorf("database connection lost")
+		defer func() { s.GetTokenByAccessTokenErr = nil }()
+
+		rec := httptest.NewRecorder()
+		mw.ServeHTTP(rec, makeRequest(validToken))
 		assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	})
 }

@@ -62,7 +62,7 @@ func TestMFAService_cleanupRecoveryAttempts(t *testing.T) {
 }
 
 // TestMFAService_Close 测试 Close 停止后台 goroutine
-// 通过二次 Close 应 panic 来验证 stopChan 被关闭
+// 使用 sync.Once 保护，二次 Close 不应 panic
 func TestMFAService_Close(t *testing.T) {
 	store := mock.New()
 	svc := NewMFAService(store)
@@ -70,8 +70,8 @@ func TestMFAService_Close(t *testing.T) {
 	// 正常关闭不应 panic
 	assert.NotPanics(t, func() { svc.Close() })
 
-	// 二次关闭应 panic（close of closed channel）
-	assert.Panics(t, func() { svc.Close() })
+	// 二次关闭不应 panic（sync.Once 保护）
+	assert.NotPanics(t, func() { svc.Close() })
 }
 
 // TestMFAService_recordTOTPUsage 测试 TOTP 使用记录写入

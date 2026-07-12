@@ -43,10 +43,12 @@ func startSetupWizard(loadErr error, version string) {
 		http.Redirect(w, r, "/setup", http.StatusFound)
 	})
 
-	addr := os.Getenv("SERVER_HOST") + ":" + os.Getenv("SERVER_PORT")
-	if addr == ":" {
-		addr = "127.0.0.1:9090"
+	// 配置向导强制绑定本地地址，防止公网暴露
+	wizardPort := os.Getenv("WIZARD_PORT")
+	if wizardPort == "" {
+		wizardPort = "9090"
 	}
+	addr := "127.0.0.1:" + wizardPort
 	// nosec G706 -- slog 结构化日志，值作为参数传递不受注入影响
 	slog.Info("配置向导启动", "address", addr, "config_error", loadErr.Error())
 

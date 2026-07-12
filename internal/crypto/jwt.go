@@ -241,10 +241,14 @@ func (s *JWTService) GenerateRefreshToken() (string, error) {
 }
 
 // ValidateAccessToken 验证访问令牌并返回Claims
-// 验证签名、过期时间、算法、密钥过期状态和JTI重放
+// 验证签名、过期时间、算法、Issuer、密钥过期状态和JTI重放
 // 返回解析后的Claims或错误
 func (s *JWTService) ValidateAccessToken(tokenString string) (*AccessTokenClaims, error) {
 	var usedKeyID string
+	s.mu.RLock()
+	issuer := s.issuer
+	s.mu.RUnlock()
+
 	token, err := jwt.ParseWithClaims(tokenString, &AccessTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
 		if token.Method.Alg() != jwt.SigningMethodRS256.Alg() {
 			return nil, ErrInvalidToken
@@ -267,7 +271,10 @@ func (s *JWTService) ValidateAccessToken(tokenString string) (*AccessTokenClaims
 		}
 
 		return nil, ErrInvalidToken
-	})
+	},
+		jwt.WithIssuer(issuer),
+		jwt.WithExpirationRequired(),
+	)
 
 	if err != nil {
 		if errors.Is(err, jwt.ErrTokenExpired) {

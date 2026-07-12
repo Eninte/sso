@@ -212,7 +212,7 @@ func TestAdminService_SystemHealth(t *testing.T) {
 
 		health, err := adminSvc.SystemHealth(ctx)
 		require.NoError(t, err)
-		assert.Equal(t, "ok", health.Status)
+		assert.Equal(t, "error", health.Status)
 		assert.Equal(t, "error", health.Database)
 	})
 }

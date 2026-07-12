@@ -1,8 +1,8 @@
 # Git 未提交更改分析与审查报告
 
-**审查日期**: 2026-04-21  
-**审查范围**: 暂存区 (staged) 未提交更改  
-**修复日期**: 2026-04-21  
+**审查日期**: 2026-04-21
+**审查范围**: 暂存区 (staged) 未提交更改
+**修复日期**: 2026-04-21
 **修复状态**: ✅ 所有高/中优先级问题已修复
 
 ---
@@ -129,12 +129,12 @@ func calculateJitter(delay time.Duration, jitterFactor float64) time.Duration {
     }
     maxJitter := float64(delay) * jitterFactor
     maxJitterInt := int64(maxJitter)
-    
+
     // ✅ 修复：添加边界检查，避免 panic
     if maxJitterInt < 1 {
         return 0
     }
-    
+
     randomValue, err := rand.Int(rand.Reader, big.NewInt(maxJitterInt))
     if err != nil {
         return 0
@@ -199,12 +199,12 @@ func (e *TemplateEngine) renderEmailTemplate(
 
 // ✅ 简化后的方法（从 ~40 行减少到 ~5 行）
 func (e *TemplateEngine) RenderVerificationEmail(lang string, data TemplateData) (subject, htmlBody string, err error) {
-    return e.renderEmailTemplate("verification", lang, data, 
+    return e.renderEmailTemplate("verification", lang, data,
         "Verify Your Email - SSO Service", "验证您的邮箱 - SSO服务")
 }
 
 func (e *TemplateEngine) RenderPasswordResetEmail(lang string, data TemplateData) (subject, htmlBody string, err error) {
-    return e.renderEmailTemplate("password_reset", lang, data, 
+    return e.renderEmailTemplate("password_reset", lang, data,
         "Reset Your Password - SSO Service", "重置您的密码 - SSO服务")
 }
 ```
@@ -316,7 +316,7 @@ body {
 ✅ go test -v ./internal/util/retryutil/...
    PASS (2.875s) - 所有测试通过
 
-# email 引擎测试  
+# email 引擎测试
 ✅ go test -v ./internal/service/email/...
    PASS (0.015s) - 所有测试通过
 

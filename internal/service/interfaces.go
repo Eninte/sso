@@ -66,19 +66,6 @@ type OAuthServiceInterface interface {
 }
 
 // ============================================================================
-// 邮件服务接口
-// ============================================================================
-
-// EmailServiceInterface 邮件服务接口
-type EmailServiceInterface interface {
-	// SendVerificationEmail 发送验证邮件
-	SendVerificationEmail(to, token, baseURL string) error
-
-	// SendPasswordResetEmail 发送密码重置邮件
-	SendPasswordResetEmail(to, token, baseURL string) error
-}
-
-// ============================================================================
 // 审计服务接口
 // ============================================================================
 

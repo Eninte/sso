@@ -37,6 +37,9 @@ type Store struct {
 
 	keys map[string]*model.KeyVersion
 
+	mfaRecoveryCodes map[string][]string // 每实例独立，避免全局状态污染
+	hmacKey          []byte              // Mock HMAC 密钥
+
 	CreateUserErr              error
 	GetUserByIDErr             error
 	GetUserByEmailErr          error
@@ -83,6 +86,8 @@ func New() *Store {
 		resetTokens:        make(map[string]*store.ResetToken),
 		auditLogs:          make([]*model.AuditLog, 0),
 		keys:               make(map[string]*model.KeyVersion),
+		mfaRecoveryCodes:   make(map[string][]string),
+		hmacKey:            []byte("test-hmac-key-32-bytes-long!!!!!"),
 	}
 }
 
@@ -870,8 +875,7 @@ func (m *Store) DeleteKey(ctx context.Context, keyID string) error {
 // MFA恢复码 Mock实现
 // ============================================================================
 
-// mfaRecoveryCodes MFA恢复码存储 (user_id -> []code_hash)
-var mfaRecoveryCodes = make(map[string][]string)
+// mfaRecoveryCodes MFA恢复码存储已移至 Store 结构体字段，避免全局状态污染
 
 // StoreMFARecoveryCodes 存储MFA恢复码
 // Mock实现：直接存储哈希值（与真实实现一致）
@@ -882,7 +886,7 @@ func (m *Store) StoreMFARecoveryCodes(ctx context.Context, userID string, codeHa
 	// 复制切片
 	codes := make([]string, len(codeHashes))
 	copy(codes, codeHashes)
-	mfaRecoveryCodes[userID] = codes
+	m.mfaRecoveryCodes[userID] = codes
 	return nil
 }
 
@@ -891,7 +895,7 @@ func (m *Store) GetUnusedMFARecoveryCodes(ctx context.Context, userID string) ([
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	codes, ok := mfaRecoveryCodes[userID]
+	codes, ok := m.mfaRecoveryCodes[userID]
 	if !ok {
 		return nil, nil
 	}
@@ -907,13 +911,13 @@ func (m *Store) VerifyAndUseMFARecoveryCode(ctx context.Context, userID, code st
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	codes, ok := mfaRecoveryCodes[userID]
+	codes, ok := m.mfaRecoveryCodes[userID]
 	if !ok || len(codes) == 0 {
 		return false, nil
 	}
 
 	// 对输入的code进行HMAC哈希（与真实实现一致）
-	codeHash, err := hashRecoveryCodeForMock(code)
+	codeHash, err := m.hashRecoveryCode(code)
 	if err != nil {
 		return false, err
 	}
@@ -922,27 +926,27 @@ func (m *Store) VerifyAndUseMFARecoveryCode(ctx context.Context, userID, code st
 	for i, hash := range codes {
 		if hash == codeHash {
 			// 标记为已使用（从列表中移除）
-			mfaRecoveryCodes[userID] = append(codes[:i], codes[i+1:]...)
+			m.mfaRecoveryCodes[userID] = append(codes[:i], codes[i+1:]...)
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-// hashRecoveryCodeForMock Mock实现的恢复码哈希函数
+// hashRecoveryCode Mock实现的恢复码哈希函数
 // 使用与真实实现相同的HMAC-SHA256算法
-// 注意：这里使用固定密钥，测试时service层也必须使用相同密钥
-var mockHMACKey = []byte("test-hmac-key-32-bytes-long!!!!!")
-
-func hashRecoveryCodeForMock(code string) (string, error) {
-	mac := hmac.New(sha256.New, mockHMACKey)
+// 注意：密钥存储在 Store.hmacKey 字段，测试时通过 SetMockHMACKey 修改
+func (m *Store) hashRecoveryCode(code string) (string, error) {
+	mac := hmac.New(sha256.New, m.hmacKey)
 	mac.Write([]byte(code))
 	return fmt.Sprintf("%x", mac.Sum(nil)), nil
 }
 
 // SetMockHMACKey 设置Mock的HMAC密钥（用于测试）
-func SetMockHMACKey(key []byte) {
-	mockHMACKey = key
+func (m *Store) SetMockHMACKey(key []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.hmacKey = key
 }
 
 // DeleteUsedMFARecoveryCodes 删除已使用的恢复码
@@ -951,7 +955,7 @@ func (m *Store) DeleteUsedMFARecoveryCodes(ctx context.Context, userID string) e
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	delete(mfaRecoveryCodes, userID)
+	delete(m.mfaRecoveryCodes, userID)
 	return nil
 }
 
@@ -960,7 +964,7 @@ func (m *Store) DeleteAllMFARecoveryCodes(ctx context.Context, userID string) er
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	delete(mfaRecoveryCodes, userID)
+	delete(m.mfaRecoveryCodes, userID)
 	return nil
 }
 
@@ -971,9 +975,4 @@ func (m *Store) DisableMFAAndClearRecoveryCodes(ctx context.Context, user *model
 		return err
 	}
 	return m.DeleteAllMFARecoveryCodes(ctx, user.ID)
-}
-
-// ClearMFARecoveryCodes 清空所有MFA恢复码（测试用）
-func ClearMFARecoveryCodes() {
-	mfaRecoveryCodes = make(map[string][]string)
 }

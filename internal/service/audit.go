@@ -12,6 +12,7 @@ import (
 	"github.com/example/sso/internal/common"
 	"github.com/example/sso/internal/model"
 	"github.com/example/sso/internal/store"
+	"github.com/example/sso/internal/util/safego"
 )
 
 // ============================================================================
@@ -131,7 +132,7 @@ func (s *AuditService) fallbackLog(ctx context.Context, log *model.AuditLog) {
 	)
 
 	// 尝试同步存储（带超时）
-	go func() { // #nosec G118 -- goroutine需要独立context，不能使用请求context
+	safego.Go(slog.Default(), "降级存储审计日志", func() { // #nosec G118 -- goroutine需要独立context，不能使用请求context
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := s.store.StoreAuditLog(ctx, log); err != nil {
@@ -141,7 +142,7 @@ func (s *AuditService) fallbackLog(ctx context.Context, log *model.AuditLog) {
 				"event_type", log.EventType,
 			)
 		}
-	}()
+	})
 }
 
 // LogUserRegister 记录用户注册事件

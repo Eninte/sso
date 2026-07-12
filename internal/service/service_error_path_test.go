@@ -269,8 +269,8 @@ func TestAuthService_RefreshToken_ComprehensiveErrorPaths(t *testing.T) {
 		assert.ErrorIs(t, err, service.ErrInvalidToken)
 	})
 
-	// ==== 测试2: RevokeToken失败导致刷新失败 ====
-	// 验证: 需求 8.6
+	// ==== 测试2: RevokeToken失败导致刷新失败（fail-closed） ====
+	// 验证: P1 修复 - 撤销旧Token失败时拒绝刷新，防止旧Token被重复使用
 	t.Run("RevokeToken失败导致刷新失败", func(t *testing.T) {
 		storeInst := mock.New()
 
@@ -307,9 +307,8 @@ func TestAuthService_RefreshToken_ComprehensiveErrorPaths(t *testing.T) {
 
 		_, err = authSvc.RefreshToken(ctx, "valid-refresh-token")
 
-		// 验证返回错误（撤销失败）
+		// 撤销失败应返回错误，防止旧Token被重复使用
 		assert.Error(t, err)
-		assert.NotContains(t, err.Error(), "撤销旧Token失败")
 	})
 
 	// ==== 测试3: StoreToken失败 ====

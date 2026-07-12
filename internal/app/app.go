@@ -45,6 +45,9 @@ func Run(version, buildTime string) {
 	router, rateLimiters, err := initHandlers(cfg, svc, version, buildTime)
 	if err != nil {
 		slog.Error("路由初始化失败", "error", err)
+		// 显式释放已初始化的资源，os.Exit 不会执行 defer
+		_ = db.Close()
+		_ = svc.Cache.Close()
 		os.Exit(1)
 	}
 

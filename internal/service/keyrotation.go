@@ -82,7 +82,7 @@ func (s *KeyRotationService) RotateKey(ctx context.Context) (*model.KeyVersion, 
 	}
 
 	// 使用统一的审计日志工具记录密钥轮换事件
-	auditutil.SafeAuditLog(ctx, s.auditSvc, "key_rotated", "", map[string]interface{}{
+	auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventKeyRotated), "", map[string]interface{}{
 		"key_id": newKeyVersion.ID,
 	})
 
@@ -114,7 +114,7 @@ func (s *KeyRotationService) CleanupExpiredKeys(ctx context.Context) (int, error
 			slog.Info("revoked expired key", "key_id", key.ID)
 
 			// 使用统一的审计日志工具记录密钥撤销事件
-			auditutil.SafeAuditLog(ctx, s.auditSvc, "key_revoked", "", map[string]interface{}{
+			auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventKeyRevoked), "", map[string]interface{}{
 				"key_id": key.ID,
 			})
 		}
@@ -140,7 +140,7 @@ func (s *KeyRotationService) RevokeKey(ctx context.Context, keyID string) error 
 	s.jwtSvc.RemoveKey(keyID)
 
 	// 使用统一的审计日志工具记录密钥撤销事件
-	auditutil.SafeAuditLog(ctx, s.auditSvc, "key_revoked", "", map[string]interface{}{
+	auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventKeyRevoked), "", map[string]interface{}{
 		"key_id": keyID,
 	})
 

@@ -10,6 +10,7 @@ import (
 	"github.com/example/sso/internal/cache"
 	"github.com/example/sso/internal/model"
 	"github.com/example/sso/internal/store"
+	"github.com/example/sso/internal/util/auditutil"
 	"github.com/example/sso/internal/util/serviceutil"
 )
 
@@ -189,7 +190,9 @@ func (s *AdminService) DisableUser(ctx context.Context, userID string) error {
 
 	// 记录管理员操作审计日志（失败不影响主流程）
 	if s.auditSvc != nil {
-		s.auditSvc.LogUserDisabled(ctx, userID, clientIPFromContext(ctx))
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventUserDisabled), userID, map[string]interface{}{
+			"ip_address": clientIPFromContext(ctx),
+		})
 	}
 
 	return nil
@@ -221,7 +224,9 @@ func (s *AdminService) EnableUser(ctx context.Context, userID string) error {
 
 	// 记录管理员操作审计日志（失败不影响主流程）
 	if s.auditSvc != nil {
-		s.auditSvc.LogUserEnabled(ctx, userID, clientIPFromContext(ctx))
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventUserEnabled), userID, map[string]interface{}{
+			"ip_address": clientIPFromContext(ctx),
+		})
 	}
 
 	return nil
@@ -249,7 +254,9 @@ func (s *AdminService) DeleteUser(ctx context.Context, userID string) error {
 
 	// 记录管理员操作审计日志（失败不影响主流程）
 	if s.auditSvc != nil {
-		s.auditSvc.LogUserDeleted(ctx, userID, clientIPFromContext(ctx))
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventUserDeleted), userID, map[string]interface{}{
+			"ip_address": clientIPFromContext(ctx),
+		})
 	}
 
 	return nil
@@ -271,8 +278,14 @@ func (s *AdminService) SystemHealth(ctx context.Context) (*SystemHealthInfo, err
 		dbStatus = "error"
 	}
 
+	// 整体状态：数据库故障时为 error，否则为 ok
+	status := "ok"
+	if dbStatus != "ok" {
+		status = "error"
+	}
+
 	return &SystemHealthInfo{
-		Status:    "ok",
+		Status:    status,
 		Timestamp: time.Now(),
 		Database:  dbStatus,
 		Version:   s.version,
@@ -288,7 +301,9 @@ func (s *AdminService) CleanupExpired(ctx context.Context) error {
 
 	// 记录管理员操作审计日志（失败不影响主流程）
 	if s.auditSvc != nil {
-		s.auditSvc.LogSystemCleanup(ctx, clientIPFromContext(ctx))
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventSystemCleanup), "", map[string]interface{}{
+			"ip_address": clientIPFromContext(ctx),
+		})
 	}
 
 	return nil

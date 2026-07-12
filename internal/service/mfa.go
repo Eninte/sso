@@ -53,6 +53,7 @@ type MFAService struct {
 	totpMu    sync.Mutex
 	totpUsage map[string]*totpUsageRecord // userID -> 使用记录
 	stopChan  chan struct{}               // 停止清理goroutine
+	stopOnce  sync.Once                   // 确保 Close 只执行一次
 }
 
 // recoveryAttempt 恢复码验证尝试记录
@@ -110,7 +111,9 @@ func (s *MFAService) runCleanup() {
 
 // Close 停止后台清理goroutine
 func (s *MFAService) Close() {
-	close(s.stopChan)
+	s.stopOnce.Do(func() {
+		close(s.stopChan)
+	})
 }
 
 // SetHMACKey 设置HMAC密钥（用于恢复码哈希）

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 
+	apperrors "github.com/example/sso/internal/errors"
 	"github.com/example/sso/internal/cache"
 	"github.com/example/sso/internal/crypto"
 	"github.com/example/sso/internal/store"
@@ -59,10 +60,22 @@ func AuthMiddleware(jwtSvc *crypto.JWTService) func(http.Handler) http.Handler {
 // AuthMiddlewareWithStore 带数据库检查的认证中间件
 // 会检查token是否被撤销
 // 注意：此方法每次请求都查询数据库，建议使用AuthMiddlewareWithCache以获得更好性能
+//
+// 安全说明（fail-closed 策略）：
+//   - DB 错误（网络超时、连接失败等）时拒绝请求，防止已撤销 Token 在故障期间被使用
+//   - JWT 签名验证无法替代撤销状态检查：已登出、已禁用会话的 Token 签名仍有效
+//   - 仅 ErrNotFound（Token 确实不存在）才视为已撤销
+//   - 生产环境建议使用 AuthMiddlewareWithCache，缓存层可减轻 DB 故障影响
 func AuthMiddlewareWithStore(jwtSvc *crypto.JWTService, store store.Store) func(http.Handler) http.Handler {
 	return authMiddlewareWithBlacklist(jwtSvc, func(ctx context.Context, token string) bool {
 		tokenRecord, err := store.GetTokenByAccessToken(ctx, token)
 		if err != nil {
+			if errors.Is(err, apperrors.ErrNotFound) {
+				// Token 确实不存在，视为已撤销
+				return true
+			}
+			// DB 错误时 fail-closed：拒绝请求，防止已撤销 Token 绕过检查
+			slog.Error("查询Token状态失败，拒绝请求（fail-closed）", "error", err)
 			return true
 		}
 		return tokenRecord.RevokedAt != nil
@@ -98,7 +111,14 @@ func AuthMiddlewareWithMetrics(jwtSvc *crypto.JWTService, store store.Store, cac
 
 		tokenRecord, err := store.GetTokenByAccessToken(ctx, token)
 		if err != nil {
-			_ = cacheSvc.Set(ctx, cacheKey, true, cache.TokenTTL)
+			if errors.Is(err, apperrors.ErrNotFound) {
+				// Token 确实不存在，缓存为已撤销
+				_ = cacheSvc.Set(ctx, cacheKey, true, cache.TokenTTL)
+				return true
+			}
+			// DB 错误时 fail-closed：拒绝请求，防止已撤销 Token 绕过检查
+			// 不缓存错误状态，避免 DB 恢复后仍拒绝正常 Token
+			slog.Error("查询Token状态失败，拒绝请求（fail-closed）", "error", err)
 			return true
 		}
 

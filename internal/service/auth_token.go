@@ -63,16 +63,37 @@ func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken st
 	}
 	logger.Debug("RefreshToken: 查询到用户", "user_id", user.ID, "email", user.Email)
 
+	// 检查用户状态（被禁用/锁定的用户不能刷新Token）
+	if user.Status == model.UserStatusDisabled {
+		logger.Warn("RefreshToken: 用户已被禁用", "user_id", user.ID)
+		return nil, ErrAccountDisabled
+	}
+	if user.Status == model.UserStatusLocked {
+		logger.Warn("RefreshToken: 用户已被锁定", "user_id", user.ID)
+		return nil, ErrAccountLocked
+	}
+
+	// 先撤销旧 Token，成功后再生成新 Token
+	// 这确保旧 Refresh Token 不会被重复使用换取新 Token
+	// 注意：如果撤销成功但新 Token 生成失败，用户需重新登录（安全优先于可用性）
 	if revokeErr := s.revokeTokenWithRetry(ctx, tokenRecord.AccessToken); revokeErr != nil {
-		logger.Error("撤销旧Token失败，已达到最大重试次数",
+		logger.Error("撤销旧Token失败，拒绝刷新以防止Token重用",
 			"error", revokeErr,
 			"user_id", tokenRecord.UserID,
 			"token_id", tokenRecord.ID,
 		)
-		// 撤销失败时返回错误，避免生成冲突的access_token
 		return nil, serviceutil.WrapServiceError("撤销旧Token", revokeErr)
 	}
-	logger.Debug("RefreshToken: 旧Token已撤销", "token_id", tokenRecord.ID)
+
+	resp, err := s.generateTokenPair(ctx, user.ID, user.Email, user.Role, tokenRecord.Scopes, tokenRecord.ClientID)
+	if err != nil {
+		// 旧 Token 已撤销，新 Token 生成失败，用户需重新登录
+		logger.Error("旧Token已撤销但新Token生成失败，用户需重新登录",
+			"error", err,
+			"user_id", user.ID,
+		)
+		return nil, err
+	}
 
 	s.incrementMetric("auth_token_refresh_total")
 
@@ -83,7 +104,7 @@ func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken st
 		})
 	}
 
-	return s.generateTokenPair(ctx, user.ID, user.Email, user.Role, tokenRecord.Scopes, tokenRecord.ClientID)
+	return resp, nil
 }
 
 func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (*model.LoginResponse, error) {
@@ -98,17 +119,20 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (*m
 func (s *AuthService) LogoutWithAudit(ctx context.Context, accessToken string, auditCtx *AuditContext) error {
 	logger := logging.WithContext(ctx)
 	claims, err := s.jwtSvc.ValidateAccessToken(accessToken)
-	if err == nil && auditCtx != nil {
-		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventUserLogout), claims.Subject, map[string]interface{}{
-			"ip_address": auditCtx.IPAddress,
-		})
-	}
+
 	if err := s.revokeTokenWithRetry(ctx, accessToken); err != nil {
 		logger.Error("登出时撤销Token失败",
 			"error", err,
 			"token_prefix", maskToken(accessToken),
 		)
 		return serviceutil.WrapServiceError("登出", err)
+	}
+
+	// 撤销成功后记录审计日志
+	if err == nil && auditCtx != nil {
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventUserLogout), claims.Subject, map[string]interface{}{
+			"ip_address": auditCtx.IPAddress,
+		})
 	}
 
 	s.incrementMetric("auth_token_revoke_total")
