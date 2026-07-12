@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -757,10 +758,12 @@ func TestIsolateAndCleanup(t *testing.T) {
 	})
 
 	t.Run("redis namespace generation", func(t *testing.T) {
-		// Create a mock Redis client
+		// Use miniredis to avoid depending on a local Redis server
+		mr := miniredis.RunT(t)
 		mockRedis := redis.NewClient(&redis.Options{
-			Addr: "localhost:6379", // Will not be used but must be valid
+			Addr: mr.Addr(),
 		})
+		defer mockRedis.Close()
 
 		runner := NewTestRunner(nil, mockRedis, "http://localhost:9090", &RunnerConfig{
 			UseDBTransactions:  false,
@@ -800,8 +803,6 @@ func TestIsolateAndCleanup(t *testing.T) {
 		if runner.testNamespace != "" {
 			t.Error("expected testNamespace to be cleared after cleanup")
 		}
-
-		mockRedis.Close()
 	})
 }
 
@@ -882,6 +883,16 @@ func TestActiveTxLifecycle(t *testing.T) {
 
 		// Expect transaction rollback
 		mock.ExpectRollback()
+
+		// Expect pattern-based cleanup queries for each table
+		testIDPattern := "%" + runner.testID + "%"
+		mock.ExpectExec("DELETE FROM audit_logs").WithArgs(testIDPattern).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec("DELETE FROM verification_tokens").WithArgs(testIDPattern).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec("DELETE FROM reset_tokens").WithArgs(testIDPattern).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec("DELETE FROM authorization_codes").WithArgs(testIDPattern).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec("DELETE FROM tokens").WithArgs(testIDPattern).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec("DELETE FROM oauth_clients").WithArgs(testIDPattern).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec("DELETE FROM users").WithArgs(testIDPattern).WillReturnResult(sqlmock.NewResult(0, 0))
 
 		err = runner.CleanupTest(ctx, test)
 		if err != nil {

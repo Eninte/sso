@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -86,32 +87,46 @@ func (ih *IsolationHelper) WithRedisNamespace(ctx context.Context, namespace str
 	return err
 }
 
+// tableCleanupDef defines the columns to match for cleaning a specific table.
+type tableCleanupDef struct {
+	table   string
+	columns []string
+}
+
 // CleanupTestDataByPattern deletes database records matching a pattern.
 // This is useful for cleaning up test data that escaped transaction boundaries.
+// Each table uses only the columns it actually owns to avoid SQL errors.
 func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern string) error {
 	if ih.db == nil {
 		return fmt.Errorf("database connection is nil")
 	}
 
-	// Clean up test data in dependency order (foreign keys first)
-	tables := []string{
-		"audit_logs",
-		"verification_tokens",
-		"reset_tokens",
-		"authorization_codes",
-		"tokens",
-		"oauth_clients",
-		"users",
+	// Define columns per table based on actual schema (see migrations/)
+	// Clean in dependency order (foreign keys first)
+	tables := []tableCleanupDef{
+		{"audit_logs", []string{"user_id", "client_id"}},
+		{"verification_tokens", []string{"user_id", "token"}},
+		{"reset_tokens", []string{"user_id", "token"}},
+		{"authorization_codes", []string{"code", "client_id", "user_id"}},
+		{"tokens", []string{"access_token", "refresh_token", "user_id", "client_id"}},
+		{"oauth_clients", []string{"client_id", "name"}},
+		{"users", []string{"email", "id"}},
 	}
 
-	for _, table := range tables {
-		// #nosec G201 -- 表名来自内部常量列表，不是用户输入
-		query := fmt.Sprintf("DELETE FROM %s WHERE email LIKE $1 OR user_id LIKE $1 OR token LIKE $1 OR code LIKE $1 OR client_id LIKE $1", table)
-		_, err := ih.db.ExecContext(ctx, query, pattern)
-		if err != nil {
-			// Ignore errors for tables that don't have the column
-			// In production, we'd want more specific error handling
-			continue
+	for _, t := range tables {
+		// Build WHERE clause from only the columns this table actually has
+		where := ""
+		args := []interface{}{pattern}
+		for i, col := range t.columns {
+			if i > 0 {
+				where += " OR "
+			}
+			where += fmt.Sprintf("%s LIKE $1", col)
+		}
+		// #nosec G201 -- table name and columns come from internal constant list, not user input
+		query := fmt.Sprintf("DELETE FROM %s WHERE %s", t.table, where)
+		if _, err := ih.db.ExecContext(ctx, query, args...); err != nil {
+			return fmt.Errorf("cleanup %s failed: %w", t.table, err)
 		}
 	}
 
@@ -130,9 +145,9 @@ type NamespacedRedisClient struct {
 }
 
 // Set stores a value with the namespaced key.
-func (nrc *NamespacedRedisClient) Set(ctx context.Context, key string, value interface{}, expiration interface{}) error {
+func (nrc *NamespacedRedisClient) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
 	namespacedKey := nrc.namespaceKey(key)
-	return nrc.client.Set(ctx, namespacedKey, value, 0).Err()
+	return nrc.client.Set(ctx, namespacedKey, value, expiration).Err()
 }
 
 // Get retrieves a value using the namespaced key.

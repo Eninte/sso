@@ -39,6 +39,10 @@ type TestRunner struct {
 
 	// testNamespace stores the Redis key namespace for the current test
 	testNamespace string
+
+	// testID stores a unique identifier for the current test, used for
+	// pattern-based cleanup of data that escapes transaction boundaries
+	testID string
 }
 
 // RunnerConfig holds configuration for the test runner.
@@ -442,6 +446,9 @@ func (tr *TestRunner) runSingleTest(ctx context.Context, test Test) TestResult {
 // IsolateTest sets up isolation mechanisms for a test execution.
 // This includes starting a database transaction and setting up Redis namespacing.
 func (tr *TestRunner) IsolateTest(ctx context.Context, test Test) error {
+	// Generate unique test identifier for pattern-based cleanup
+	tr.testID = fmt.Sprintf("e2e_%d_%s", time.Now().UnixNano(), sanitizeTestName(test.Name))
+
 	// Database transaction isolation
 	if tr.config.UseDBTransactions && tr.db != nil {
 		tx, err := tr.db.BeginTx(ctx, nil)
@@ -461,7 +468,9 @@ func (tr *TestRunner) IsolateTest(ctx context.Context, test Test) error {
 }
 
 // CleanupTest performs cleanup after test execution.
-// This includes rolling back database transactions and clearing Redis test data.
+// This includes rolling back database transactions, clearing Redis test data,
+// and pattern-based cleanup for data that may have escaped transaction boundaries
+// (e.g., through HTTP requests handled by the server's own DB connections).
 func (tr *TestRunner) CleanupTest(ctx context.Context, test Test) error {
 	var cleanupErrors []error
 
@@ -471,6 +480,16 @@ func (tr *TestRunner) CleanupTest(ctx context.Context, test Test) error {
 			cleanupErrors = append(cleanupErrors, fmt.Errorf("transaction rollback failed: %w", err))
 		}
 		tr.activeTx = nil
+	}
+
+	// Pattern-based cleanup: removes test data that escaped the transaction
+	// boundary (e.g., HTTP requests executed by the server's own DB connections).
+	if tr.testID != "" && tr.db != nil {
+		isolation := NewIsolationHelper(tr.db, tr.redis)
+		if err := isolation.CleanupTestDataByPattern(ctx, "%"+tr.testID+"%"); err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("pattern cleanup failed: %w", err))
+		}
+		tr.testID = ""
 	}
 
 	// Clean up Redis test keys with namespace prefix
@@ -825,6 +844,14 @@ func (tr *TestRunner) GetDB() *sql.DB {
 // GetRedis returns the Redis client for direct Redis operations if needed.
 func (tr *TestRunner) GetRedis() *redis.Client {
 	return tr.redis
+}
+
+// GetTx returns the active database transaction for the current test.
+// Returns nil if DB transactions are disabled or no test is active.
+// Use this to execute direct database operations within the test transaction,
+// ensuring they are rolled back during cleanup.
+func (tr *TestRunner) GetTx() *sql.Tx {
+	return tr.activeTx
 }
 
 // ============================================================================
