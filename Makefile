@@ -2,6 +2,11 @@
 # SSO服务构建配置
 # ============================================================================
 
+# Shell configuration for proper error propagation
+.ONESHELL:
+SHELL := /bin/bash
+.SHELLFLAGS := -e -u -o pipefail -c
+
 # 变量定义
 APP_NAME=sso
 BUILD_DIR=./bin
@@ -25,9 +30,12 @@ all: test build  ## 运行测试并构建
 .PHONY: build
 build: ## 构建应用二进制文件（自动注入版本信息）
 	@echo "构建 $(APP_NAME) $(VERSION)..."
-	@mkdir -p $(BUILD_DIR)
-	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP_NAME) cmd/server/main.go
-	@echo "构建完成: $(BUILD_DIR)/$(APP_NAME) (版本: $(VERSION), 构建时间: $(BUILD_TIME))"
+	@mkdir -p $(BUILD_DIR) || { echo "❌ 创建构建目录失败"; exit 1; }
+	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP_NAME) cmd/server/main.go || { \
+		echo "❌ 构建失败"; \
+		exit 1; \
+	}
+	@echo "✅ 构建完成: $(BUILD_DIR)/$(APP_NAME) (版本: $(VERSION), 构建时间: $(BUILD_TIME))"
 
 .PHONY: release
 release: ## 构建发布版本（清理后构建，带版本标签）
@@ -53,7 +61,12 @@ dev: ## 开发模式: 启动依赖服务并运行应用
 # ============================================================================
 .PHONY: test
 test: ## 运行所有测试
-	DATABASE_URL="$(TEST_DATABASE_URL)" gotestsum --format pkgname -- -race -timeout 120s ./...
+	@test -f .env.test || { echo "❌ .env.test 不存在，请参照 .env.example 创建"; exit 1; }; set -a; source .env.test; set +a; \
+	DATABASE_URL="$(TEST_DATABASE_URL)" gotestsum --format pkgname -- -race -timeout 120s ./... || { \
+		echo "❌ 测试失败"; \
+		exit 1; \
+	}
+	@echo "✅ 所有测试通过"
 
 .PHONY: test-verbose
 test-verbose: ## 运行测试（详细输出）
@@ -69,7 +82,11 @@ test-integration: ## 运行集成测试
 
 .PHONY: test-e2e
 test-e2e: ## 运行端到端测试（需要服务运行中）
-	E2E_ADMIN_EMAIL="system@eninte.com" E2E_ADMIN_PASSWORD="Admin1234!" RATE_LIMIT_REQUESTS=0 CAPTCHA_ENABLED=false DATABASE_URL="$(TEST_DATABASE_URL)" gotestsum --format pkgname -- -race -tags=e2e ./test/e2e/...
+	@E2E_ADMIN_EMAIL="system@eninte.com" E2E_ADMIN_PASSWORD="Admin1234!" RATE_LIMIT_REQUESTS=0 CAPTCHA_ENABLED=false DATABASE_URL="$(TEST_DATABASE_URL)" gotestsum --format pkgname -- -race -tags=e2e ./test/e2e/... || { \
+		echo "❌ E2E测试失败"; \
+		exit 1; \
+	}
+	@echo "✅ E2E测试通过"
 
 .PHONY: test-e2e-prepare
 test-e2e-prepare: ## 准备E2E测试数据（验证测试用户邮箱）
@@ -83,12 +100,30 @@ test-e2e-cleanup: ## 清理E2E测试数据（CI安全，非交互模式）
 test-e2e-full: test-e2e-prepare test-e2e test-e2e-cleanup ## 完整E2E测试流程（准备数据 + 运行测试 + 清理）
 
 .PHONY: test-coverage
-test-coverage: ## 生成测试覆盖率报告（HTML）
-	DATABASE_URL="$(TEST_DATABASE_URL)" go test -coverprofile=coverage.out $(shell go list ./internal/... | grep -v '/store/mock')
-	go tool cover -func=coverage.out | grep "total:"
+test-coverage: ## 生成测试覆盖率报告（HTML + JSON）并执行阈值检查
+	@test -f .env.test || { echo "❌ .env.test 不存在，请参照 .env.example 创建"; exit 1; }; set -a; source .env.test; set +a; \
+	DATABASE_URL="$(TEST_DATABASE_URL)" go test -coverprofile=coverage.out $$(go list ./internal/... | grep -v '/store/mock') || { \
+		echo "❌ 覆盖率测试失败"; \
+		exit 1; \
+	}
+	@go tool cover -func=coverage.out | grep "total:" || { \
+		echo "❌ 覆盖率报告生成失败"; \
+		exit 1; \
+	}
 	@echo "---"
-	go tool cover -html=coverage.out -o coverage.html
-	@echo "覆盖率报告: coverage.html"
+	@echo "生成覆盖率报告..."
+	@go run cmd/coverage-check/main.go \
+		-profile coverage.out \
+		-threshold 80.0 \
+		-html coverage.html \
+		-json coverage.json \
+		-verbose || { \
+		echo ""; \
+		echo "❌ 覆盖率未达到80%阈值"; \
+		exit 1; \
+	}
+	@echo "✅ 覆盖率报告: coverage.html, coverage.json"
+	@echo "✅ 覆盖率检查通过"
 
 .PHONY: test-report
 test-report: ## 生成JUnit XML测试报告
@@ -101,19 +136,24 @@ test-failed: ## 仅重跑失败的测试
 
 .PHONY: test-coverage-check
 test-coverage-check: ## 运行测试并检查覆盖率阈值 (>=80%，排除app组合根与store/mock)
-	@go test -coverprofile=coverage.out $(shell go list ./internal/... | grep -v '/store/mock' | grep -v '/internal/app$$') > /dev/null 2>&1
-	@COVERAGE=$$(go tool cover -func=coverage.out | grep total | awk '{print $$3}' | sed 's/%//'); \
-	if [ $$(echo "$$COVERAGE < 80" | bc) -eq 1 ]; then \
-		echo "❌ Coverage $$COVERAGE% is below threshold 80%"; \
+	@test -f .env.test || { echo "❌ .env.test 不存在，请参照 .env.example 创建"; exit 1; }; set -a; source .env.test; set +a; \
+	DATABASE_URL="$(TEST_DATABASE_URL)" go test -coverprofile=coverage.out $$(go list ./internal/... | grep -v '/store/mock' | grep -v '/internal/app$$') > /dev/null 2>&1 || { \
+		echo "❌ 测试失败"; \
 		exit 1; \
-	fi; \
-	echo "✅ Coverage: $$COVERAGE%"
+	}
+	@go run cmd/coverage-check/main.go -profile coverage.out -threshold 80.0 || { \
+		exit 1; \
+	}
 
 .PHONY: test-security
 test-security: ## 运行安全检查
-	go vet ./...
-	@which govulncheck > /dev/null || go install golang.org/x/vuln/cmd/govulncheck@latest
-	govulncheck ./...
+	@go vet ./... || { echo "❌ go vet 安全检查失败"; exit 1; }
+	@which govulncheck > /dev/null || go install golang.org/x/vuln/cmd/govulncheck@latest || { \
+		echo "❌ govulncheck 安装失败"; \
+		exit 1; \
+	}
+	@govulncheck ./... || { echo "❌ 漏洞检查失败"; exit 1; }
+	@echo "✅ 安全检查通过"
 
 # ============================================================================
 # 数据库迁移
@@ -189,9 +229,10 @@ deploy: ## 部署到TrueNAS (用法: make deploy [TRUENAS_HOST=192.168.1.3])
 # ============================================================================
 .PHONY: lint
 lint: ## 运行代码检查
-	go vet ./...
-	@which golangci-lint > /dev/null || (echo "错误: 未安装 golangci-lint，请安装后再运行 lint" && exit 1)
-	golangci-lint run ./...
+	@go vet ./... || { echo "❌ go vet 检查失败"; exit 1; }
+	@which golangci-lint > /dev/null || { echo "❌ 未安装 golangci-lint，请安装后再运行 lint"; exit 1; }
+	@golangci-lint run ./... || { echo "❌ golangci-lint 检查失败"; exit 1; }
+	@echo "✅ 代码检查通过"
 
 .PHONY: fmt
 fmt: ## 格式化代码
@@ -204,6 +245,40 @@ fmt: ## 格式化代码
 clean: ## 清理构建文件
 	rm -rf $(BUILD_DIR)
 	rm -f coverage.out coverage.html test-results.xml
+
+# ============================================================================
+# 错误处理验证
+# ============================================================================
+.PHONY: test-error-handling
+test-error-handling: ## 验证 Makefile 错误处理机制
+	@echo "=========================================="
+	@echo "  Makefile 错误处理验证测试"
+	@echo "=========================================="
+	@echo ""
+	@echo "测试 1: 构建失败错误传播"
+	@echo "-------------------------------------------"
+	@bash -c 'set -e; false; echo "这行不应该被执行"' 2>/dev/null && { \
+		echo "❌ 测试失败：错误未正确传播"; \
+		exit 1; \
+	} || echo "✅ 通过：false 命令正确导致脚本终止"
+	@echo ""
+	@echo "测试 2: 命令链错误中断（管道）"
+	@echo "-------------------------------------------"
+	@bash -c 'set -e -o pipefail; false | true' 2>/dev/null && { \
+		echo "❌ 测试失败：管道错误未正确传播"; \
+		exit 1; \
+	} || echo "✅ 通过：管道中的失败命令正确导致脚本终止"
+	@echo ""
+	@echo "测试 3: 未定义变量检测"
+	@echo "-------------------------------------------"
+	@bash -c 'set -u; echo $$UNDEFINED_VAR' 2>/dev/null && { \
+		echo "❌ 测试失败：未定义变量未被检测"; \
+		exit 1; \
+	} || echo "✅ 通过：未定义变量正确触发错误"
+	@echo ""
+	@echo "=========================================="
+	@echo "✅ 所有 Makefile 错误处理测试通过"
+	@echo "=========================================="
 
 # ============================================================================
 # 帮助
