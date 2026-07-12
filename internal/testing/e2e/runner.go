@@ -489,8 +489,9 @@ func (tr *TestRunner) CleanupTest(ctx context.Context, test Test) error {
 		if err := isolation.CleanupTestDataByPattern(ctx, "%"+tr.testID+"%"); err != nil {
 			cleanupErrors = append(cleanupErrors, fmt.Errorf("pattern cleanup failed: %w", err))
 		}
-		tr.testID = ""
 	}
+	// Always clear testID after cleanup attempt
+	tr.testID = ""
 
 	// Clean up Redis test keys with namespace prefix
 	if tr.config.RedisNamespaceMode && tr.redis != nil && tr.testNamespace != "" {
@@ -844,6 +845,27 @@ func (tr *TestRunner) GetDB() *sql.DB {
 // GetRedis returns the Redis client for direct Redis operations if needed.
 func (tr *TestRunner) GetRedis() *redis.Client {
 	return tr.redis
+}
+
+// GetTestID returns the unique test identifier for the current test execution.
+// This identifier is generated during IsolateTest and can be embedded in test
+// data (e.g., email addresses, client IDs) so that CleanupTest's pattern-based
+// cleanup can find and remove all data created by the test.
+//
+// Example usage in a test:
+//
+//	func TestExample(t *testing.T) {
+//	    runner.Run(ctx, []Test{{
+//	        Name: "MyTest",
+//	        Run: func(ctx context.Context, tr *TestRunner) error {
+//	            testID := tr.GetTestID()
+//	            email := fmt.Sprintf("user-%s@example.com", testID)
+//	            // ... create user with this email ...
+//	        },
+//	    }})
+//	}
+func (tr *TestRunner) GetTestID() string {
+	return tr.testID
 }
 
 // GetTx returns the active database transaction for the current test.

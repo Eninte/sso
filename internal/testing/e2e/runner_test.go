@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -885,6 +886,7 @@ func TestActiveTxLifecycle(t *testing.T) {
 		mock.ExpectRollback()
 
 		// Expect pattern-based cleanup queries for each table
+		// UUID columns (user_id, id) use ::text cast for LIKE compatibility
 		testIDPattern := "%" + runner.testID + "%"
 		mock.ExpectExec("DELETE FROM audit_logs").WithArgs(testIDPattern).WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec("DELETE FROM verification_tokens").WithArgs(testIDPattern).WillReturnResult(sqlmock.NewResult(0, 0))
@@ -1327,4 +1329,166 @@ func TestCheckSMTPAvailable_PartialConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ============================================================================
+// GetTestID Tests
+// ============================================================================
+
+// TestGetTestID_ReturnsEmptyBeforeIsolation verifies GetTestID returns empty before IsolateTest.
+func TestGetTestID_ReturnsEmptyBeforeIsolation(t *testing.T) {
+	runner := NewTestRunner(nil, nil, "http://localhost:9090", &RunnerConfig{
+		UseDBTransactions:  false,
+		RedisNamespaceMode: false,
+	})
+
+	if id := runner.GetTestID(); id != "" {
+		t.Errorf("expected empty testID before isolation, got '%s'", id)
+	}
+}
+
+// TestGetTestID_ReturnsNonEmptyAfterIsolation verifies GetTestID returns a value after IsolateTest.
+func TestGetTestID_ReturnsNonEmptyAfterIsolation(t *testing.T) {
+	runner := NewTestRunner(nil, nil, "http://localhost:9090", &RunnerConfig{
+		UseDBTransactions:  false,
+		RedisNamespaceMode: false,
+	})
+
+	test := Test{Name: "GetTestIDTest"}
+	ctx := context.Background()
+
+	err := runner.IsolateTest(ctx, test)
+	if err != nil {
+		t.Fatalf("IsolateTest failed: %v", err)
+	}
+
+	testID := runner.GetTestID()
+	if testID == "" {
+		t.Error("expected non-empty testID after IsolateTest")
+	}
+
+	// Verify testID contains sanitized test name
+	if !strings.Contains(testID, "GetTestIDTest") {
+		t.Errorf("expected testID to contain test name, got '%s'", testID)
+	}
+
+	// Verify testID starts with e2e_ prefix
+	if !strings.HasPrefix(testID, "e2e_") {
+		t.Errorf("expected testID to start with 'e2e_', got '%s'", testID)
+	}
+
+	// Cleanup
+	runner.CleanupTest(ctx, test)
+}
+
+// TestGetTestID_ReturnsConsistentValue verifies GetTestID returns the same value on repeated calls.
+func TestGetTestID_ReturnsConsistentValue(t *testing.T) {
+	runner := NewTestRunner(nil, nil, "http://localhost:9090", &RunnerConfig{
+		UseDBTransactions:  false,
+		RedisNamespaceMode: false,
+	})
+
+	test := Test{Name: "ConsistentIDTest"}
+	ctx := context.Background()
+
+	err := runner.IsolateTest(ctx, test)
+	if err != nil {
+		t.Fatalf("IsolateTest failed: %v", err)
+	}
+
+	id1 := runner.GetTestID()
+	id2 := runner.GetTestID()
+
+	if id1 != id2 {
+		t.Errorf("expected consistent testID, got '%s' then '%s'", id1, id2)
+	}
+
+	// Cleanup
+	runner.CleanupTest(ctx, test)
+}
+
+// TestGetTestID_ClearedAfterCleanup verifies GetTestID returns empty after CleanupTest.
+func TestGetTestID_ClearedAfterCleanup(t *testing.T) {
+	runner := NewTestRunner(nil, nil, "http://localhost:9090", &RunnerConfig{
+		UseDBTransactions:  false,
+		RedisNamespaceMode: false,
+	})
+
+	test := Test{Name: "CleanupIDTest"}
+	ctx := context.Background()
+
+	err := runner.IsolateTest(ctx, test)
+	if err != nil {
+		t.Fatalf("IsolateTest failed: %v", err)
+	}
+
+	if id := runner.GetTestID(); id == "" {
+		t.Fatal("expected non-empty testID after IsolateTest")
+	}
+
+	err = runner.CleanupTest(ctx, test)
+	if err != nil {
+		t.Fatalf("CleanupTest failed: %v", err)
+	}
+
+	if id := runner.GetTestID(); id != "" {
+		t.Errorf("expected empty testID after CleanupTest, got '%s'", id)
+	}
+}
+
+// TestGetTestID_UniquePerTest verifies different tests get different testIDs.
+func TestGetTestID_UniquePerTest(t *testing.T) {
+	runner := NewTestRunner(nil, nil, "http://localhost:9090", &RunnerConfig{
+		UseDBTransactions:  false,
+		RedisNamespaceMode: false,
+	})
+
+	ctx := context.Background()
+
+	test1 := Test{Name: "Test1"}
+	runner.IsolateTest(ctx, test1)
+	id1 := runner.GetTestID()
+	runner.CleanupTest(ctx, test1)
+
+	test2 := Test{Name: "Test2"}
+	runner.IsolateTest(ctx, test2)
+	id2 := runner.GetTestID()
+	runner.CleanupTest(ctx, test2)
+
+	if id1 == id2 {
+		t.Errorf("expected unique testIDs for different tests, both got '%s'", id1)
+	}
+}
+
+// TestGetTestID_UsableInTestData verifies testID can be embedded in test data patterns.
+func TestGetTestID_UsableInTestData(t *testing.T) {
+	runner := NewTestRunner(nil, nil, "http://localhost:9090", &RunnerConfig{
+		UseDBTransactions:  false,
+		RedisNamespaceMode: false,
+	})
+
+	test := Test{Name: "UsableIDTest"}
+	ctx := context.Background()
+
+	err := runner.IsolateTest(ctx, test)
+	if err != nil {
+		t.Fatalf("IsolateTest failed: %v", err)
+	}
+
+	testID := runner.GetTestID()
+
+	// Verify testID can be used to construct email-like test data
+	email := fmt.Sprintf("user-%s@example.com", testID)
+	if !strings.Contains(email, testID) {
+		t.Errorf("expected email to contain testID, got '%s'", email)
+	}
+
+	// Verify testID can be used in client_id-like test data
+	clientID := fmt.Sprintf("client-%s", testID)
+	if !strings.Contains(clientID, testID) {
+		t.Errorf("expected clientID to contain testID, got '%s'", clientID)
+	}
+
+	// Cleanup
+	runner.CleanupTest(ctx, test)
 }

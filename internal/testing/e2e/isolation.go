@@ -89,39 +89,76 @@ func (ih *IsolationHelper) WithRedisNamespace(ctx context.Context, namespace str
 
 // tableCleanupDef defines the columns to match for cleaning a specific table.
 type tableCleanupDef struct {
-	table   string
-	columns []string
+	table      string
+	columns    []string
+	uuidCols   map[string]bool // columns that are UUID type need ::text cast for LIKE
 }
 
 // CleanupTestDataByPattern deletes database records matching a pattern.
 // This is useful for cleaning up test data that escaped transaction boundaries.
 // Each table uses only the columns it actually owns to avoid SQL errors.
+// UUID columns are cast to text before applying LIKE, since PostgreSQL does not
+// support the LIKE operator directly on UUID types.
 func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern string) error {
 	if ih.db == nil {
 		return fmt.Errorf("database connection is nil")
 	}
 
 	// Define columns per table based on actual schema (see migrations/)
-	// Clean in dependency order (foreign keys first)
+	// Clean in dependency order (foreign keys first).
+	// UUID columns are explicitly marked so they get a ::text cast.
 	tables := []tableCleanupDef{
-		{"audit_logs", []string{"user_id", "client_id"}},
-		{"verification_tokens", []string{"user_id", "token"}},
-		{"reset_tokens", []string{"user_id", "token"}},
-		{"authorization_codes", []string{"code", "client_id", "user_id"}},
-		{"tokens", []string{"access_token", "refresh_token", "user_id", "client_id"}},
-		{"oauth_clients", []string{"client_id", "name"}},
-		{"users", []string{"email", "id"}},
+		{
+			table:    "audit_logs",
+			columns:  []string{"user_id", "client_id"},
+			uuidCols: map[string]bool{}, // audit_logs.user_id is VARCHAR(36), not UUID
+		},
+		{
+			table:    "verification_tokens",
+			columns:  []string{"user_id", "token"},
+			uuidCols: map[string]bool{"user_id": true},
+		},
+		{
+			table:    "reset_tokens",
+			columns:  []string{"user_id", "token"},
+			uuidCols: map[string]bool{"user_id": true},
+		},
+		{
+			table:    "authorization_codes",
+			columns:  []string{"code", "client_id", "user_id"},
+			uuidCols: map[string]bool{"user_id": true},
+		},
+		{
+			table:    "tokens",
+			columns:  []string{"access_token", "refresh_token", "user_id", "client_id"},
+			uuidCols: map[string]bool{"user_id": true},
+		},
+		{
+			table:    "oauth_clients",
+			columns:  []string{"client_id", "name"},
+			uuidCols: map[string]bool{},
+		},
+		{
+			table:    "users",
+			columns:  []string{"email", "id"},
+			uuidCols: map[string]bool{"id": true},
+		},
 	}
 
 	for _, t := range tables {
-		// Build WHERE clause from only the columns this table actually has
+		// Build WHERE clause from only the columns this table actually has.
+		// UUID columns are cast to text so LIKE works on PostgreSQL.
 		where := ""
 		args := []interface{}{pattern}
 		for i, col := range t.columns {
 			if i > 0 {
 				where += " OR "
 			}
-			where += fmt.Sprintf("%s LIKE $1", col)
+			if t.uuidCols[col] {
+				where += fmt.Sprintf("%s::text LIKE $1", col)
+			} else {
+				where += fmt.Sprintf("%s LIKE $1", col)
+			}
 		}
 		// #nosec G201 -- table name and columns come from internal constant list, not user input
 		query := fmt.Sprintf("DELETE FROM %s WHERE %s", t.table, where)
