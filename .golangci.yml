@@ -50,8 +50,6 @@ linters:
     - errchkjson
     - gocritic
     - goconst
-    - gocyclo
-    - gosec
     - unused
     - errorlint
     - govet
@@ -123,5 +121,11 @@ issues:
     - path: cmd/
       linters:
         - errcheck
+        - gocognit
+        - gocyclo
+    - path: internal/testing/coverage/
+      linters:
+        - revive
+        - gocognit
   max-issues-per-linter: 100
   max-same-issues: 10

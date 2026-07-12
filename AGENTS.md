@@ -61,6 +61,25 @@ make migrate-create NAME=xxx  # 创建新迁移文件
 - `.env.test` - 测试环境配置（含真实凭据，不可分发）
 - `.env` - 本地开发配置（自行创建，不提交）
 
+### 测试环境连接信息
+
+测试数据库和服务已部署在远程主机，配置存储在 `.env.test` 中（不可提交/分发）。
+
+连接方式：
+
+```bash
+# 加载测试环境变量
+source .env.test
+
+# PostgreSQL 连接
+echo $DATABASE_URL
+
+# Redis 连接
+echo $REDIS_URL
+```
+
+> ⚠️ **安全要求：** 不得将 `.env.test` 中的凭据硬编码到代码或文档中。如需新环境凭据，联系项目维护者。
+
 所有配置项详见 `.env.example`。测试环境关键差异：
 
 | 配置项 | 测试环境 | 生产环境 |

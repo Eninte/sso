@@ -44,7 +44,7 @@ func (s *Store) storeToken(ctx context.Context, tableName, userID, token string,
 	_, _ = s.db.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE user_id = $1`, tableName), userID)
 
 	// 插入新令牌
-	// nosec G201 -- tableName 已通过 validateTableName 验证，防止 SQL 注入
+	// #nosec G201 -- tableName 已通过 validateTableName 验证，防止 SQL 注入
 	query := fmt.Sprintf(`INSERT INTO %s (user_id, token, expires_at, created_at) VALUES ($1, $2, $3, $4)`, tableName)
 	_, err := s.db.ExecContext(ctx, query, userID, token, expiresAt, time.Now())
 	return err

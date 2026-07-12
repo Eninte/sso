@@ -1084,3 +1084,74 @@ func TestStore_MFARecoveryCodes_UserNotFound(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func TestStore_DeleteAllMFARecoveryCodes(t *testing.T) {
+	store, db := setupTestStore(t)
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
+	ctx := context.Background()
+
+	// 创建测试用户
+	user := newTestUser("mfa-deleteall@example.com")
+	require.NoError(t, store.Create(ctx, user))
+
+	// 存储恢复码
+	codeHashes := []string{"$2a$10$hash1", "$2a$10$hash2", "$2a$10$hash3"}
+	require.NoError(t, store.StoreMFARecoveryCodes(ctx, user.ID, codeHashes))
+
+	t.Run("删除所有恢复码", func(t *testing.T) {
+		err := store.DeleteAllMFARecoveryCodes(ctx, user.ID)
+		assert.NoError(t, err)
+
+		// 验证恢复码已全部删除
+		codes, err := store.GetUnusedMFARecoveryCodes(ctx, user.ID)
+		assert.NoError(t, err)
+		assert.Empty(t, codes)
+	})
+
+	t.Run("删除不存在用户的恢复码-不报错", func(t *testing.T) {
+		err := store.DeleteAllMFARecoveryCodes(ctx, "00000000-0000-0000-0000-000000000000")
+		assert.NoError(t, err)
+	})
+}
+
+func TestStore_DisableMFAAndClearRecoveryCodes(t *testing.T) {
+	store, db := setupTestStore(t)
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
+	ctx := context.Background()
+
+	// 创建启用MFA的测试用户
+	user := newTestUser("mfa-disable@example.com")
+	user.MFAEnabled = true
+	user.MFASecret = "test-secret-key"
+	require.NoError(t, store.Create(ctx, user))
+
+	// 存储恢复码
+	codeHashes := []string{"$2a$10$hash1", "$2a$10$hash2"}
+	require.NoError(t, store.StoreMFARecoveryCodes(ctx, user.ID, codeHashes))
+
+	t.Run("原子禁用MFA并清除恢复码", func(t *testing.T) {
+		// 修改用户状态
+		user.MFAEnabled = false
+		user.MFASecret = ""
+
+		err := store.DisableMFAAndClearRecoveryCodes(ctx, user)
+		assert.NoError(t, err)
+
+		// 验证用户MFA已禁用
+		updatedUser, err := store.GetByID(ctx, user.ID)
+		assert.NoError(t, err)
+		assert.False(t, updatedUser.MFAEnabled)
+		assert.Empty(t, updatedUser.MFASecret)
+
+		// 验证恢复码已全部清除
+		codes, err := store.GetUnusedMFARecoveryCodes(ctx, user.ID)
+		assert.NoError(t, err)
+		assert.Empty(t, codes)
+	})
+}
