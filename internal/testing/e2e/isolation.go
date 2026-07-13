@@ -137,7 +137,7 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 	// Phase 2: Delete audit logs for those users.
 	// audit_logs.user_id stores UUIDs, not testIDs, so LIKE on the pattern
 	// won't match. Instead, delete by the collected user UUIDs.
-	if err := ih.deleteAuditLogsByUserIDs(ctx, userIDs); err != nil {
+	if _, err := ih.deleteAuditLogsByUserIDs(ctx, userIDs); err != nil {
 		return fmt.Errorf("cleanup audit_logs (by user_id) failed: %w", err)
 	}
 
@@ -208,15 +208,45 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 		}
 	}
 
-	// Phase 4: If extraUserIDs were provided, poll briefly for async audit writes.
+	// Phase 4: If extraUserIDs were provided, poll for async audit writes.
 	// The audit service writes asynchronously via a worker pool; the initial
-	// delete in Phase 2 may race against a pending write. A short retry loop
-	// catches the stragglers without adding noticeable test latency.
+	// delete in Phase 2 may race against a pending write. We poll with
+	// exponential backoff (20ms → 40ms → 80ms → … capped at 100ms) within
+	// the context's remaining time budget. Two consecutive zero-delete rounds
+	// mean the async queue has drained; context expiry is a hard stop.
 	if len(extraUserIDs) > 0 {
-		for i := 0; i < 3; i++ {
-			time.Sleep(50 * time.Millisecond)
-			if err := ih.deleteAuditLogsByUserIDs(ctx, extraUserIDs); err != nil {
+		backoff := 20 * time.Millisecond
+		const maxBackoff = 100 * time.Millisecond
+		consecutiveEmpty := 0
+
+		for {
+			if ctx.Err() != nil {
+				break
+			}
+
+			time.Sleep(backoff)
+			if backoff < maxBackoff {
+				backoff *= 2
+				if backoff > maxBackoff {
+					backoff = maxBackoff
+				}
+			}
+
+			deleted, err := ih.deleteAuditLogsByUserIDs(ctx, extraUserIDs)
+			if err != nil {
+				if ctx.Err() != nil {
+					break
+				}
 				return fmt.Errorf("cleanup audit_logs (async poll) failed: %w", err)
+			}
+
+			if deleted == 0 {
+				consecutiveEmpty++
+				if consecutiveEmpty >= 2 {
+					break
+				}
+			} else {
+				consecutiveEmpty = 0
 			}
 		}
 	}
@@ -248,10 +278,10 @@ func (ih *IsolationHelper) collectUserIDsByPattern(ctx context.Context, pattern 
 
 // deleteAuditLogsByUserIDs deletes audit log entries for the given user UUIDs.
 // This handles the case where audit_logs.user_id stores server-generated UUIDs
-// that don't contain the testID string.
-func (ih *IsolationHelper) deleteAuditLogsByUserIDs(ctx context.Context, userIDs []string) error {
+// that don't contain the testID string. Returns the number of rows deleted.
+func (ih *IsolationHelper) deleteAuditLogsByUserIDs(ctx context.Context, userIDs []string) (int64, error) {
 	if len(userIDs) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	// Build IN clause: DELETE FROM audit_logs WHERE user_id IN ($1, $2, ...)
@@ -266,8 +296,11 @@ func (ih *IsolationHelper) deleteAuditLogsByUserIDs(ctx context.Context, userIDs
 	}
 	query += ")"
 
-	_, err := ih.db.ExecContext(ctx, query, args...)
-	return err
+	res, err := ih.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // ============================================================================
