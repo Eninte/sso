@@ -573,7 +573,7 @@ func ensureTestCleanup(t *testing.T) {
 		defer cancel()
 
 		helper := e2etest.NewIsolationHelper(e2eDB, nil)
-		if err := helper.CleanupTestDataByPattern(ctx, "%"+cleanupID+"%", currentExtraCleanupIDs...); err != nil {
+		if err := helper.CleanupTestDataByPatternWithRetry(ctx, "%"+cleanupID+"%", 2*time.Second, 3, currentExtraCleanupIDs...); err != nil {
 			t.Logf("WARN: 自动清理失败 (testID=%s): %v", cleanupID, err)
 		}
 		currentTestCleanupID = ""

@@ -336,7 +336,11 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 			}
 		}
 		// Post-sweep check: if records still exist, signal the caller to retry.
-		if remaining, err := ih.countAuditLogsByUserIDs(sweepCtx, extraUserIDs); err == nil && remaining > 0 {
+		remaining, err := ih.countAuditLogsByUserIDs(sweepCtx, extraUserIDs)
+		if err != nil {
+			return fmt.Errorf("audit-log post-sweep count failed: %w", err)
+		}
+		if remaining > 0 {
 			return ErrResidualAuditLogs
 		}
 	}
