@@ -514,6 +514,87 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
+
+	t.Run("post-count re-sweep DELETE failure returns error", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		defer db.Close()
+
+		fc := newFakeClock(time.Now())
+		helper := NewIsolationHelper(db, nil).WithClock(fc)
+		helper.DrainWindow = 100 * time.Millisecond
+		helper.SettleTimeout = 1 * time.Second
+		helper.SweepTimeout = 1 * time.Second
+
+		setupPhase1to3(mock, pattern, extraUserID)
+		// Phase 4 poll → drain
+		for i := 0; i < 3; i++ {
+			mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+				WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		}
+		// Sweep: 2 empty passes
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		// Post-sweep COUNT → 0
+		mock.ExpectQuery(`SELECT COUNT\(\*\) FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+		// Post-count re-sweep DELETE → database error
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnError(fmt.Errorf("connection reset"))
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		err = helper.CleanupTestDataByPattern(ctx, pattern, extraUserID)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "post-count re-sweep failed")
+		assert.Contains(t, err.Error(), "connection reset")
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("post-count re-check COUNT failure returns error", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		defer db.Close()
+
+		fc := newFakeClock(time.Now())
+		helper := NewIsolationHelper(db, nil).WithClock(fc)
+		helper.DrainWindow = 100 * time.Millisecond
+		helper.SettleTimeout = 1 * time.Second
+		helper.SweepTimeout = 1 * time.Second
+
+		setupPhase1to3(mock, pattern, extraUserID)
+		// Phase 4 poll → drain
+		for i := 0; i < 3; i++ {
+			mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+				WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		}
+		// Sweep: 2 empty passes
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		// Post-sweep COUNT → 0
+		mock.ExpectQuery(`SELECT COUNT\(\*\) FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+		// Post-count re-sweep catches late write
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 1))
+		// Re-count → database error
+		mock.ExpectQuery(`SELECT COUNT\(\*\) FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnError(fmt.Errorf("connection refused"))
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		err = helper.CleanupTestDataByPattern(ctx, pattern, extraUserID)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "post-count re-check failed")
+		assert.Contains(t, err.Error(), "connection refused")
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
 }
 
 // ============================================================================

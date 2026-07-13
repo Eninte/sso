@@ -363,10 +363,18 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 		case <-sweepCtx.Done():
 			// Parent deadline already expired — skip re-check.
 		case <-ih.clock.After(postCountDrain):
-			if deleted, _ := ih.deleteAuditLogsByUserIDs(sweepCtx, extraUserIDs); deleted > 0 {
+			deleted, err := ih.deleteAuditLogsByUserIDs(sweepCtx, extraUserIDs)
+			if err != nil {
+				return fmt.Errorf("audit-log post-count re-sweep failed: %w", err)
+			}
+			if deleted > 0 {
 				// Caught a late write. Re-count to give WithRetry a
 				// chance to do another full attempt.
-				if remaining, _ := ih.countAuditLogsByUserIDs(sweepCtx, extraUserIDs); remaining > 0 {
+				remaining, err := ih.countAuditLogsByUserIDs(sweepCtx, extraUserIDs)
+				if err != nil {
+					return fmt.Errorf("audit-log post-count re-check failed: %w", err)
+				}
+				if remaining > 0 {
 					return ErrResidualAuditLogs
 				}
 			}
