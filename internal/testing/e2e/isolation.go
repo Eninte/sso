@@ -5,10 +5,54 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
+
+// clock abstracts time.Now for deterministic testing.
+type clock interface {
+	Now() time.Time
+	After(d time.Duration) <-chan time.Time
+}
+
+// realClock delegates to the standard time package.
+type realClock struct{}
+
+func (realClock) Now() time.Time                       { return time.Now() }
+func (realClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
+
+// fakeClock is a manually-advancing clock for tests.
+// Call Advance to move time forward; Now returns the current fake time.
+type fakeClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func newFakeClock(start time.Time) *fakeClock { return &fakeClock{now: start} }
+
+func (fc *fakeClock) Now() time.Time {
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	return fc.now
+}
+
+func (fc *fakeClock) Advance(d time.Duration) {
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	fc.now = fc.now.Add(d)
+}
+
+// After returns a channel that fires after advancing by d.
+// In tests this fires immediately (no real sleep), so the loop
+// iterations are fully deterministic.
+func (fc *fakeClock) After(d time.Duration) <-chan time.Time {
+	fc.Advance(d)
+	ch := make(chan time.Time, 1)
+	ch <- fc.Now()
+	return ch
+}
 
 // ============================================================================
 // Test Data Isolation Helpers
@@ -18,6 +62,12 @@ import (
 type IsolationHelper struct {
 	db    *sql.DB
 	redis *redis.Client
+	clock clock
+
+	// DrainWindow is how long Phase 4 waits with zero deletes before
+	// declaring the async audit queue drained.  Defaults to 1 s.
+	// Override via SettleDrainWindow or leave as zero for the default.
+	DrainWindow time.Duration
 }
 
 // NewIsolationHelper creates a new isolation helper instance.
@@ -25,7 +75,23 @@ func NewIsolationHelper(db *sql.DB, redis *redis.Client) *IsolationHelper {
 	return &IsolationHelper{
 		db:    db,
 		redis: redis,
+		clock: realClock{},
 	}
+}
+
+// WithClock replaces the time source (for testing).  Returns the same
+// helper so calls can be chained: NewIsolationHelper(db, nil).WithClock(fc).
+func (ih *IsolationHelper) WithClock(c clock) *IsolationHelper {
+	ih.clock = c
+	return ih
+}
+
+// drainWindow returns the configured drain window or the default (1 s).
+func (ih *IsolationHelper) drainWindow() time.Duration {
+	if ih.DrainWindow > 0 {
+		return ih.DrainWindow
+	}
+	return 1 * time.Second
 }
 
 // WithTransaction executes a function within a database transaction that is
@@ -210,13 +276,17 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 
 	// Phase 4: If extraUserIDs were provided, poll for async audit writes.
 	// The audit service writes asynchronously via a worker pool; the initial
-	// delete in Phase 2 may race against a pending write. We poll with
-	// exponential backoff (20ms → 40ms → 80ms → … capped at 100ms) until
-	// either no more audit logs appear or the settle timeout expires.
+	// delete in Phase 2 may race against a pending write.
 	//
-	// A hard settle timeout prevents infinite polling when the caller passes
-	// a context without a deadline (e.g. context.Background()). If the parent
-	// context has a shorter deadline, it takes precedence.
+	// We poll with exponential backoff (20ms → 40ms → 80ms → … capped at
+	// 100ms) and track the last successful delete.  When a full drain
+	// window elapses with zero deletes, we consider the queue drained.
+	//
+	// KNOWN LIMITATION: Polling the database cannot definitively prove the
+	// producer queue is empty — a write may be in-flight at the network
+	// layer.  The drain window (default 1 s) is a practical heuristic.
+	// For a reliable guarantee, AuditService needs a flush/drain protocol
+	// or each audit record should carry a testID for direct cleanup.
 	if len(extraUserIDs) > 0 {
 		const settleTimeout = 2 * time.Second
 
@@ -229,20 +299,15 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 		backoff := 20 * time.Millisecond
 		const maxBackoff = 100 * time.Millisecond
 
-		// We consider the async audit queue drained when a full drain
-		// window passes with zero rows deleted.  500 ms is long enough
-		// to absorb remote-PostgreSQL network latency, AuditService
-		// worker queuing, and batch-write jitter — while still well
-		// within the 2 s hard cap.
-		const drainWindow = 500 * time.Millisecond
-		lastDeleteTime := time.Now() // treat start as "nothing pending"
+		drainWindow := ih.drainWindow()
+		lastDeleteTime := ih.clock.Now() // treat start as "nothing pending"
 
 		for {
 			// Sleep with context awareness — returns immediately on cancel.
-			timer := time.NewTimer(backoff)
+			// fakeClock.After advances time immediately and returns a ready
+			// channel, so tests run with zero real wall-clock delay.
 			select {
 			case <-settleCtx.Done():
-				timer.Stop()
 				// Phase 4 exited before all async audit writes could be
 				// confirmed drained. Return an error so the caller knows
 				// test data may have been left behind.
@@ -250,7 +315,7 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 					return fmt.Errorf("audit-log settle interrupted by parent context: %w", ctx.Err())
 				}
 				return fmt.Errorf("audit-log settle timed out after %s: some async audit logs may not have been cleaned up", settleTimeout)
-			case <-timer.C:
+			case <-ih.clock.After(backoff):
 			}
 
 			if backoff < maxBackoff {
@@ -272,8 +337,8 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 			}
 
 			if deleted > 0 {
-				lastDeleteTime = time.Now()
-			} else if time.Since(lastDeleteTime) >= drainWindow {
+				lastDeleteTime = ih.clock.Now()
+			} else if ih.clock.Now().Sub(lastDeleteTime) >= drainWindow {
 				return nil
 			}
 		}
