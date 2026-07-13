@@ -178,6 +178,126 @@ func TestIsolationHelper_AuditLogCleanup(t *testing.T) {
 }
 
 // ============================================================================
+// Phase 4 Async Poll Tests
+// ============================================================================
+
+// setupPhase1to3 expects the standard Phase 1-3 queries for CleanupTestDataByPattern
+// with the given pattern and one extraUserID. Callers add their own Phase 4 expectations.
+func setupPhase1to3(mock sqlmock.Sqlmock, pattern, extraUserID string) {
+	// Phase 1: collect user IDs
+	userRows := sqlmock.NewRows([]string{"id"}).AddRow(extraUserID)
+	mock.ExpectQuery(`SELECT id::text FROM users WHERE`).
+		WithArgs(pattern).WillReturnRows(userRows)
+	// Phase 2: delete audit logs by user ID
+	mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+		WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 1))
+	// Phase 2b: delete audit logs by details
+	mock.ExpectExec(`DELETE FROM audit_logs WHERE details::text LIKE`).
+		WithArgs(pattern).WillReturnResult(sqlmock.NewResult(0, 0))
+	// Phase 3: remaining tables
+	for _, table := range []string{
+		"verification_tokens", "reset_tokens", "authorization_codes",
+		"tokens", "oauth_clients", "users",
+	} {
+		mock.ExpectExec(`DELETE FROM `+table+` WHERE`).
+			WithArgs(pattern).WillReturnResult(sqlmock.NewResult(0, 0))
+	}
+}
+
+func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
+	const pattern = "%e2e_async_test%"
+	const extraUserID = "uuid-async-user"
+
+	t.Run("polls until context deadline does not early-exit on zero deletes", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		defer db.Close()
+
+		helper := NewIsolationHelper(db, nil)
+
+		setupPhase1to3(mock, pattern, extraUserID)
+
+		// Phase 4: queue enough deletes for the deadline window.
+		// With 200ms timeout and backoff 20→40→80→100ms, ~3 calls fit
+		// before the context expires. All return 0 rows — the loop must
+		// NOT stop on that; only the deadline ends it.
+		const phase4Calls = 3
+		for i := 0; i < phase4Calls; i++ {
+			mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+				WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		defer cancel()
+
+		start := time.Now()
+		err = helper.CleanupTestDataByPattern(ctx, pattern, extraUserID)
+		elapsed := time.Since(start)
+
+		assert.NoError(t, err)
+		// Must have polled for roughly the full context budget, not returned early.
+		assert.GreaterOrEqual(t, elapsed.Milliseconds(), int64(150),
+			"should poll until context deadline, not exit early on zero deletes")
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("context cancellation exits promptly", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		defer db.Close()
+
+		helper := NewIsolationHelper(db, nil)
+
+		setupPhase1to3(mock, pattern, extraUserID)
+
+		// Phase 4: one expectation consumed before cancel fires.
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+
+		ctx, cancel := context.WithCancel(context.Background())
+		// Cancel after 30ms — Phases 1-3 finish near-instantly with mocks,
+		// so the cancel fires during Phase 4's first or second sleep.
+		time.AfterFunc(30*time.Millisecond, cancel)
+
+		start := time.Now()
+		err = helper.CleanupTestDataByPattern(ctx, pattern, extraUserID)
+		elapsed := time.Since(start)
+
+		assert.NoError(t, err)
+		// Must exit within ~one backoff window (≤100ms) of the cancel signal.
+		assert.Less(t, elapsed.Milliseconds(), int64(200),
+			"should exit promptly on context cancellation")
+	})
+
+	t.Run("late-arriving audit write is still cleaned", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		defer db.Close()
+
+		helper := NewIsolationHelper(db, nil)
+
+		setupPhase1to3(mock, pattern, extraUserID)
+
+		// Phase 4, call 1: arrives before the async worker writes → 0 rows.
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		// Phase 4, call 2: the worker has now written → 1 row deleted.
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 1))
+		// Subsequent polls until deadline: all return 0.
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		defer cancel()
+
+		err = helper.CleanupTestDataByPattern(ctx, pattern, extraUserID)
+		assert.NoError(t, err)
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+}
+
+// ============================================================================
 // NamespacedRedisClient Tests
 // ============================================================================
 

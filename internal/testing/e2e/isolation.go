@@ -211,20 +211,24 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 	// Phase 4: If extraUserIDs were provided, poll for async audit writes.
 	// The audit service writes asynchronously via a worker pool; the initial
 	// delete in Phase 2 may race against a pending write. We poll with
-	// exponential backoff (20ms → 40ms → 80ms → … capped at 100ms) within
-	// the context's remaining time budget. Two consecutive zero-delete rounds
-	// mean the async queue has drained; context expiry is a hard stop.
+	// exponential backoff (20ms → 40ms → 80ms → … capped at 100ms) until
+	// the caller's context deadline. We cannot infer "drain" from zero-delete
+	// rounds because the worker may simply not have written yet; the only
+	// reliable stop signal is the context deadline or cancellation.
 	if len(extraUserIDs) > 0 {
 		backoff := 20 * time.Millisecond
 		const maxBackoff = 100 * time.Millisecond
-		consecutiveEmpty := 0
 
 		for {
-			if ctx.Err() != nil {
-				break
+			// Sleep with context awareness — returns immediately on cancel.
+			timer := time.NewTimer(backoff)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil
+			case <-timer.C:
 			}
 
-			time.Sleep(backoff)
 			if backoff < maxBackoff {
 				backoff *= 2
 				if backoff > maxBackoff {
@@ -232,21 +236,11 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 				}
 			}
 
-			deleted, err := ih.deleteAuditLogsByUserIDs(ctx, extraUserIDs)
-			if err != nil {
+			if _, err := ih.deleteAuditLogsByUserIDs(ctx, extraUserIDs); err != nil {
 				if ctx.Err() != nil {
-					break
+					return nil
 				}
 				return fmt.Errorf("cleanup audit_logs (async poll) failed: %w", err)
-			}
-
-			if deleted == 0 {
-				consecutiveEmpty++
-				if consecutiveEmpty >= 2 {
-					break
-				}
-			} else {
-				consecutiveEmpty = 0
 			}
 		}
 	}
