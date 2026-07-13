@@ -361,7 +361,8 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 		const postCountDrain = 200 * time.Millisecond
 		select {
 		case <-sweepCtx.Done():
-			// Parent deadline already expired — skip re-check.
+			// Cannot confirm late writes are clean — signal retry.
+			return fmt.Errorf("audit-log post-count drain interrupted: %w", sweepCtx.Err())
 		case <-ih.clock.After(postCountDrain):
 			deleted, err := ih.deleteAuditLogsByUserIDs(sweepCtx, extraUserIDs)
 			if err != nil {

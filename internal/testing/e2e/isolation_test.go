@@ -595,6 +595,42 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 		assert.Contains(t, err.Error(), "connection refused")
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
+
+	t.Run("post-count drain interrupted by sweep context expiry", func(t *testing.T) {
+		// sweepCtx expires during the 200ms post-count drain window.
+		// The function must return an error so WithRetry can retry.
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		defer db.Close()
+
+		helper := NewIsolationHelper(db, nil)
+		helper.DrainWindow = 1 * time.Second
+		helper.SettleTimeout = 1 * time.Millisecond // poll exits immediately, 0 DELETEs
+		helper.SweepTimeout = 1 * time.Second
+
+		setupPhase1to3(mock, pattern, extraUserID)
+		// Sweep: 2 empty passes (poll did 0 iterations)
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		// Post-sweep COUNT → 0
+		mock.ExpectQuery(`SELECT COUNT\(\*\) FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+		// No re-sweep mock — sweepCtx expires before drain completes.
+
+		// sweepCtx = min(1s, parent_remaining).  Sweep loop does 1 drain
+		// wait (200ms) then breaks on second empty pass, finishing at
+		// ~200ms.  COUNT at ~200ms.  sweepCtx expires at 300ms, which
+		// is before After(200ms) fires at ~400ms → Done wins.
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		defer cancel()
+
+		err = helper.CleanupTestDataByPattern(ctx, pattern, extraUserID)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "post-count drain interrupted")
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
 }
 
 // ============================================================================
