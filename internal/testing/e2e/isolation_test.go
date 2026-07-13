@@ -209,10 +209,14 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 	const extraUserID = "uuid-async-user"
 
 	sweepMock := func(mock sqlmock.Sqlmock) {
+		// Two consecutive empty sweep passes
 		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
 			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
 			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		// Post-sweep COUNT check → 0 remaining
+		mock.ExpectQuery(`SELECT COUNT\(\*\) FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	}
 
 	// All tests use fakeClock + short timeouts for determinism.
@@ -299,6 +303,9 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
 			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		// Post-sweep COUNT → 0 remaining
+		mock.ExpectQuery(`SELECT COUNT\(\*\) FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -356,6 +363,65 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 		sweepMock(mock)
 
 		err = helper.CleanupTestDataByPattern(context.Background(), pattern, extraUserID)
+		assert.NoError(t, err)
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("write after sweep is caught by retry", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		defer db.Close()
+
+		fc := newFakeClock(time.Now())
+		helper := NewIsolationHelper(db, nil).WithClock(fc)
+		helper.DrainWindow = 100 * time.Millisecond
+		helper.SettleTimeout = 1 * time.Second
+		helper.SweepTimeout = 1 * time.Second
+
+		// All mocks in consumption order: attempt 1, then attempt 2.
+		// sqlmock consumes expectations sequentially.
+
+		// --- Attempt 1 ---
+		setupPhase1to3(mock, pattern, extraUserID) // 8 mocks (SELECT + 7 DELETEs)
+		// Phase 4 poll: 3 calls returning 0 → drain
+		for i := 0; i < 3; i++ {
+			mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+				WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		}
+		// Phase 4 sweep: 2 empty passes → done
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		// Post-sweep COUNT → 1 residual → ErrResidualAuditLogs → retry
+		mock.ExpectQuery(`SELECT COUNT\(\*\) FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+		// --- Retry delay: After(100ms) via fakeClock ---
+		// (consumed by CleanupTestDataByPatternWithRetry between attempts)
+
+		// --- Attempt 2 ---
+		setupPhase1to3(mock, pattern, extraUserID) // 8 more mocks
+		// Phase 4 poll: 3 calls returning 0
+		for i := 0; i < 3; i++ {
+			mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+				WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		}
+		// Phase 4 sweep: first pass finds late write (1 row), then 2 empty
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		// Post-sweep COUNT → 0 remaining → success
+		mock.ExpectQuery(`SELECT COUNT\(\*\) FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		err = helper.CleanupTestDataByPatternWithRetry(ctx, pattern, 100*time.Millisecond, 2, extraUserID)
 		assert.NoError(t, err)
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})

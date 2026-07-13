@@ -301,14 +301,16 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 	// Phase 4: If extraUserIDs were provided, poll briefly for async audit
 	// writes, then sweep in a loop.  The poll lets the async worker flush
 	// naturally; the sweep loop catches writes that arrive during or after
-	// the poll.  Multiple sweep passes handle the case where the worker
-	// dequeued a message before the sweep started but commits the DB write
-	// after the first sweep completes.
+	// the poll.
+	//
+	// KNOWN LIMITATION: This is best-effort.  Database polling cannot prove
+	// the producer queue is empty — a write may commit after the sweep
+	// loop exits.  For tests that exercise async audit paths (e.g.
+	// TestAdminDeleteUser), prefer CleanupTestDataByPatternWithRetry which
+	// runs the full cleanup multiple times.
 	if len(extraUserIDs) > 0 {
 		ih.pollAsyncAuditWrites(ctx, extraUserIDs)
 
-		// Sweep loop: keep deleting until two consecutive passes find
-		// nothing, or the sweep budget is exhausted.
 		sweepCtx, sweepCancel := context.WithTimeout(context.Background(), ih.sweepTimeout())
 		defer sweepCancel()
 
@@ -327,17 +329,50 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 					break
 				}
 			}
-			// Brief pause before the next sweep pass.
 			select {
 			case <-sweepCtx.Done():
 				return fmt.Errorf("audit-log sweep timed out: some async audit logs may not have been cleaned up")
 			case <-ih.clock.After(sweepDrainWindow):
 			}
 		}
+		// Post-sweep check: if records still exist, signal the caller to retry.
+		if remaining, err := ih.countAuditLogsByUserIDs(sweepCtx, extraUserIDs); err == nil && remaining > 0 {
+			return ErrResidualAuditLogs
+		}
 	}
 
 	return nil
 }
+
+// CleanupTestDataByPatternWithRetry runs CleanupTestDataByPattern up to
+// maxAttempts times, with a delay between attempts.  Each attempt re-runs
+// the full cleanup (Phases 1–4), catching audit logs that were written by
+// the async worker after the previous attempt's sweep completed.
+//
+// Use this for tests that exercise async audit paths (e.g. user deletion
+// that triggers user.deleted audit writes via a worker pool).
+func (ih *IsolationHelper) CleanupTestDataByPatternWithRetry(ctx context.Context, pattern string, delayBetweenAttempts time.Duration, maxAttempts int, extraUserIDs ...string) error {
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("cleanup retry interrupted after %d attempts: %w", attempt, lastErr)
+			case <-ih.clock.After(delayBetweenAttempts):
+			}
+		}
+		lastErr = ih.CleanupTestDataByPattern(ctx, pattern, extraUserIDs...)
+		if lastErr == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("cleanup failed after %d attempts: %w", maxAttempts, lastErr)
+}
+
+// ErrResidualAuditLogs is returned when audit logs remain after the sweep.
+// Callers (e.g. CleanupTestDataByPatternWithRetry) can use this to decide
+// whether to retry the cleanup.
+var ErrResidualAuditLogs = fmt.Errorf("residual audit logs detected after sweep")
 
 // pollAsyncAuditWrites polls the database with exponential backoff until
 // the drain window elapses with no new writes, or the settle timeout fires.
@@ -429,6 +464,32 @@ func (ih *IsolationHelper) deleteAuditLogsByUserIDs(ctx context.Context, userIDs
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+// countAuditLogsByUserIDs returns the number of audit log entries for the
+// given user UUIDs.  Used after a sweep to detect records that arrived after
+// the sweep loop exited.
+func (ih *IsolationHelper) countAuditLogsByUserIDs(ctx context.Context, userIDs []string) (int64, error) {
+	if len(userIDs) == 0 {
+		return 0, nil
+	}
+
+	query := "SELECT COUNT(*) FROM audit_logs WHERE user_id IN ("
+	args := make([]interface{}, len(userIDs))
+	for i, id := range userIDs {
+		if i > 0 {
+			query += ", "
+		}
+		query += fmt.Sprintf("$%d", i+1)
+		args[i] = id
+	}
+	query += ")"
+
+	var count int64
+	if err := ih.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 // ============================================================================
