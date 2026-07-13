@@ -212,10 +212,20 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 	// The audit service writes asynchronously via a worker pool; the initial
 	// delete in Phase 2 may race against a pending write. We poll with
 	// exponential backoff (20ms → 40ms → 80ms → … capped at 100ms) until
-	// the caller's context deadline. We cannot infer "drain" from zero-delete
-	// rounds because the worker may simply not have written yet; the only
-	// reliable stop signal is the context deadline or cancellation.
+	// either no more audit logs appear or the settle timeout expires.
+	//
+	// A hard settle timeout prevents infinite polling when the caller passes
+	// a context without a deadline (e.g. context.Background()). If the parent
+	// context has a shorter deadline, it takes precedence.
 	if len(extraUserIDs) > 0 {
+		const settleTimeout = 2 * time.Second
+
+		// Use whichever deadline is shorter: the parent context's or our
+		// own settle cap. This guarantees we never poll forever even when
+		// the caller passes context.Background().
+		settleCtx, settleCancel := context.WithTimeout(ctx, settleTimeout)
+		defer settleCancel()
+
 		backoff := 20 * time.Millisecond
 		const maxBackoff = 100 * time.Millisecond
 
@@ -223,9 +233,16 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 			// Sleep with context awareness — returns immediately on cancel.
 			timer := time.NewTimer(backoff)
 			select {
-			case <-ctx.Done():
+			case <-settleCtx.Done():
 				timer.Stop()
-				return nil
+				// Phase 4 exited before all async audit writes could be
+				// confirmed drained. Return an error so the caller knows
+				// test data may have been left behind — previously this
+				// returned nil, silently masking incomplete cleanup.
+				if ctx.Err() != nil {
+					return fmt.Errorf("audit-log settle interrupted by parent context: %w", ctx.Err())
+				}
+				return fmt.Errorf("audit-log settle timed out after %s: some async audit logs may not have been cleaned up", settleTimeout)
 			case <-timer.C:
 			}
 
@@ -236,9 +253,13 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 				}
 			}
 
-			if _, err := ih.deleteAuditLogsByUserIDs(ctx, extraUserIDs); err != nil {
-				if ctx.Err() != nil {
-					return nil
+			if _, err := ih.deleteAuditLogsByUserIDs(settleCtx, extraUserIDs); err != nil {
+				if settleCtx.Err() != nil {
+					// Same as above — context expired mid-delete.
+					if ctx.Err() != nil {
+						return fmt.Errorf("audit-log settle interrupted by parent context: %w", ctx.Err())
+					}
+					return fmt.Errorf("audit-log settle timed out after %s: some async audit logs may not have been cleaned up", settleTimeout)
 				}
 				return fmt.Errorf("cleanup audit_logs (async poll) failed: %w", err)
 			}

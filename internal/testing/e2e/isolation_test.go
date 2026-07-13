@@ -234,7 +234,10 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 		err = helper.CleanupTestDataByPattern(ctx, pattern, extraUserID)
 		elapsed := time.Since(start)
 
-		assert.NoError(t, err)
+		// Phase 4 now returns an error when the context expires, since we
+		// cannot confirm all async audit writes have been drained.
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
 		// Must have polled for roughly the full context budget, not returned early.
 		assert.GreaterOrEqual(t, elapsed.Milliseconds(), int64(150),
 			"should poll until context deadline, not exit early on zero deletes")
@@ -263,7 +266,9 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 		err = helper.CleanupTestDataByPattern(ctx, pattern, extraUserID)
 		elapsed := time.Since(start)
 
-		assert.NoError(t, err)
+		// Phase 4 now returns an error on cancellation.
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, context.Canceled)
 		// Must exit within ~one backoff window (≤100ms) of the cancel signal.
 		assert.Less(t, elapsed.Milliseconds(), int64(200),
 			"should exit promptly on context cancellation")
@@ -292,8 +297,51 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 		defer cancel()
 
 		err = helper.CleanupTestDataByPattern(ctx, pattern, extraUserID)
-		assert.NoError(t, err)
+		// The late write was cleaned (call 2 deleted 1 row), but the context
+		// expired before we could confirm no more writes are coming — so an
+		// error is returned indicating incomplete settle.
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
 		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("no-deadline context uses settle timeout cap instead of polling forever", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		defer db.Close()
+
+		helper := NewIsolationHelper(db, nil)
+
+		setupPhase1to3(mock, pattern, extraUserID)
+
+		// Phase 4: with context.Background() (no deadline), the 2-second
+		// settle cap must terminate the loop. Queue enough expectations
+		// to cover ~2s of polling at 20→40→80→100ms backoff.
+		// Worst case: 20+40+80+100*16 ≈ 1740ms → ~18 calls.
+		// We set an unlimited sequence to be safe.
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0)).
+			WillDelayFor(0)
+		// Use regexp match so sqlmock doesn't panic on unexpected calls —
+		// it already returns an error for unmatched calls, which is fine.
+		// However, to be robust, just set a high call count.
+		for i := 0; i < 25; i++ {
+			mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+				WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		}
+
+		start := time.Now()
+		err = helper.CleanupTestDataByPattern(context.Background(), pattern, extraUserID)
+		elapsed := time.Since(start)
+
+		// Must return an error (not nil) indicating settle timeout.
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "settle timed out")
+		// Must terminate within roughly the 2s cap (plus some tolerance).
+		assert.Less(t, elapsed.Milliseconds(), int64(3000),
+			"should terminate at settle timeout cap, not poll forever")
+		assert.Greater(t, elapsed.Milliseconds(), int64(1500),
+			"should poll for roughly the full settle budget")
 	})
 }
 
