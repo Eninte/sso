@@ -99,20 +99,31 @@ type tableCleanupDef struct {
 // Each table uses only the columns it actually owns to avoid SQL errors.
 // UUID columns are cast to text before applying LIKE, since PostgreSQL does not
 // support the LIKE operator directly on UUID types.
+//
+// Audit logs are handled specially: since audit_logs.user_id stores server-generated
+// UUIDs (not testIDs), we first collect user UUIDs that match the pattern from the
+// users table, then delete audit logs referencing those UUIDs.
 func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern string) error {
 	if ih.db == nil {
 		return fmt.Errorf("database connection is nil")
 	}
 
-	// Define columns per table based on actual schema (see migrations/)
-	// Clean in dependency order (foreign keys first).
-	// UUID columns are explicitly marked so they get a ::text cast.
+	// Phase 1: Collect UUIDs of users matching the pattern (by email or id).
+	userIDs, err := ih.collectUserIDsByPattern(ctx, pattern)
+	if err != nil {
+		return fmt.Errorf("collect user IDs failed: %w", err)
+	}
+
+	// Phase 2: Delete audit logs for those users.
+	// audit_logs.user_id stores UUIDs, not testIDs, so LIKE on the pattern
+	// won't match. Instead, delete by the collected user UUIDs.
+	if err := ih.deleteAuditLogsByUserIDs(ctx, userIDs); err != nil {
+		return fmt.Errorf("cleanup audit_logs failed: %w", err)
+	}
+
+	// Phase 3: Delete remaining tables in dependency order (foreign keys first).
+	// audit_logs is excluded here — it was handled in Phase 2.
 	tables := []tableCleanupDef{
-		{
-			table:    "audit_logs",
-			columns:  []string{"user_id", "client_id"},
-			uuidCols: map[string]bool{}, // audit_logs.user_id is VARCHAR(36), not UUID
-		},
 		{
 			table:    "verification_tokens",
 			columns:  []string{"user_id", "token"},
@@ -168,6 +179,52 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 	}
 
 	return nil
+}
+
+// collectUserIDsByPattern queries the users table for UUIDs matching the pattern.
+// Used to bridge the gap between testID-based patterns and UUID-based foreign keys
+// in audit_logs.
+func (ih *IsolationHelper) collectUserIDsByPattern(ctx context.Context, pattern string) ([]string, error) {
+	rows, err := ih.db.QueryContext(ctx,
+		`SELECT id::text FROM users WHERE email LIKE $1 OR id::text LIKE $1`, pattern)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// deleteAuditLogsByUserIDs deletes audit log entries for the given user UUIDs.
+// This handles the case where audit_logs.user_id stores server-generated UUIDs
+// that don't contain the testID string.
+func (ih *IsolationHelper) deleteAuditLogsByUserIDs(ctx context.Context, userIDs []string) error {
+	if len(userIDs) == 0 {
+		return nil
+	}
+
+	// Build IN clause: DELETE FROM audit_logs WHERE user_id IN ($1, $2, ...)
+	query := "DELETE FROM audit_logs WHERE user_id IN ("
+	args := make([]interface{}, len(userIDs))
+	for i, id := range userIDs {
+		if i > 0 {
+			query += ", "
+		}
+		query += fmt.Sprintf("$%d", i+1)
+		args[i] = id
+	}
+	query += ")"
+
+	_, err := ih.db.ExecContext(ctx, query, args...)
+	return err
 }
 
 // ============================================================================

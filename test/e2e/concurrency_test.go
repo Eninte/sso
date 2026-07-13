@@ -67,7 +67,7 @@ func TestConcurrentRegister(t *testing.T) {
 // ============================================================================
 
 func TestConcurrentLogin(t *testing.T) {
-	email := generateUniqueEmail("concurrentlogin")
+	email := testAwareEmail(t, "concurrentlogin")
 	password := generateTestPassword()
 
 	// 先注册用户并验证邮箱
@@ -121,7 +121,7 @@ func TestConcurrentLogin(t *testing.T) {
 // ============================================================================
 
 func TestConcurrentTokenRefreshFull(t *testing.T) {
-	email := generateUniqueEmail("concrefreshfull")
+	email := testAwareEmail(t, "concrefreshfull")
 	password := generateTestPassword()
 
 	// 注册并验证邮箱
@@ -172,7 +172,7 @@ func TestConcurrentTokenRefreshFull(t *testing.T) {
 // ============================================================================
 
 func TestConcurrentResourceAccess(t *testing.T) {
-	email := generateUniqueEmail("concurrentaccess")
+	email := testAwareEmail(t, "concurrentaccess")
 	password := generateTestPassword()
 
 	// 注册并验证邮箱
@@ -216,7 +216,7 @@ func TestConcurrentResourceAccess(t *testing.T) {
 // ============================================================================
 
 func TestConcurrentRegisterSameEmail(t *testing.T) {
-	email := generateUniqueEmail("sameemail")
+	email := testAwareEmail(t, "sameemail")
 	password := generateTestPassword()
 
 	const concurrency = 5
@@ -252,7 +252,7 @@ func TestConcurrentRegisterSameEmail(t *testing.T) {
 // ============================================================================
 
 func TestConcurrentForgotPasswordFull(t *testing.T) {
-	email := generateUniqueEmail("forgotconcurrent")
+	email := testAwareEmail(t, "forgotconcurrent")
 	password := generateTestPassword()
 
 	// 注册用户

@@ -51,7 +51,7 @@ func TestVerifyEmail(t *testing.T) {
 // ============================================================================
 
 func TestFullEmailVerifyFlow(t *testing.T) {
-	email := generateUniqueEmail("verify")
+	email := testAwareEmail(t, "verify")
 	password := generateTestPassword()
 
 	// 1. 注册用户
@@ -86,7 +86,7 @@ func TestFullEmailVerifyFlow(t *testing.T) {
 func TestEmailVerifySecurity(t *testing.T) {
 	t.Run("验证令牌应为一次性使用", func(t *testing.T) {
 		// 注册用户，通过测试 API 验证邮箱，然后尝试用 GET 端点再次验证
-		email := generateUniqueEmail("onetime")
+		email := testAwareEmail(t, "onetime")
 		password := generateTestPassword()
 
 		user, err := registerUser(email, password)
@@ -108,7 +108,7 @@ func TestEmailVerifySecurity(t *testing.T) {
 	})
 
 	t.Run("已验证邮箱不应重复验证", func(t *testing.T) {
-		email := generateUniqueEmail("alreadyverified")
+		email := testAwareEmail(t, "alreadyverified")
 		password := generateTestPassword()
 
 		user, err := registerUser(email, password)
@@ -130,7 +130,7 @@ func TestEmailVerifySecurity(t *testing.T) {
 // ============================================================================
 
 func TestEmailVerifyLoginAssociation(t *testing.T) {
-	email := generateUniqueEmail("verifylogin")
+	email := testAwareEmail(t, "verifylogin")
 	password := generateTestPassword()
 
 	// 注册用户
@@ -158,7 +158,7 @@ func TestEmailVerifyLoginAssociation(t *testing.T) {
 // ============================================================================
 
 func TestResendVerificationEmail(t *testing.T) {
-	email := generateUniqueEmail("resend")
+	email := testAwareEmail(t, "resend")
 	password := generateTestPassword()
 
 	// 注册用户
@@ -200,7 +200,7 @@ func TestResendVerificationEmail(t *testing.T) {
 // ============================================================================
 
 func TestEmailVerificationStatus(t *testing.T) {
-	email := generateUniqueEmail("status")
+	email := testAwareEmail(t, "status")
 	password := generateTestPassword()
 
 	// 注册用户

@@ -16,7 +16,7 @@ import (
 // ============================================================================
 
 func TestForgotPassword(t *testing.T) {
-	email := generateUniqueEmail("forgot")
+	email := testAwareEmail(t, "forgot")
 	password := generateTestPassword()
 
 	// 先注册用户
@@ -125,7 +125,7 @@ func TestResetPassword(t *testing.T) {
 // ============================================================================
 
 func TestFullPasswordResetFlow(t *testing.T) {
-	email := generateUniqueEmail("resetfull")
+	email := testAwareEmail(t, "resetfull")
 	oldPassword := generateTestPassword()
 
 	// 1. 注册用户
@@ -173,7 +173,7 @@ func TestPasswordResetSecurity(t *testing.T) {
 	})
 
 	t.Run("重置后旧密码应失效", func(t *testing.T) {
-		email := generateUniqueEmail("resetexpire")
+		email := testAwareEmail(t, "resetexpire")
 		oldPassword := generateTestPassword()
 
 		// 注册用户
@@ -203,7 +203,7 @@ func TestPasswordResetSecurity(t *testing.T) {
 // ============================================================================
 
 func TestConcurrentForgotPassword(t *testing.T) {
-	email := generateUniqueEmail("concforgot")
+	email := testAwareEmail(t, "concforgot")
 	password := generateTestPassword()
 
 	// 注册用户
@@ -238,7 +238,7 @@ func TestConcurrentForgotPassword(t *testing.T) {
 // ============================================================================
 
 func TestFullPasswordResetFlow_RealToken(t *testing.T) {
-	email := generateUniqueEmail("resetreal")
+	email := testAwareEmail(t, "resetreal")
 	oldPassword := generateTestPassword()
 	newPassword := "NewSecurePassword456!"
 

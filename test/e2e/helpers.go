@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	e2etest "github.com/example/sso/internal/testing/e2e"
 	"github.com/example/sso/internal/util/retryutil"
 	"github.com/example/sso/internal/util/testutil"
 	_ "github.com/lib/pq" // PostgreSQL 驱动
@@ -515,6 +516,91 @@ func registerAndLogin() (string, *loginResponse, error) {
 	}
 
 	// 验证邮箱（使用测试专用API）
+	if userID, ok := user["user_id"].(string); ok && userID != "" {
+		if err := verifyEmail(userID); err != nil {
+			return "", nil, fmt.Errorf("验证邮箱失败: %w", err)
+		}
+	}
+
+	tokens, err := loginUser(email, password)
+	if err != nil {
+		return "", nil, err
+	}
+
+	return email, tokens, nil
+}
+
+// ============================================================================
+// 测试数据清理基础设施
+// 说明：通过在邮箱中嵌入 testID，使 CleanupTestDataByPattern 能匹配到
+// 测试创建的数据，实现自动清理。
+// ============================================================================
+
+// currentTestCleanupID 存储当前测试的清理标识符。
+// 由 ensureTestCleanup 设置，嵌入到 testAwareEmail 生成的邮箱中。
+var currentTestCleanupID string
+
+// ensureTestCleanup 注册 t.Cleanup 回调，在测试结束时通过 testID 模式匹配清理数据。
+// 幂等：同一测试内多次调用只注册一次。
+func ensureTestCleanup(t *testing.T) {
+	t.Helper()
+	if currentTestCleanupID != "" {
+		return // 已注册
+	}
+
+	initE2EDB()
+	if e2eDB == nil {
+		t.Log("WARN: e2eDB 未初始化，跳过自动清理注册")
+		return
+	}
+
+	cleanupID := e2etest.GenerateTestID(t.Name())
+	currentTestCleanupID = cleanupID
+
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		helper := e2etest.NewIsolationHelper(e2eDB, nil)
+		if err := helper.CleanupTestDataByPattern(ctx, "%"+cleanupID+"%"); err != nil {
+			t.Logf("WARN: 自动清理失败 (testID=%s): %v", cleanupID, err)
+		}
+		currentTestCleanupID = ""
+	})
+}
+
+// testAwareEmail 生成包含 testID 的邮箱地址，使 CleanupTestDataByPattern 能匹配。
+// 自动调用 ensureTestCleanup 注册清理回调。
+func testAwareEmail(t *testing.T, prefix string) string {
+	t.Helper()
+	ensureTestCleanup(t)
+	if currentTestCleanupID != "" {
+		return fmt.Sprintf("test-%s-%s@example.com", prefix, currentTestCleanupID)
+	}
+	// 回退：e2eDB 不可用时使用原逻辑（无自动清理）
+	return generateUniqueEmail(prefix)
+}
+
+// registerUserWithCleanup 注册用户并自动注册清理回调。
+// 邮箱中嵌入 testID，测试结束后自动清理该用户及其关联数据。
+func registerUserWithCleanup(t *testing.T, password string) (map[string]interface{}, error) {
+	t.Helper()
+	email := testAwareEmail(t, t.Name())
+	return registerUser(email, password)
+}
+
+// registerAndLoginWithCleanup 注册、验证邮箱、登录，并自动注册清理回调。
+// 替代 registerAndLogin，适用于需要自动清理的测试。
+func registerAndLoginWithCleanup(t *testing.T) (string, *loginResponse, error) {
+	t.Helper()
+	email := testAwareEmail(t, "e2e")
+	password := generateTestPassword()
+
+	user, err := registerUser(email, password)
+	if err != nil {
+		return "", nil, err
+	}
+
 	if userID, ok := user["user_id"].(string); ok && userID != "" {
 		if err := verifyEmail(userID); err != nil {
 			return "", nil, fmt.Errorf("验证邮箱失败: %w", err)

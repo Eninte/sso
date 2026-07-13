@@ -82,6 +82,94 @@ func TestIsolationHelper_WithRedisNamespace(t *testing.T) {
 }
 
 // ============================================================================
+// Audit Log Cleanup Tests
+// ============================================================================
+
+func TestIsolationHelper_AuditLogCleanup(t *testing.T) {
+	t.Run("collects user IDs then deletes audit logs", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		defer db.Close()
+
+		helper := NewIsolationHelper(db, nil)
+		pattern := "%e2e_123_TestLogin%"
+
+		// Phase 1: collectUserIDsByPattern queries users table
+		userRows := sqlmock.NewRows([]string{"id"}).
+			AddRow("uuid-user-1").
+			AddRow("uuid-user-2")
+		mock.ExpectQuery(`SELECT id::text FROM users WHERE email LIKE \$1 OR id::text LIKE \$1`).
+			WithArgs(pattern).
+			WillReturnRows(userRows)
+
+		// Phase 2: deleteAuditLogsByUserIDs deletes audit logs for collected UUIDs
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN \(\$1, \$2\)`).
+			WithArgs("uuid-user-1", "uuid-user-2").
+			WillReturnResult(sqlmock.NewResult(0, 3))
+
+		// Phase 3: remaining tables (verification_tokens, reset_tokens, etc.)
+		mock.ExpectExec(`DELETE FROM verification_tokens WHERE`).
+			WithArgs(pattern).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(`DELETE FROM reset_tokens WHERE`).
+			WithArgs(pattern).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(`DELETE FROM authorization_codes WHERE`).
+			WithArgs(pattern).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(`DELETE FROM tokens WHERE`).
+			WithArgs(pattern).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(`DELETE FROM oauth_clients WHERE`).
+			WithArgs(pattern).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(`DELETE FROM users WHERE`).
+			WithArgs(pattern).WillReturnResult(sqlmock.NewResult(0, 0))
+
+		err = helper.CleanupTestDataByPattern(context.Background(), pattern)
+		assert.NoError(t, err)
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("skips audit log deletion when no matching users", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		defer db.Close()
+
+		helper := NewIsolationHelper(db, nil)
+		pattern := "%e2e_nonexistent%"
+
+		// Phase 1: no matching users
+		userRows := sqlmock.NewRows([]string{"id"})
+		mock.ExpectQuery(`SELECT id::text FROM users WHERE email LIKE \$1 OR id::text LIKE \$1`).
+			WithArgs(pattern).
+			WillReturnRows(userRows)
+
+		// Phase 2: skipped (no user IDs)
+
+		// Phase 3: remaining tables still cleaned
+		mock.ExpectExec(`DELETE FROM verification_tokens WHERE`).
+			WithArgs(pattern).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(`DELETE FROM reset_tokens WHERE`).
+			WithArgs(pattern).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(`DELETE FROM authorization_codes WHERE`).
+			WithArgs(pattern).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(`DELETE FROM tokens WHERE`).
+			WithArgs(pattern).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(`DELETE FROM oauth_clients WHERE`).
+			WithArgs(pattern).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(`DELETE FROM users WHERE`).
+			WithArgs(pattern).WillReturnResult(sqlmock.NewResult(0, 0))
+
+		err = helper.CleanupTestDataByPattern(context.Background(), pattern)
+		assert.NoError(t, err)
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("nil database connection", func(t *testing.T) {
+		helper := NewIsolationHelper(nil, nil)
+		err := helper.CleanupTestDataByPattern(context.Background(), "%test%")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "database connection is nil")
+	})
+}
+
+// ============================================================================
 // NamespacedRedisClient Tests
 // ============================================================================
 

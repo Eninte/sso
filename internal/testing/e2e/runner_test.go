@@ -843,11 +843,50 @@ func TestSanitizeTestName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := sanitizeTestName(tt.input)
+			result := SanitizeTestName(tt.input)
 			if result != tt.expected {
-				t.Errorf("sanitizeTestName(%s) = %s, expected %s", tt.input, result, tt.expected)
+				t.Errorf("SanitizeTestName(%s) = %s, expected %s", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+// TestGenerateTestID verifies that GenerateTestID produces identifiers
+// compatible with the format used by TestRunner.IsolateTest.
+func TestGenerateTestID(t *testing.T) {
+	testID := GenerateTestID("TestMyExample")
+
+	// Should start with "e2e_"
+	if len(testID) <= 4 || testID[:4] != "e2e_" {
+		t.Errorf("GenerateTestID should start with 'e2e_', got: %s", testID)
+	}
+
+	// Should contain sanitized test name
+	if !strings.Contains(testID, "TestMyExample") {
+		t.Errorf("GenerateTestID should contain sanitized test name, got: %s", testID)
+	}
+
+	// Format: e2e_<unix_nano>_<sanitized_name>
+	parts := strings.SplitN(testID, "_", 3)
+	if len(parts) != 3 {
+		t.Errorf("GenerateTestID should have 3 parts separated by '_', got: %s", testID)
+	} else {
+		if parts[0] != "e2e" {
+			t.Errorf("first part should be 'e2e', got: %s", parts[0])
+		}
+		if parts[2] != "TestMyExample" {
+			t.Errorf("third part should be sanitized test name, got: %s", parts[2])
+		}
+	}
+
+	// Two calls should produce valid IDs
+	id1 := GenerateTestID("TestName")
+	id2 := GenerateTestID("TestName")
+	if !strings.HasPrefix(id1, "e2e_") {
+		t.Errorf("id1 should start with 'e2e_', got: %s", id1)
+	}
+	if !strings.HasPrefix(id2, "e2e_") {
+		t.Errorf("id2 should start with 'e2e_', got: %s", id2)
 	}
 }
 
@@ -886,9 +925,18 @@ func TestActiveTxLifecycle(t *testing.T) {
 		mock.ExpectRollback()
 
 		// Expect pattern-based cleanup queries for each table
-		// UUID columns (user_id, id) use ::text cast for LIKE compatibility
+		// New flow: first collect user UUIDs, then delete audit logs by UUID, then remaining tables
 		testIDPattern := "%" + runner.testID + "%"
-		mock.ExpectExec("DELETE FROM audit_logs").WithArgs(testIDPattern).WillReturnResult(sqlmock.NewResult(0, 0))
+
+		// Phase 1: collect user IDs matching the pattern
+		userRows := sqlmock.NewRows([]string{"id"})
+		mock.ExpectQuery(`SELECT id::text FROM users WHERE email LIKE \$1 OR id::text LIKE \$1`).
+			WithArgs(testIDPattern).
+			WillReturnRows(userRows)
+
+		// Phase 2: audit logs skipped (no matching users)
+
+		// Phase 3: remaining tables
 		mock.ExpectExec("DELETE FROM verification_tokens").WithArgs(testIDPattern).WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec("DELETE FROM reset_tokens").WithArgs(testIDPattern).WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec("DELETE FROM authorization_codes").WithArgs(testIDPattern).WillReturnResult(sqlmock.NewResult(0, 0))

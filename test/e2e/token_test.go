@@ -18,7 +18,7 @@ import (
 // ============================================================================
 
 func TestTokenValid(t *testing.T) {
-	email := generateUniqueEmail("tokenvalid")
+	email := testAwareEmail(t, "tokenvalid")
 	password := generateTestPassword()
 
 	// 注册、验证邮箱并登录
@@ -72,7 +72,7 @@ func TestTokenInvalid(t *testing.T) {
 
 	t.Run("截断Token", func(t *testing.T) {
 		// 注册、验证邮箱并登录获取有效Token
-		email := generateUniqueEmail("trunc")
+		email := testAwareEmail(t, "trunc")
 		password := generateTestPassword()
 		user, err := registerUser(email, password)
 		require.NoError(t, err)
@@ -95,7 +95,7 @@ func TestTokenInvalid(t *testing.T) {
 // ============================================================================
 
 func TestTokenRevoked(t *testing.T) {
-	email := generateUniqueEmail("revoked")
+	email := testAwareEmail(t, "revoked")
 	password := generateTestPassword()
 
 	// 注册、验证邮箱并登录
@@ -133,7 +133,7 @@ func TestTokenRevoked(t *testing.T) {
 // ============================================================================
 
 func TestTokenRefresh(t *testing.T) {
-	email := generateUniqueEmail("refresh")
+	email := testAwareEmail(t, "refresh")
 	password := generateTestPassword()
 
 	// 注册、验证邮箱并登录
@@ -189,7 +189,7 @@ func TestTokenRefresh(t *testing.T) {
 func TestTokenExpired(t *testing.T) {
 	// Token过期需要等待TTL或构造特殊JWT，不适合常规E2E测试
 	// 这里验证基本的Token生命周期：获取 → 使用 → 刷新 → 旧Token失效
-	email := generateUniqueEmail("expired")
+	email := testAwareEmail(t, "expired")
 	password := generateTestPassword()
 
 	user, err := registerUser(email, password)
@@ -220,7 +220,7 @@ func TestTokenExpired(t *testing.T) {
 // ============================================================================
 
 func TestConcurrentTokenRefresh(t *testing.T) {
-	email := generateUniqueEmail("concrefresh")
+	email := testAwareEmail(t, "concrefresh")
 	password := generateTestPassword()
 
 	// 注册、验证邮箱并登录
@@ -272,7 +272,7 @@ func TestConcurrentTokenRefresh(t *testing.T) {
 // ============================================================================
 
 func TestTokenPermissions(t *testing.T) {
-	email := generateUniqueEmail("perms")
+	email := testAwareEmail(t, "perms")
 	password := generateTestPassword()
 
 	// 注册、验证邮箱并登录

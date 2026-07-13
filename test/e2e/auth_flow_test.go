@@ -31,7 +31,7 @@ func TestHealthCheck(t *testing.T) {
 // ============================================================================
 
 func TestRegisterFlow(t *testing.T) {
-	email := generateUniqueEmail("register")
+	email := testAwareEmail(t, "register")
 	password := generateTestPassword()
 
 	t.Run("成功注册", func(t *testing.T) {
@@ -83,7 +83,7 @@ func TestRegisterFlow(t *testing.T) {
 // ============================================================================
 
 func TestLoginFlow(t *testing.T) {
-	email := generateUniqueEmail("login")
+	email := testAwareEmail(t, "login")
 	password := generateTestPassword()
 
 	// 先注册用户
@@ -137,7 +137,7 @@ func TestLoginFlow(t *testing.T) {
 // ============================================================================
 
 func TestFullAuthFlow(t *testing.T) {
-	email := generateUniqueEmail("full")
+	email := testAwareEmail(t, "full")
 	password := generateTestPassword()
 
 	// 1. 注册
@@ -212,7 +212,7 @@ func TestRateLimit(t *testing.T) {
 // ============================================================================
 
 func TestMultiDeviceLogin(t *testing.T) {
-	email := generateUniqueEmail("multi")
+	email := testAwareEmail(t, "multi")
 	password := generateTestPassword()
 
 	// 注册用户
@@ -246,7 +246,7 @@ func TestMultiDeviceLogin(t *testing.T) {
 // ============================================================================
 
 func TestLogoutAllDevices(t *testing.T) {
-	email := generateUniqueEmail("logoutall")
+	email := testAwareEmail(t, "logoutall")
 	password := generateTestPassword()
 
 	// 注册用户

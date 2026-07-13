@@ -447,7 +447,7 @@ func (tr *TestRunner) runSingleTest(ctx context.Context, test Test) TestResult {
 // This includes starting a database transaction and setting up Redis namespacing.
 func (tr *TestRunner) IsolateTest(ctx context.Context, test Test) error {
 	// Generate unique test identifier for pattern-based cleanup
-	tr.testID = fmt.Sprintf("e2e_%d_%s", time.Now().UnixNano(), sanitizeTestName(test.Name))
+	tr.testID = fmt.Sprintf("e2e_%d_%s", time.Now().UnixNano(), SanitizeTestName(test.Name))
 
 	// Database transaction isolation
 	if tr.config.UseDBTransactions && tr.db != nil {
@@ -461,7 +461,7 @@ func (tr *TestRunner) IsolateTest(ctx context.Context, test Test) error {
 	// Redis namespace isolation
 	// Generate unique namespace for this test using timestamp + test name
 	if tr.config.RedisNamespaceMode && tr.redis != nil {
-		tr.testNamespace = fmt.Sprintf("test:%d:%s", time.Now().UnixNano(), sanitizeTestName(test.Name))
+		tr.testNamespace = fmt.Sprintf("test:%d:%s", time.Now().UnixNano(), SanitizeTestName(test.Name))
 	}
 
 	return nil
@@ -535,8 +535,11 @@ func (tr *TestRunner) cleanupRedisKeys(ctx context.Context) error {
 	return nil
 }
 
-// sanitizeTestName converts test name to a safe Redis key component.
-func sanitizeTestName(name string) string {
+// SanitizeTestName converts a test name to a safe identifier component,
+// replacing non-alphanumeric characters with hyphens.
+// This is exported so external test suites (e.g., test/e2e) can generate
+// testIDs compatible with the cleanup framework.
+func SanitizeTestName(name string) string {
 	// Replace spaces and special characters with hyphens
 	safe := ""
 	for _, r := range name {
@@ -547,6 +550,15 @@ func sanitizeTestName(name string) string {
 		}
 	}
 	return safe
+}
+
+// GenerateTestID produces a unique test identifier in the same format used by
+// TestRunner.IsolateTest. External test suites can call this to generate a testID
+// that is compatible with CleanupTestDataByPattern.
+//
+// Format: e2e_<unix_nano>_<sanitized_test_name>
+func GenerateTestID(testName string) string {
+	return fmt.Sprintf("e2e_%d_%s", time.Now().UnixNano(), SanitizeTestName(testName))
 }
 
 // ============================================================================

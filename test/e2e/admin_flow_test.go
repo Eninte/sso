@@ -107,7 +107,7 @@ func TestAdminGetUser(t *testing.T) {
 	require.NoError(t, err, "管理员登录失败")
 
 	// 先创建一个测试用户
-	testEmail := generateUniqueEmail("admintest")
+	testEmail := testAwareEmail(t, "admintest")
 	testPassword := generateTestPassword()
 	testUser, err := registerUser(testEmail, testPassword)
 	require.NoError(t, err)
@@ -153,7 +153,7 @@ func TestAdminDisableEnableUser(t *testing.T) {
 	require.NoError(t, err, "管理员登录失败")
 
 	// 创建测试用户并验证邮箱
-	testEmail := generateUniqueEmail("disabletest")
+	testEmail := testAwareEmail(t, "disabletest")
 	testPassword := generateTestPassword()
 	testUser, err := registerUser(testEmail, testPassword)
 	require.NoError(t, err)
@@ -197,7 +197,7 @@ func TestAdminDisableEnableUser(t *testing.T) {
 
 func TestAdminUnauthorized(t *testing.T) {
 	// 创建普通用户并验证邮箱
-	testEmail := generateUniqueEmail("nonadmin")
+	testEmail := testAwareEmail(t, "nonadmin")
 	testPassword := generateTestPassword()
 	user, err := registerUser(testEmail, testPassword)
 	require.NoError(t, err)
@@ -237,7 +237,7 @@ func TestAdminDeleteUser(t *testing.T) {
 	require.NoError(t, err, "管理员登录失败")
 
 	// 创建测试用户
-	testEmail := generateUniqueEmail("deletetest")
+	testEmail := testAwareEmail(t, "deletetest")
 	testPassword := generateTestPassword()
 	testUser, err := registerUser(testEmail, testPassword)
 	require.NoError(t, err)

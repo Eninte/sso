@@ -357,7 +357,7 @@ func TestBoundaryValues(t *testing.T) {
 
 	t.Run("密码最小长度", func(t *testing.T) {
 		req := registerRequest{
-			Email:    generateUniqueEmail("minpwd"),
+			Email:    testAwareEmail(t, "minpwd"),
 			Password: "12345678", // 假设最小8位
 		}
 		resp, _, err := doRequest("POST", "/api/v1/register", req, "")
@@ -371,7 +371,7 @@ func TestBoundaryValues(t *testing.T) {
 
 	t.Run("密码边界长度", func(t *testing.T) {
 		req := registerRequest{
-			Email:    generateUniqueEmail("boundary"),
+			Email:    testAwareEmail(t, "boundary"),
 			Password: "1234567", // 7位，应该不够
 		}
 		resp, _, err := doRequest("POST", "/api/v1/register", req, "")
