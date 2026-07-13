@@ -218,6 +218,9 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 		// Post-sweep COUNT check → 0 remaining
 		mock.ExpectQuery(`SELECT COUNT\(\*\) FROM audit_logs WHERE user_id IN`).
 			WithArgs(extraUserID).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+		// Post-count drain re-sweep → no late writes
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
 	}
 
 	// All tests use fakeClock + short timeouts for determinism.
@@ -307,6 +310,9 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 		// Post-sweep COUNT → 0 remaining
 		mock.ExpectQuery(`SELECT COUNT\(\*\) FROM audit_logs WHERE user_id IN`).
 			WithArgs(extraUserID).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+		// Post-count drain re-sweep → no late writes
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -418,6 +424,9 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 		// Post-sweep COUNT → 0 remaining → success
 		mock.ExpectQuery(`SELECT COUNT\(\*\) FROM audit_logs WHERE user_id IN`).
 			WithArgs(extraUserID).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+		// Post-count drain re-sweep → no late writes
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -460,6 +469,49 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "post-sweep count failed")
 		assert.Contains(t, err.Error(), "connection refused")
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("post-count drain catches late write after COUNT=0", func(t *testing.T) {
+		// Race scenario: sweep finishes, COUNT returns 0, but an async
+		// write commits during the post-count drain window.  The re-sweep
+		// after the drain catches it.
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		defer db.Close()
+
+		fc := newFakeClock(time.Now())
+		helper := NewIsolationHelper(db, nil).WithClock(fc)
+		helper.DrainWindow = 100 * time.Millisecond
+		helper.SettleTimeout = 1 * time.Second
+		helper.SweepTimeout = 1 * time.Second
+
+		setupPhase1to3(mock, pattern, extraUserID)
+		// Phase 4 poll: 3 calls → drain
+		for i := 0; i < 3; i++ {
+			mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+				WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		}
+		// Sweep: 2 empty passes → done
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		// Post-sweep COUNT → 0 (the late write hasn't committed yet)
+		mock.ExpectQuery(`SELECT COUNT\(\*\) FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+		// Post-count drain re-sweep → catches the late write (1 row)
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 1))
+		// Re-count after catching late write → 0 remaining
+		mock.ExpectQuery(`SELECT COUNT\(\*\) FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		err = helper.CleanupTestDataByPattern(ctx, pattern, extraUserID)
+		assert.NoError(t, err)
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 }

@@ -311,7 +311,17 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 	if len(extraUserIDs) > 0 {
 		ih.pollAsyncAuditWrites(ctx, extraUserIDs)
 
-		sweepCtx, sweepCancel := context.WithTimeout(context.Background(), ih.sweepTimeout())
+		sweepTimeout := ih.sweepTimeout()
+		if deadline, ok := ctx.Deadline(); ok {
+			if remaining := time.Until(deadline); remaining < sweepTimeout {
+				sweepTimeout = remaining
+			}
+		}
+		// Use context.Background() so the sweep is not canceled when the
+		// parent context is canceled — cleanup should always run to
+		// completion.  We still respect the parent's deadline (above) to
+		// avoid exceeding the declared total budget.
+		sweepCtx, sweepCancel := context.WithTimeout(context.Background(), sweepTimeout)
 		defer sweepCancel()
 
 		const sweepDrainWindow = 200 * time.Millisecond
@@ -342,6 +352,24 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 		}
 		if remaining > 0 {
 			return ErrResidualAuditLogs
+		}
+
+		// Drain window: wait briefly for writes that committed between the
+		// last sweep DELETE and the COUNT query, then sweep once more.
+		// This narrows the race window but cannot eliminate it entirely —
+		// the producer may still write after this re-check.
+		const postCountDrain = 200 * time.Millisecond
+		select {
+		case <-sweepCtx.Done():
+			// Parent deadline already expired — skip re-check.
+		case <-ih.clock.After(postCountDrain):
+			if deleted, _ := ih.deleteAuditLogsByUserIDs(sweepCtx, extraUserIDs); deleted > 0 {
+				// Caught a late write. Re-count to give WithRetry a
+				// chance to do another full attempt.
+				if remaining, _ := ih.countAuditLogsByUserIDs(sweepCtx, extraUserIDs); remaining > 0 {
+					return ErrResidualAuditLogs
+				}
+			}
 		}
 	}
 
