@@ -229,12 +229,13 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 		backoff := 20 * time.Millisecond
 		const maxBackoff = 100 * time.Millisecond
 
-		// After this many consecutive zero-delete rounds we consider the
-		// async audit queue drained. Two rounds at 20→40 ms give the
-		// worker pool ~60 ms to flush any pending writes — generous for
-		// a local in-process worker.
-		const drainThreshold = 2
-		consecutiveZeroDeletes := 0
+		// We consider the async audit queue drained when a full drain
+		// window passes with zero rows deleted.  500 ms is long enough
+		// to absorb remote-PostgreSQL network latency, AuditService
+		// worker queuing, and batch-write jitter — while still well
+		// within the 2 s hard cap.
+		const drainWindow = 500 * time.Millisecond
+		lastDeleteTime := time.Now() // treat start as "nothing pending"
 
 		for {
 			// Sleep with context awareness — returns immediately on cancel.
@@ -244,8 +245,7 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 				timer.Stop()
 				// Phase 4 exited before all async audit writes could be
 				// confirmed drained. Return an error so the caller knows
-				// test data may have been left behind — previously this
-				// returned nil, silently masking incomplete cleanup.
+				// test data may have been left behind.
 				if ctx.Err() != nil {
 					return fmt.Errorf("audit-log settle interrupted by parent context: %w", ctx.Err())
 				}
@@ -263,7 +263,6 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 			deleted, err := ih.deleteAuditLogsByUserIDs(settleCtx, extraUserIDs)
 			if err != nil {
 				if settleCtx.Err() != nil {
-					// Same as above — context expired mid-delete.
 					if ctx.Err() != nil {
 						return fmt.Errorf("audit-log settle interrupted by parent context: %w", ctx.Err())
 					}
@@ -273,13 +272,9 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 			}
 
 			if deleted > 0 {
-				// Found more writes — reset the counter and keep polling.
-				consecutiveZeroDeletes = 0
-			} else {
-				consecutiveZeroDeletes++
-				if consecutiveZeroDeletes >= drainThreshold {
-					return nil
-				}
+				lastDeleteTime = time.Now()
+			} else if time.Since(lastDeleteTime) >= drainWindow {
+				return nil
 			}
 		}
 	}
