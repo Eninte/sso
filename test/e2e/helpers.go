@@ -540,6 +540,17 @@ func registerAndLogin() (string, *loginResponse, error) {
 // 由 ensureTestCleanup 设置，嵌入到 testAwareEmail 生成的邮箱中。
 var currentTestCleanupID string
 
+// currentExtraCleanupIDs 存储需要额外清理的用户 UUID。
+// 用于测试已自行删除用户的场景（如 TestAdminDeleteUser），此时 UUID 无法从
+// users 表恢复，需要显式传递给 CleanupTestDataByPattern。
+var currentExtraCleanupIDs []string
+
+// registerExtraCleanupIDs 注册需要额外清理的用户 UUID。
+// 应在测试删除用户之前调用，确保 cleanup 能按 UUID 删除关联的审计日志。
+func registerExtraCleanupIDs(ids ...string) {
+	currentExtraCleanupIDs = append(currentExtraCleanupIDs, ids...)
+}
+
 // ensureTestCleanup 注册 t.Cleanup 回调，在测试结束时通过 testID 模式匹配清理数据。
 // 幂等：同一测试内多次调用只注册一次。
 func ensureTestCleanup(t *testing.T) {
@@ -562,10 +573,11 @@ func ensureTestCleanup(t *testing.T) {
 		defer cancel()
 
 		helper := e2etest.NewIsolationHelper(e2eDB, nil)
-		if err := helper.CleanupTestDataByPattern(ctx, "%"+cleanupID+"%"); err != nil {
+		if err := helper.CleanupTestDataByPattern(ctx, "%"+cleanupID+"%", currentExtraCleanupIDs...); err != nil {
 			t.Logf("WARN: 自动清理失败 (testID=%s): %v", cleanupID, err)
 		}
 		currentTestCleanupID = ""
+		currentExtraCleanupIDs = nil
 	})
 }
 

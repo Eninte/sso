@@ -103,7 +103,12 @@ type tableCleanupDef struct {
 // Audit logs are handled specially: since audit_logs.user_id stores server-generated
 // UUIDs (not testIDs), we first collect user UUIDs that match the pattern from the
 // users table, then delete audit logs referencing those UUIDs.
-func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern string) error {
+//
+// extraUserIDs are additional user UUIDs to clean audit logs for. Use this when a
+// test has already deleted the user (e.g. TestAdminDeleteUser) so the UUID can no
+// longer be recovered from the users table. A brief poll handles the race where the
+// audit service writes asynchronously after the cleanup query.
+func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern string, extraUserIDs ...string) error {
 	if ih.db == nil {
 		return fmt.Errorf("database connection is nil")
 	}
@@ -112,6 +117,21 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 	userIDs, err := ih.collectUserIDsByPattern(ctx, pattern)
 	if err != nil {
 		return fmt.Errorf("collect user IDs failed: %w", err)
+	}
+
+	// Merge with extraUserIDs provided by the caller (e.g. for users already
+	// deleted by the test itself). Deduplicate to avoid redundant deletes.
+	if len(extraUserIDs) > 0 {
+		seen := make(map[string]bool, len(userIDs))
+		for _, id := range userIDs {
+			seen[id] = true
+		}
+		for _, id := range extraUserIDs {
+			if !seen[id] {
+				userIDs = append(userIDs, id)
+				seen[id] = true
+			}
+		}
 	}
 
 	// Phase 2: Delete audit logs for those users.
@@ -185,6 +205,19 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 		query := fmt.Sprintf("DELETE FROM %s WHERE %s", t.table, where)
 		if _, err := ih.db.ExecContext(ctx, query, args...); err != nil {
 			return fmt.Errorf("cleanup %s failed: %w", t.table, err)
+		}
+	}
+
+	// Phase 4: If extraUserIDs were provided, poll briefly for async audit writes.
+	// The audit service writes asynchronously via a worker pool; the initial
+	// delete in Phase 2 may race against a pending write. A short retry loop
+	// catches the stragglers without adding noticeable test latency.
+	if len(extraUserIDs) > 0 {
+		for i := 0; i < 3; i++ {
+			time.Sleep(50 * time.Millisecond)
+			if err := ih.deleteAuditLogsByUserIDs(ctx, extraUserIDs); err != nil {
+				return fmt.Errorf("cleanup audit_logs (async poll) failed: %w", err)
+			}
 		}
 	}
 

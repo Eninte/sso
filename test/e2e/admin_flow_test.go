@@ -243,6 +243,10 @@ func TestAdminDeleteUser(t *testing.T) {
 	require.NoError(t, err)
 	userID := testUser["user_id"].(string)
 
+	// 注册 UUID 以便清理：删除用户后 UUID 无法从 users 表恢复，
+	// 且 EventUserDeleted 的 details 不含 email/testID。
+	registerExtraCleanupIDs(userID)
+
 	t.Run("删除用户", func(t *testing.T) {
 		resp, _, err := doRequest("DELETE", "/api/v1/admin/users/"+userID, nil, adminTokens.AccessToken)
 		require.NoError(t, err)
