@@ -72,6 +72,10 @@ type IsolationHelper struct {
 	// terminates after this duration regardless of drain state.
 	// Defaults to 2 s.  Must be longer than DrainWindow.
 	SettleTimeout time.Duration
+
+	// SweepTimeout is the hard cap for the post-poll sweep loop.
+	// Defaults to 5 s.
+	SweepTimeout time.Duration
 }
 
 // NewIsolationHelper creates a new isolation helper instance.
@@ -104,6 +108,14 @@ func (ih *IsolationHelper) settleTimeout() time.Duration {
 		return ih.SettleTimeout
 	}
 	return 2 * time.Second
+}
+
+// sweepTimeout returns the configured sweep timeout or the default (5 s).
+func (ih *IsolationHelper) sweepTimeout() time.Duration {
+	if ih.SweepTimeout > 0 {
+		return ih.SweepTimeout
+	}
+	return 5 * time.Second
 }
 
 // WithTransaction executes a function within a database transaction that is
@@ -287,22 +299,40 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 	}
 
 	// Phase 4: If extraUserIDs were provided, poll briefly for async audit
-	// writes, then run a final sweep.  The poll lets the async worker
-	// flush naturally; the sweep catches anything written during or after
-	// the poll.  This two-pass approach is more reliable than trying to
-	// prove the queue is empty from database observations alone.
+	// writes, then sweep in a loop.  The poll lets the async worker flush
+	// naturally; the sweep loop catches writes that arrive during or after
+	// the poll.  Multiple sweep passes handle the case where the worker
+	// dequeued a message before the sweep started but commits the DB write
+	// after the first sweep completes.
 	if len(extraUserIDs) > 0 {
 		ih.pollAsyncAuditWrites(ctx, extraUserIDs)
 
-		// Final sweep: delete any audit logs that arrived after the initial
-		// Phase 2 cleanup or during the Phase 4 poll.  This is the actual
-		// correctness guarantee — the poll is best-effort waiting; the sweep
-		// is what ensures no test data leaks regardless of timing.
-		// Use a fresh context since the caller's ctx may have been cancelled.
-		sweepCtx, sweepCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// Sweep loop: keep deleting until two consecutive passes find
+		// nothing, or the sweep budget is exhausted.
+		sweepCtx, sweepCancel := context.WithTimeout(context.Background(), ih.sweepTimeout())
 		defer sweepCancel()
-		if _, err := ih.deleteAuditLogsByUserIDs(sweepCtx, extraUserIDs); err != nil {
-			return fmt.Errorf("audit-log sweep failed: %w", err)
+
+		const sweepDrainWindow = 200 * time.Millisecond
+		consecutiveEmpty := 0
+		for {
+			deleted, err := ih.deleteAuditLogsByUserIDs(sweepCtx, extraUserIDs)
+			if err != nil {
+				return fmt.Errorf("audit-log sweep failed: %w", err)
+			}
+			if deleted > 0 {
+				consecutiveEmpty = 0
+			} else {
+				consecutiveEmpty++
+				if consecutiveEmpty >= 2 {
+					break
+				}
+			}
+			// Brief pause before the next sweep pass.
+			select {
+			case <-sweepCtx.Done():
+				return fmt.Errorf("audit-log sweep timed out: some async audit logs may not have been cleaned up")
+			case <-ih.clock.After(sweepDrainWindow):
+			}
 		}
 	}
 
