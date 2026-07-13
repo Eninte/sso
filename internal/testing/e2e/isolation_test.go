@@ -107,6 +107,10 @@ func TestIsolationHelper_AuditLogCleanup(t *testing.T) {
 			WithArgs("uuid-user-1", "uuid-user-2").
 			WillReturnResult(sqlmock.NewResult(0, 3))
 
+		// Phase 2b: deleteAuditLogsByDetails deletes audit logs matching pattern in details
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE details::text LIKE \$1`).
+			WithArgs(pattern).WillReturnResult(sqlmock.NewResult(0, 1))
+
 		// Phase 3: remaining tables (verification_tokens, reset_tokens, etc.)
 		mock.ExpectExec(`DELETE FROM verification_tokens WHERE`).
 			WithArgs(pattern).WillReturnResult(sqlmock.NewResult(0, 0))
@@ -141,6 +145,10 @@ func TestIsolationHelper_AuditLogCleanup(t *testing.T) {
 			WillReturnRows(userRows)
 
 		// Phase 2: skipped (no user IDs)
+
+		// Phase 2b: deleteAuditLogsByDetails still runs (details may contain testID)
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE details::text LIKE \$1`).
+			WithArgs(pattern).WillReturnResult(sqlmock.NewResult(0, 0))
 
 		// Phase 3: remaining tables still cleaned
 		mock.ExpectExec(`DELETE FROM verification_tokens WHERE`).

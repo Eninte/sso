@@ -936,6 +936,10 @@ func TestActiveTxLifecycle(t *testing.T) {
 
 		// Phase 2: audit logs skipped (no matching users)
 
+		// Phase 2b: audit logs by details (handles pre-deleted users)
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE details::text LIKE \$1`).
+			WithArgs(testIDPattern).WillReturnResult(sqlmock.NewResult(0, 0))
+
 		// Phase 3: remaining tables
 		mock.ExpectExec("DELETE FROM verification_tokens").WithArgs(testIDPattern).WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec("DELETE FROM reset_tokens").WithArgs(testIDPattern).WillReturnResult(sqlmock.NewResult(0, 0))

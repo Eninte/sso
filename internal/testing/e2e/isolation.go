@@ -118,7 +118,17 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 	// audit_logs.user_id stores UUIDs, not testIDs, so LIKE on the pattern
 	// won't match. Instead, delete by the collected user UUIDs.
 	if err := ih.deleteAuditLogsByUserIDs(ctx, userIDs); err != nil {
-		return fmt.Errorf("cleanup audit_logs failed: %w", err)
+		return fmt.Errorf("cleanup audit_logs (by user_id) failed: %w", err)
+	}
+
+	// Phase 2b: Also delete audit logs whose details contain the testID pattern.
+	// This handles the case where a test has already deleted the user (e.g.
+	// TestAdminDeleteUser) — collectUserIDsByPattern returns nothing, but the
+	// audit_logs (user.deleted, user.register, etc.) still reference that user
+	// and their details text may contain the testID or email.
+	if _, err := ih.db.ExecContext(ctx,
+		`DELETE FROM audit_logs WHERE details::text LIKE $1`, pattern); err != nil {
+		return fmt.Errorf("cleanup audit_logs (by details) failed: %w", err)
 	}
 
 	// Phase 3: Delete remaining tables in dependency order (foreign keys first).

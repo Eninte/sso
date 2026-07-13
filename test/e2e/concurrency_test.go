@@ -19,6 +19,11 @@ import (
 // ============================================================================
 
 func TestConcurrentRegister(t *testing.T) {
+	// 调用 testAwareEmail 触发 ensureTestCleanup 注册清理回调。
+	// 后续每个 goroutine 的邮箱都包含同一个 cleanupID，确保全部被清理。
+	_ = testAwareEmail(t, "concurrent") // side-effect: registers cleanup
+	cleanupID := currentTestCleanupID
+
 	const concurrency = 10
 	var wg sync.WaitGroup
 	errors := make(chan error, concurrency)
@@ -29,7 +34,13 @@ func TestConcurrentRegister(t *testing.T) {
 		go func(index int) {
 			defer wg.Done()
 
-			email := fmt.Sprintf("test-concurrent-%d-%d@example.com", index, time.Now().UnixNano())
+			// 使用 cleanupID 构造邮箱，保证 CleanupTestDataByPattern 能匹配
+			var email string
+			if cleanupID != "" {
+				email = fmt.Sprintf("test-concurrent-%d-%s@example.com", index, cleanupID)
+			} else {
+				email = fmt.Sprintf("test-concurrent-%d-%d@example.com", index, time.Now().UnixNano())
+			}
 			password := "TestPassword123!"
 
 			req := registerRequest{Email: email, Password: password}
