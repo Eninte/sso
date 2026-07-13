@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/lib/pq"
-
 	"github.com/example/sso/internal/model"
 	"github.com/example/sso/internal/store"
 )
@@ -29,7 +27,7 @@ func (s *Store) StoreAuthorizationCode(ctx context.Context, code *model.Authoriz
 		code.ClientID,
 		code.UserID,
 		code.RedirectURI,
-		pq.Array(code.Scopes),
+		code.Scopes,
 		code.CodeChallenge,
 		code.CodeChallengeMethod,
 		code.ExpiresAt,
@@ -52,7 +50,7 @@ func (s *Store) GetAuthorizationCode(ctx context.Context, code string) (*model.A
 		&authCode.ClientID,
 		&authCode.UserID,
 		&authCode.RedirectURI,
-		pq.Array(&authCode.Scopes),
+		scanTextArray(&authCode.Scopes),
 		&authCode.CodeChallenge,
 		&authCode.CodeChallengeMethod,
 		&authCode.ExpiresAt,
@@ -112,7 +110,7 @@ func (s *Store) StoreToken(ctx context.Context, token *model.Token) error {
 		token.RefreshToken,
 		token.UserID,
 		token.ClientID,
-		pq.Array(token.Scopes),
+		token.Scopes,
 		token.ExpiresAt,
 		token.CreatedAt,
 	)
@@ -147,7 +145,7 @@ func (s *Store) getTokenByField(ctx context.Context, field, value string) (*mode
 		&token.RefreshToken,
 		&token.UserID,
 		&token.ClientID,
-		pq.Array(&token.Scopes),
+		scanTextArray(&token.Scopes),
 		&token.ExpiresAt,
 		&token.CreatedAt,
 		&token.RevokedAt,

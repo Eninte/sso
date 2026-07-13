@@ -8,13 +8,13 @@ import (
 	"fmt"
 	"time"
 
-	_ "github.com/lib/pq" // PostgreSQL驱动
+	_ "github.com/jackc/pgx/v5/stdlib" // PostgreSQL驱动
 	"github.com/redis/go-redis/v9"
 )
 
 // openDB 打开数据库连接（用于setup测试连接）
 func openDB(dsn string) (*sql.DB, error) {
-	db, err := sql.Open("postgres", dsn)
+	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, err
 	}

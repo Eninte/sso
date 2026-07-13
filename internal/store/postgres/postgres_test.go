@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/example/sso/internal/model"
+	storepkg "github.com/example/sso/internal/store"
 	"github.com/example/sso/internal/store/postgres"
 	"github.com/example/sso/internal/util/testutil"
 )
@@ -94,7 +94,8 @@ func TestStore_CreateUser(t *testing.T) {
 		require.NoError(t, store.Create(ctx, user1))
 
 		user2 := newTestUser("dup@example.com")
-		assert.Error(t, store.Create(ctx, user2))
+		err := store.Create(ctx, user2)
+		assert.ErrorIs(t, err, storepkg.ErrDuplicateEmail)
 	})
 }
 
@@ -393,7 +394,7 @@ func TestStore_TokenOperations(t *testing.T) {
 			RefreshToken: "test-refresh-" + uuid.New().String(),
 			UserID:       user.ID,
 			ClientID:     ptrTo(uniqueClientID),
-			Scopes:       []string{"openid", "profile"},
+			Scopes:       []string{"openid", "scope,with,commas", `scope"quote`, `scope\backslash`, ""},
 			ExpiresAt:    time.Now().Add(1 * time.Hour),
 			CreatedAt:    time.Now(),
 		}
@@ -402,10 +403,12 @@ func TestStore_TokenOperations(t *testing.T) {
 		retrieved, err := store.GetTokenByAccessToken(ctx, token.AccessToken)
 		require.NoError(t, err)
 		assert.Equal(t, token.ID, retrieved.ID)
+		assert.Equal(t, token.Scopes, retrieved.Scopes)
 
 		retrieved, err = store.GetTokenByRefreshToken(ctx, token.RefreshToken)
 		require.NoError(t, err)
 		assert.Equal(t, token.ID, retrieved.ID)
+		assert.Equal(t, token.Scopes, retrieved.Scopes)
 	})
 
 	t.Run("撤销Token", func(t *testing.T) {
@@ -522,7 +525,7 @@ func TestStore_AuthorizationCode(t *testing.T) {
 			ClientID:    uniqueClientID,
 			UserID:      user.ID,
 			RedirectURI: "http://localhost/callback",
-			Scopes:      []string{"openid"},
+			Scopes:      []string{"openid", "scope,with,commas", `scope"quote`, `scope\backslash`, ""},
 			ExpiresAt:   time.Now().Add(10 * time.Minute),
 			CreatedAt:   time.Now(),
 		}
@@ -532,6 +535,7 @@ func TestStore_AuthorizationCode(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, code.UserID, retrieved.UserID)
 		assert.Equal(t, code.ClientID, retrieved.ClientID)
+		assert.Equal(t, code.Scopes, retrieved.Scopes)
 	})
 
 	t.Run("标记授权码已使用", func(t *testing.T) {
@@ -632,9 +636,9 @@ func TestStore_GetByClientID(t *testing.T) {
 		ClientID:     "test-getclient-" + uuid.New().String()[:8],
 		ClientSecret: "secret",
 		Name:         "GetByClientID Test",
-		RedirectURIs: []string{"http://localhost/callback"},
-		GrantTypes:   []string{"authorization_code"},
-		Scopes:       []string{"openid"},
+		RedirectURIs: []string{"http://localhost/callback", "https://example.com/callback?next=a,b", `https://example.com/callback\\path`, ""},
+		GrantTypes:   []string{"authorization_code", "grant,custom", `grant"quote`, ""},
+		Scopes:       []string{"openid", "scope,with,commas", `scope"quote`, `scope\backslash`, ""},
 		CreatedAt:    time.Now(),
 	}
 	require.NoError(t, store.CreateClient(ctx, client))
@@ -644,7 +648,29 @@ func TestStore_GetByClientID(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, client.ClientID, retrieved.ClientID)
 		assert.Equal(t, client.Name, retrieved.Name)
-		assert.Contains(t, retrieved.RedirectURIs, "http://localhost/callback")
+		assert.Equal(t, client.RedirectURIs, retrieved.RedirectURIs)
+		assert.Equal(t, client.GrantTypes, retrieved.GrantTypes)
+		assert.Equal(t, client.Scopes, retrieved.Scopes)
+	})
+
+	t.Run("空数组往返", func(t *testing.T) {
+		emptyClient := &model.Client{
+			ID:           uuid.New().String(),
+			ClientID:     "test-empty-client-" + uuid.New().String()[:8],
+			ClientSecret: "secret",
+			Name:         "Empty Arrays Test",
+			RedirectURIs: []string{},
+			GrantTypes:   []string{},
+			Scopes:       []string{},
+			CreatedAt:    time.Now(),
+		}
+		require.NoError(t, store.CreateClient(ctx, emptyClient))
+
+		retrieved, err := store.GetByClientID(ctx, emptyClient.ClientID)
+		require.NoError(t, err)
+		assert.Equal(t, []string{}, retrieved.RedirectURIs)
+		assert.Equal(t, []string{}, retrieved.GrantTypes)
+		assert.Equal(t, []string{}, retrieved.Scopes)
 	})
 
 	t.Run("客户端不存在", func(t *testing.T) {

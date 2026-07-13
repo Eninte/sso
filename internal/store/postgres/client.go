@@ -6,8 +6,6 @@ import (
 	"database/sql"
 	"errors"
 
-	"github.com/lib/pq"
-
 	"github.com/example/sso/internal/model"
 	"github.com/example/sso/internal/store"
 )
@@ -30,9 +28,9 @@ func (s *Store) GetByClientID(ctx context.Context, clientID string) (*model.Clie
 		&client.ClientID,
 		&client.ClientSecret,
 		&client.Name,
-		pq.Array(&client.RedirectURIs),
-		pq.Array(&client.GrantTypes),
-		pq.Array(&client.Scopes),
+		scanTextArray(&client.RedirectURIs),
+		scanTextArray(&client.GrantTypes),
+		scanTextArray(&client.Scopes),
 		&client.PublicClient,
 		&client.CreatedAt,
 	)
@@ -58,9 +56,9 @@ func (s *Store) CreateClient(ctx context.Context, client *model.Client) error {
 		client.ClientID,
 		client.ClientSecret,
 		client.Name,
-		pq.Array(client.RedirectURIs),
-		pq.Array(client.GrantTypes),
-		pq.Array(client.Scopes),
+		client.RedirectURIs,
+		client.GrantTypes,
+		client.Scopes,
 		client.PublicClient,
 		client.CreatedAt,
 	)

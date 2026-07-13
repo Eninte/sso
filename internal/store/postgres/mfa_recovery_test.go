@@ -13,7 +13,6 @@ import (
 
 	"github.com/example/sso/internal/store/postgres"
 	"github.com/example/sso/internal/util/testutil"
-	_ "github.com/lib/pq"
 )
 
 // ============================================================================

@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/lib/pq"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/example/sso/internal/model"
 	"github.com/example/sso/internal/store"
@@ -43,13 +43,18 @@ func (s *Store) Create(ctx context.Context, user *model.User) error {
 
 	if err != nil {
 		// 检查是否为唯一约束冲突
-		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+		if isUniqueViolation(err) {
 			return store.ErrDuplicateEmail
 		}
 		return err
 	}
 
 	return nil
+}
+
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 // GetByID 根据ID获取用户

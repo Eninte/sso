@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	_ "github.com/lib/pq"
 
 	"github.com/example/sso/internal/model"
 	"github.com/example/sso/internal/store/postgres"

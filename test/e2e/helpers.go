@@ -18,10 +18,11 @@ import (
 	"testing"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib" // PostgreSQL 驱动
+
 	e2etest "github.com/example/sso/internal/testing/e2e"
 	"github.com/example/sso/internal/util/retryutil"
 	"github.com/example/sso/internal/util/testutil"
-	_ "github.com/lib/pq" // PostgreSQL 驱动
 )
 
 // ============================================================================
@@ -135,7 +136,7 @@ func initE2EDB() {
 		ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
 		defer cancel()
 
-		db, err := sql.Open("postgres", dbURL)
+		db, err := sql.Open("pgx", dbURL)
 		if err != nil {
 			fmt.Printf("WARN: sql.Open 失败，e2eDB 未初始化: %v\n", err)
 			return

@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/lib/pq" // 注册 PostgreSQL 数据库驱动
+	_ "github.com/jackc/pgx/v5/stdlib" // 注册 PostgreSQL 数据库驱动
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 
@@ -122,7 +122,7 @@ func ConnectTestDB(tb testing.TB) *sql.DB {
 	defer cancel()
 
 	// sql.Open 不实际连接，需 Ping 才会真正建立连接
-	db, err := sql.Open("postgres", dbURL)
+	db, err := sql.Open("pgx", dbURL)
 	require.NoError(tb, err, "sql.Open 失败")
 
 	// 用 retryutil 重试 Ping

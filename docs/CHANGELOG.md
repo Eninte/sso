@@ -55,6 +55,7 @@
 
 ### Changed
 
+- PostgreSQL 驱动由 `lib/pq` 迁移至 `pgx/v5 stdlib`，保留现有 `database/sql` 接口与连接池配置
 - `AuditServiceInterface.Log()` 移除 `error` 返回值，与 `AuditService.Log()` 实现保持一致（审计日志异步写入，失败不阻塞主流程）
 - `gracefulShutdown` 函数签名变更，新增 `auditSvc`、`socialSvc` 和 `timeout` 参数用于优雅关闭
 - 清理 `.golangci.yml` 中 10 个已废弃 linter 配置（deadcode, exhaustivestruct, golint 等）

@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"log/slog"
 
+	_ "github.com/jackc/pgx/v5/stdlib" // PostgreSQL driver
+
 	"github.com/example/sso/internal/cache"
 	"github.com/example/sso/internal/captcha"
 	"github.com/example/sso/internal/config"
@@ -215,7 +217,7 @@ func initServices(cfg *config.Config, version, buildTime string) (*Services, *sq
 
 // connectDatabase 连接数据库并验证连接
 func connectDatabase(cfg *config.Config) (*sql.DB, error) {
-	db, err := sql.Open("postgres", cfg.DatabaseURL())
+	db, err := sql.Open("pgx", cfg.DatabaseURL())
 	if err != nil {
 		return nil, err
 	}

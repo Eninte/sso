@@ -8,6 +8,9 @@ import (
 	"errors"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+	_ "github.com/jackc/pgx/v5/stdlib" // PostgreSQL driver
+
 	"github.com/example/sso/internal/model"
 )
 
@@ -35,6 +38,14 @@ var AllowedCleanupTables = map[string]bool{
 // allowedCleanupTables 是AllowedCleanupTables的内部别名
 // 保持向后兼容性
 var allowedCleanupTables = AllowedCleanupTables
+
+// textArrayMap is initialized before concurrent request handling begins.
+// Prewarming the slice mapping keeps subsequent scans read-only.
+var textArrayMap = func() *pgtype.Map {
+	typeMap := pgtype.NewMap()
+	_, _ = typeMap.TypeForValue((*[]string)(nil))
+	return typeMap
+}()
 
 // cleanupTableKeys 各清理表的主键列名（只读，通过getPrimaryKeyColumn访问）
 var cleanupTableKeys = map[string]string{
@@ -73,7 +84,7 @@ func NewFromURL(databaseURL string) (*Store, error) {
 // NewFromURLWithTimeout 从URL创建PostgreSQL存储实例，支持自定义超时
 // 注意：连接池配置由调用方通过 sql.DB 设置，此函数不覆盖
 func NewFromURLWithTimeout(databaseURL string, timeout time.Duration) (*Store, error) {
-	db, err := sql.Open("postgres", databaseURL)
+	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +104,7 @@ func NewFromURLWithTimeout(databaseURL string, timeout time.Duration) (*Store, e
 
 // NewFromConfig 从URL和配置创建PostgreSQL存储实例
 func NewFromConfig(databaseURL string, maxOpenConns, maxIdleConns int, connMaxLifetime, connMaxIdleTime, queryTimeout time.Duration) (*Store, error) {
-	db, err := sql.Open("postgres", databaseURL)
+	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -138,6 +149,11 @@ func (s *Store) Close() error {
 // Ping 检查数据库连接
 func (s *Store) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
+}
+
+// scanTextArray adapts pgx's PostgreSQL array codec to database/sql.Scanner.
+func scanTextArray(destination *[]string) sql.Scanner {
+	return textArrayMap.SQLScanner(destination)
 }
 
 // ============================================================================

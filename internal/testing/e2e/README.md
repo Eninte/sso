@@ -29,14 +29,16 @@ package main
 import (
     "context"
     "database/sql"
-    
+
+    _ "github.com/jackc/pgx/v5/stdlib"
+
     "github.com/example/sso/internal/testing/e2e"
     "github.com/redis/go-redis/v9"
 )
 
 func main() {
     // Initialize dependencies
-    db, _ := sql.Open("postgres", "postgres://...")
+    db, _ := sql.Open("pgx", "postgres://...")
     redis := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
     
     // Create runner with default config
