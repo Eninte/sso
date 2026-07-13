@@ -208,7 +208,7 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 	const pattern = "%e2e_async_test%"
 	const extraUserID = "uuid-async-user"
 
-	t.Run("polls until context deadline does not early-exit on zero deletes", func(t *testing.T) {
+	t.Run("exits successfully after drain threshold on zero deletes", func(t *testing.T) {
 		db, mock, err := sqlmock.New()
 		require.NoError(t, err)
 		defer db.Close()
@@ -217,30 +217,26 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 
 		setupPhase1to3(mock, pattern, extraUserID)
 
-		// Phase 4: queue enough deletes for the deadline window.
-		// With 200ms timeout and backoff 20→40→80→100ms, ~3 calls fit
-		// before the context expires. All return 0 rows — the loop must
-		// NOT stop on that; only the deadline ends it.
-		const phase4Calls = 3
+		// Phase 4: all calls return 0 rows. After 2 consecutive
+		// zero-delete rounds the drain threshold is met → return nil.
+		const phase4Calls = 2
 		for i := 0; i < phase4Calls; i++ {
 			mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
 				WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		defer cancel()
 
 		start := time.Now()
 		err = helper.CleanupTestDataByPattern(ctx, pattern, extraUserID)
 		elapsed := time.Since(start)
 
-		// Phase 4 now returns an error when the context expires, since we
-		// cannot confirm all async audit writes have been drained.
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, context.DeadlineExceeded)
-		// Must have polled for roughly the full context budget, not returned early.
-		assert.GreaterOrEqual(t, elapsed.Milliseconds(), int64(150),
-			"should poll until context deadline, not exit early on zero deletes")
+		// Must succeed — drain threshold reached before deadline.
+		assert.NoError(t, err)
+		// Must not have waited for the full context budget.
+		assert.Less(t, elapsed.Milliseconds(), int64(200),
+			"should exit early once drain threshold is met")
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 
@@ -266,7 +262,7 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 		err = helper.CleanupTestDataByPattern(ctx, pattern, extraUserID)
 		elapsed := time.Since(start)
 
-		// Phase 4 now returns an error on cancellation.
+		// Phase 4 returns an error on cancellation.
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, context.Canceled)
 		// Must exit within ~one backoff window (≤100ms) of the cancel signal.
@@ -287,25 +283,26 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
 			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
 		// Phase 4, call 2: the worker has now written → 1 row deleted.
+		// This resets the consecutive-zero counter.
 		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
 			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 1))
-		// Subsequent polls until deadline: all return 0.
+		// Phase 4, calls 3-4: no more writes → 2 consecutive zeros → drain.
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
 			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
 
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		defer cancel()
 
 		err = helper.CleanupTestDataByPattern(ctx, pattern, extraUserID)
-		// The late write was cleaned (call 2 deleted 1 row), but the context
-		// expired before we could confirm no more writes are coming — so an
-		// error is returned indicating incomplete settle.
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, context.DeadlineExceeded)
+		// The late write was cleaned (call 2 deleted 1 row), then 2 more
+		// zero-delete rounds confirmed the queue is drained → success.
+		assert.NoError(t, err)
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 
-	t.Run("no-deadline context uses settle timeout cap instead of polling forever", func(t *testing.T) {
+	t.Run("timeout returns error when drain is not reached", func(t *testing.T) {
 		db, mock, err := sqlmock.New()
 		require.NoError(t, err)
 		defer db.Close()
@@ -314,30 +311,49 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 
 		setupPhase1to3(mock, pattern, extraUserID)
 
-		// Phase 4: with context.Background() (no deadline), the 2-second
-		// settle cap must terminate the loop. Queue enough expectations
-		// to cover ~2s of polling at 20→40→80→100ms backoff.
-		// Worst case: 20+40+80+100*16 ≈ 1740ms → ~18 calls.
-		// We set an unlimited sequence to be safe.
-		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
-			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0)).
-			WillDelayFor(0)
-		// Use regexp match so sqlmock doesn't panic on unexpected calls —
-		// it already returns an error for unmatched calls, which is fine.
-		// However, to be robust, just set a high call count.
+		// Phase 4: audit logs keep appearing every round — the drain
+		// threshold is never reached, so we eventually time out.
+		// With 200ms timeout and backoff 20→40→80→100ms, ~3 calls fit.
+		for i := 0; i < 3; i++ {
+			mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+				WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 1))
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		defer cancel()
+
+		err = helper.CleanupTestDataByPattern(ctx, pattern, extraUserID)
+		// Drain never reached → must return an error.
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("no-deadline context uses settle timeout cap", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		defer db.Close()
+
+		helper := NewIsolationHelper(db, nil)
+
+		setupPhase1to3(mock, pattern, extraUserID)
+
+		// Phase 4: audit logs keep appearing → drain never reached.
+		// With context.Background() the 2-second settle cap terminates
+		// the loop. Queue enough expectations for ~2s of polling.
 		for i := 0; i < 25; i++ {
 			mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
-				WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+				WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 1))
 		}
 
 		start := time.Now()
 		err = helper.CleanupTestDataByPattern(context.Background(), pattern, extraUserID)
 		elapsed := time.Since(start)
 
-		// Must return an error (not nil) indicating settle timeout.
+		// Must return an error indicating settle timeout.
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "settle timed out")
-		// Must terminate within roughly the 2s cap (plus some tolerance).
+		// Must terminate within roughly the 2s cap (plus tolerance).
 		assert.Less(t, elapsed.Milliseconds(), int64(3000),
 			"should terminate at settle timeout cap, not poll forever")
 		assert.Greater(t, elapsed.Milliseconds(), int64(1500),

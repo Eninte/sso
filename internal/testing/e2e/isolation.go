@@ -229,6 +229,13 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 		backoff := 20 * time.Millisecond
 		const maxBackoff = 100 * time.Millisecond
 
+		// After this many consecutive zero-delete rounds we consider the
+		// async audit queue drained. Two rounds at 20→40 ms give the
+		// worker pool ~60 ms to flush any pending writes — generous for
+		// a local in-process worker.
+		const drainThreshold = 2
+		consecutiveZeroDeletes := 0
+
 		for {
 			// Sleep with context awareness — returns immediately on cancel.
 			timer := time.NewTimer(backoff)
@@ -253,7 +260,8 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 				}
 			}
 
-			if _, err := ih.deleteAuditLogsByUserIDs(settleCtx, extraUserIDs); err != nil {
+			deleted, err := ih.deleteAuditLogsByUserIDs(settleCtx, extraUserIDs)
+			if err != nil {
 				if settleCtx.Err() != nil {
 					// Same as above — context expired mid-delete.
 					if ctx.Err() != nil {
@@ -262,6 +270,16 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 					return fmt.Errorf("audit-log settle timed out after %s: some async audit logs may not have been cleaned up", settleTimeout)
 				}
 				return fmt.Errorf("cleanup audit_logs (async poll) failed: %w", err)
+			}
+
+			if deleted > 0 {
+				// Found more writes — reset the counter and keep polling.
+				consecutiveZeroDeletes = 0
+			} else {
+				consecutiveZeroDeletes++
+				if consecutiveZeroDeletes >= drainThreshold {
+					return nil
+				}
 			}
 		}
 	}
