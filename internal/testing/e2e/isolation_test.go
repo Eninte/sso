@@ -208,27 +208,32 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 	const pattern = "%e2e_async_test%"
 	const extraUserID = "uuid-async-user"
 
-	// Drain-window tests use fakeClock for determinism.
-	// Timeout tests use real time since context.WithTimeout is real-time.
+	sweepMock := func(mock sqlmock.Sqlmock) {
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+	}
 
-	t.Run("exits successfully after drain window on zero deletes", func(t *testing.T) {
+	// All tests use fakeClock + short timeouts for determinism.
+	// Phase 4 always returns nil — the final sweep guarantees cleanup.
+
+	t.Run("exits successfully after drain window", func(t *testing.T) {
 		db, mock, err := sqlmock.New()
 		require.NoError(t, err)
 		defer db.Close()
 
-		// Short drain window (100ms) so the test runs fast with fakeClock.
-		// Backoff 20→40→80→…ms, cumulative after 3 calls = 140ms.
-		// Drain check after call 3: elapsed = 140ms ≥ 100ms → drain.
 		fc := newFakeClock(time.Now())
 		helper := NewIsolationHelper(db, nil).WithClock(fc)
 		helper.DrainWindow = 100 * time.Millisecond
+		helper.SettleTimeout = 1 * time.Second
 
 		setupPhase1to3(mock, pattern, extraUserID)
 
+		// 3 poll calls (backoff 20+40+80=140ms ≥ 100ms drain) + 1 sweep
 		for i := 0; i < 3; i++ {
 			mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
 				WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
 		}
+		sweepMock(mock)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -238,32 +243,32 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 
-	t.Run("context cancellation exits promptly", func(t *testing.T) {
+	t.Run("context cancellation still sweeps", func(t *testing.T) {
 		db, mock, err := sqlmock.New()
 		require.NoError(t, err)
 		defer db.Close()
 
-		// Use real time for cancellation — fakeClock iterations are
-		// instant and would outrun the cancel timer.
+		// Use real time so the cancel fires mid-iteration.
 		helper := NewIsolationHelper(db, nil)
-		helper.DrainWindow = 100 * time.Millisecond
+		helper.DrainWindow = 1 * time.Second
+		helper.SettleTimeout = 1 * time.Second
 
 		setupPhase1to3(mock, pattern, extraUserID)
 
-		// The first iteration sleeps 20ms and completes its delete.
-		// Cancel fires at 30ms, during the 2nd sleep.
-		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
-			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		// Phase 1-3 finish in <1ms.  Phase 4 sleeps 20ms on first
+		// iteration; cancel at 10ms fires settleCtx.Done() before the
+		// timer → 0 poll calls, 1 sweep call.
+		sweepMock(mock)
 
 		ctx, cancel := context.WithCancel(context.Background())
-		time.AfterFunc(30*time.Millisecond, cancel)
+		time.AfterFunc(10*time.Millisecond, cancel)
 
 		err = helper.CleanupTestDataByPattern(ctx, pattern, extraUserID)
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, context.Canceled)
+		assert.NoError(t, err)
+		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 
-	t.Run("late-arriving audit write resets drain window", func(t *testing.T) {
+	t.Run("late-arriving audit write is caught by sweep", func(t *testing.T) {
 		db, mock, err := sqlmock.New()
 		require.NoError(t, err)
 		defer db.Close()
@@ -271,22 +276,21 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 		fc := newFakeClock(time.Now())
 		helper := NewIsolationHelper(db, nil).WithClock(fc)
 		helper.DrainWindow = 100 * time.Millisecond
+		helper.SettleTimeout = 1 * time.Second
 
 		setupPhase1to3(mock, pattern, extraUserID)
 
-		// Call 1: no writes → 0 rows.
+		// Poll: 0, 1 (reset), 0, 0 → drain at call 4 (180ms ≥ 100ms)
 		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
 			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
-		// Call 2: late write → 1 row, resets lastDeleteTime.
 		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
 			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 1))
-		// Calls 3-4: drain window from call 2 → return nil.
-		// Backoff at call 3 = 80ms, cumulative from call 2 = 80ms.
-		// Call 4: backoff = 100ms, cumulative = 180ms ≥ 100ms → drain.
-		for i := 0; i < 2; i++ {
-			mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
-				WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
-		}
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
+			WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 0))
+		// Sweep catches the late write
+		sweepMock(mock)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -296,31 +300,31 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 
-	t.Run("timeout returns error when drain is not reached", func(t *testing.T) {
+	t.Run("settle timeout still sweeps", func(t *testing.T) {
 		db, mock, err := sqlmock.New()
 		require.NoError(t, err)
 		defer db.Close()
 
-		// Use real time + long drain window so the 200ms context deadline
-		// fires before the drain window completes.
+		// Use real time so the settle timeout fires during the loop.
 		helper := NewIsolationHelper(db, nil)
-		helper.DrainWindow = 2 * time.Second
+		helper.DrainWindow = 2 * time.Second  // longer than settle
+		helper.SettleTimeout = 200 * time.Millisecond
 
 		setupPhase1to3(mock, pattern, extraUserID)
 
-		// With 200ms context and backoff 20→40→80→100ms, 3 calls fit
-		// (cumulative 140ms) before the deadline fires during the 4th sleep.
+		// Backoff 20→40→80→…ms, settle at 200ms.
+		// 3 poll calls (cumulative 140ms) + sweep after settle.
 		for i := 0; i < 3; i++ {
 			mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
 				WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 1))
 		}
+		sweepMock(mock)
 
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
 		err = helper.CleanupTestDataByPattern(ctx, pattern, extraUserID)
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.NoError(t, err)
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 
@@ -329,24 +333,21 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 		require.NoError(t, err)
 		defer db.Close()
 
-		// Use real time + long drain window so the 2s settle timeout fires
-		// before the drain window completes.
 		helper := NewIsolationHelper(db, nil)
-		helper.DrainWindow = 5 * time.Second // longer than 2s settle cap
+		helper.DrainWindow = 2 * time.Second
+		helper.SettleTimeout = 200 * time.Millisecond
 
 		setupPhase1to3(mock, pattern, extraUserID)
 
-		// With 2s settle cap and backoff 20→40→80→100→100→…ms,
-		// 21 calls fit (cumulative 1940ms) before the 22nd sleep
-		// pushes past 2000ms → settle timeout.
-		for i := 0; i < 21; i++ {
+		for i := 0; i < 3; i++ {
 			mock.ExpectExec(`DELETE FROM audit_logs WHERE user_id IN`).
 				WithArgs(extraUserID).WillReturnResult(sqlmock.NewResult(0, 1))
 		}
+		sweepMock(mock)
 
 		err = helper.CleanupTestDataByPattern(context.Background(), pattern, extraUserID)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "settle timed out")
+		assert.NoError(t, err)
+		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 }
 

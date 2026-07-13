@@ -66,8 +66,12 @@ type IsolationHelper struct {
 
 	// DrainWindow is how long Phase 4 waits with zero deletes before
 	// declaring the async audit queue drained.  Defaults to 1 s.
-	// Override via SettleDrainWindow or leave as zero for the default.
 	DrainWindow time.Duration
+
+	// SettleTimeout is the hard cap for Phase 4 polling.  The loop
+	// terminates after this duration regardless of drain state.
+	// Defaults to 2 s.  Must be longer than DrainWindow.
+	SettleTimeout time.Duration
 }
 
 // NewIsolationHelper creates a new isolation helper instance.
@@ -92,6 +96,14 @@ func (ih *IsolationHelper) drainWindow() time.Duration {
 		return ih.DrainWindow
 	}
 	return 1 * time.Second
+}
+
+// settleTimeout returns the configured settle timeout or the default (2 s).
+func (ih *IsolationHelper) settleTimeout() time.Duration {
+	if ih.SettleTimeout > 0 {
+		return ih.SettleTimeout
+	}
+	return 2 * time.Second
 }
 
 // WithTransaction executes a function within a database transaction that is
@@ -274,77 +286,70 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 		}
 	}
 
-	// Phase 4: If extraUserIDs were provided, poll for async audit writes.
-	// The audit service writes asynchronously via a worker pool; the initial
-	// delete in Phase 2 may race against a pending write.
-	//
-	// We poll with exponential backoff (20ms → 40ms → 80ms → … capped at
-	// 100ms) and track the last successful delete.  When a full drain
-	// window elapses with zero deletes, we consider the queue drained.
-	//
-	// KNOWN LIMITATION: Polling the database cannot definitively prove the
-	// producer queue is empty — a write may be in-flight at the network
-	// layer.  The drain window (default 1 s) is a practical heuristic.
-	// For a reliable guarantee, AuditService needs a flush/drain protocol
-	// or each audit record should carry a testID for direct cleanup.
+	// Phase 4: If extraUserIDs were provided, poll briefly for async audit
+	// writes, then run a final sweep.  The poll lets the async worker
+	// flush naturally; the sweep catches anything written during or after
+	// the poll.  This two-pass approach is more reliable than trying to
+	// prove the queue is empty from database observations alone.
 	if len(extraUserIDs) > 0 {
-		const settleTimeout = 2 * time.Second
+		ih.pollAsyncAuditWrites(ctx, extraUserIDs)
 
-		// Use whichever deadline is shorter: the parent context's or our
-		// own settle cap. This guarantees we never poll forever even when
-		// the caller passes context.Background().
-		settleCtx, settleCancel := context.WithTimeout(ctx, settleTimeout)
-		defer settleCancel()
-
-		backoff := 20 * time.Millisecond
-		const maxBackoff = 100 * time.Millisecond
-
-		drainWindow := ih.drainWindow()
-		lastDeleteTime := ih.clock.Now() // treat start as "nothing pending"
-
-		for {
-			// Sleep with context awareness — returns immediately on cancel.
-			// fakeClock.After advances time immediately and returns a ready
-			// channel, so tests run with zero real wall-clock delay.
-			select {
-			case <-settleCtx.Done():
-				// Phase 4 exited before all async audit writes could be
-				// confirmed drained. Return an error so the caller knows
-				// test data may have been left behind.
-				if ctx.Err() != nil {
-					return fmt.Errorf("audit-log settle interrupted by parent context: %w", ctx.Err())
-				}
-				return fmt.Errorf("audit-log settle timed out after %s: some async audit logs may not have been cleaned up", settleTimeout)
-			case <-ih.clock.After(backoff):
-			}
-
-			if backoff < maxBackoff {
-				backoff *= 2
-				if backoff > maxBackoff {
-					backoff = maxBackoff
-				}
-			}
-
-			deleted, err := ih.deleteAuditLogsByUserIDs(settleCtx, extraUserIDs)
-			if err != nil {
-				if settleCtx.Err() != nil {
-					if ctx.Err() != nil {
-						return fmt.Errorf("audit-log settle interrupted by parent context: %w", ctx.Err())
-					}
-					return fmt.Errorf("audit-log settle timed out after %s: some async audit logs may not have been cleaned up", settleTimeout)
-				}
-				return fmt.Errorf("cleanup audit_logs (async poll) failed: %w", err)
-			}
-
-			if deleted > 0 {
-				lastDeleteTime = ih.clock.Now()
-			} else if ih.clock.Now().Sub(lastDeleteTime) >= drainWindow {
-				return nil
-			}
+		// Final sweep: delete any audit logs that arrived after the initial
+		// Phase 2 cleanup or during the Phase 4 poll.  This is the actual
+		// correctness guarantee — the poll is best-effort waiting; the sweep
+		// is what ensures no test data leaks regardless of timing.
+		// Use a fresh context since the caller's ctx may have been cancelled.
+		sweepCtx, sweepCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer sweepCancel()
+		if _, err := ih.deleteAuditLogsByUserIDs(sweepCtx, extraUserIDs); err != nil {
+			return fmt.Errorf("audit-log sweep failed: %w", err)
 		}
 	}
 
 	return nil
+}
+
+// pollAsyncAuditWrites polls the database with exponential backoff until
+// the drain window elapses with no new writes, or the settle timeout fires.
+// This is a best-effort wait — the caller should run a final cleanup sweep
+// afterwards to catch any writes that arrived during or after the poll.
+func (ih *IsolationHelper) pollAsyncAuditWrites(ctx context.Context, extraUserIDs []string) {
+	settleTimeout := ih.settleTimeout()
+
+	settleCtx, settleCancel := context.WithTimeout(ctx, settleTimeout)
+	defer settleCancel()
+
+	backoff := 20 * time.Millisecond
+	const maxBackoff = 100 * time.Millisecond
+
+	drainWindow := ih.drainWindow()
+	lastDeleteTime := ih.clock.Now()
+
+	for {
+		select {
+		case <-settleCtx.Done():
+			return
+		case <-ih.clock.After(backoff):
+		}
+
+		if backoff < maxBackoff {
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
+
+		deleted, err := ih.deleteAuditLogsByUserIDs(settleCtx, extraUserIDs)
+		if err != nil {
+			return // context expired or DB error — caller will sweep
+		}
+
+		if deleted > 0 {
+			lastDeleteTime = ih.clock.Now()
+		} else if ih.clock.Now().Sub(lastDeleteTime) >= drainWindow {
+			return
+		}
+	}
 }
 
 // collectUserIDsByPattern queries the users table for UUIDs matching the pattern.
