@@ -200,7 +200,7 @@ func setupPhase1to3(mock sqlmock.Sqlmock, pattern, extraUserID string) {
 		"verification_tokens", "reset_tokens", "authorization_codes",
 		"tokens", "oauth_clients", "users",
 	} {
-		mock.ExpectExec(`DELETE FROM `+table+` WHERE`).
+		mock.ExpectExec(`DELETE FROM ` + table + ` WHERE`).
 			WithArgs(pattern).WillReturnResult(sqlmock.NewResult(0, 0))
 	}
 }
@@ -329,7 +329,7 @@ func TestIsolationHelper_Phase4_AsyncPoll(t *testing.T) {
 
 		// Use real time so the settle timeout fires during the loop.
 		helper := NewIsolationHelper(db, nil)
-		helper.DrainWindow = 2 * time.Second  // longer than settle
+		helper.DrainWindow = 2 * time.Second // longer than settle
 		helper.SettleTimeout = 200 * time.Millisecond
 		helper.SweepTimeout = 1 * time.Second
 

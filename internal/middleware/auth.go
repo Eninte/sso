@@ -12,9 +12,9 @@ import (
 	"net/http"
 	"strings"
 
-	apperrors "github.com/example/sso/internal/errors"
 	"github.com/example/sso/internal/cache"
 	"github.com/example/sso/internal/crypto"
+	apperrors "github.com/example/sso/internal/errors"
 	"github.com/example/sso/internal/store"
 )
 

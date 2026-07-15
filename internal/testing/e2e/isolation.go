@@ -20,7 +20,7 @@ type clock interface {
 // realClock delegates to the standard time package.
 type realClock struct{}
 
-func (realClock) Now() time.Time                       { return time.Now() }
+func (realClock) Now() time.Time                         { return time.Now() }
 func (realClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
 
 // fakeClock is a manually-advancing clock for tests.
@@ -179,9 +179,9 @@ func (ih *IsolationHelper) WithRedisNamespace(ctx context.Context, namespace str
 
 // tableCleanupDef defines the columns to match for cleaning a specific table.
 type tableCleanupDef struct {
-	table      string
-	columns    []string
-	uuidCols   map[string]bool // columns that are UUID type need ::text cast for LIKE
+	table    string
+	columns  []string
+	uuidCols map[string]bool // columns that are UUID type need ::text cast for LIKE
 }
 
 // CleanupTestDataByPattern deletes database records matching a pattern.
