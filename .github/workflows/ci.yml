@@ -90,7 +90,7 @@ jobs:
             -race -p 1 -timeout 180s -tags=integration -coverprofile=coverage.out $PACKAGES
 
       - name: Upload test report
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results
@@ -108,7 +108,7 @@ jobs:
       - name: Upload coverage report
         uses: codecov/codecov-action@v5
         with:
-          file: ./coverage.out
+          files: ./coverage.out
           fail_ci_if_error: false
 
   lint:
@@ -290,7 +290,7 @@ jobs:
             -race -tags=e2e ./test/e2e/...
 
       - name: Upload E2E test report
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: e2e-results
@@ -329,7 +329,7 @@ jobs:
         run: go build -o bin/sso cmd/server/main.go
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: sso-binary
           path: bin/sso
@@ -354,7 +354,7 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile
