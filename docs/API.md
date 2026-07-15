@@ -37,6 +37,20 @@ GET /health
 }
 ```
 
+### Kubernetes 探针
+
+为 k8s 暴露的探针端点，独立路由器注册，**绕过限流和 metrics 中间件**，避免探针流量干扰业务指标。
+
+```
+GET /healthz    # 存活探针（liveness）
+GET /readyz     # 就绪探针（检查 DB 连通性）
+```
+
+**`/readyz` 响应示例**（DB 不可达时返回 503）:
+```json
+{"status":"ready","service":"sso"}
+```
+
 ### Prometheus指标
 
 获取服务监控指标（如果配置了`METRICS_USERNAME`和`METRICS_PASSWORD`，需要Basic Auth认证）。
@@ -49,6 +63,95 @@ Authorization: Basic base64(username:password)
 **认证**: 可选（配置`METRICS_USERNAME`和`METRICS_PASSWORD`后启用）
 
 **响应**: Prometheus文本格式
+
+---
+
+## 初始化端点
+
+首次启动且尚无管理员账户时，可通过初始化面板创建管理员与 OAuth 客户端。一旦存在管理员，`/init` 页面会返回 404。
+
+### 初始化面板页面
+
+```
+GET /init
+```
+
+**响应**: HTML 页面（包含系统状态、创建管理员表单、创建客户端表单）
+
+### 系统初始化状态
+
+```
+GET /api/v1/init/status
+```
+
+**成功响应** `200 OK`:
+```json
+{
+  "initialized": false,
+  "version": "dev",
+  "buildTime": "unknown",
+  "adminCount": 0,
+  "clientCount": 0
+}
+```
+
+### 创建管理员账户
+
+```
+POST /api/v1/init/admin
+Content-Type: application/json
+```
+
+**请求参数**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| email | string | 是 | 管理员邮箱 |
+| password | string | 是 | 管理员密码 |
+
+### 创建 OAuth 客户端
+
+```
+POST /api/v1/init/client
+Content-Type: application/json
+```
+
+**请求参数**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| client_id | string | 是 | 客户端ID |
+| client_secret | string | 否 | 客户端密钥（公开客户端不传） |
+| name | string | 是 | 客户端显示名称 |
+| redirect_uris | string[] | 是 | 允许的回调地址 |
+| public_client | bool | 否 | 是否公开客户端，默认 false |
+
+---
+
+## 验证码端点
+
+### 获取图形验证码
+
+注册、登录失败次数达到阈值（`CAPTCHA_FAIL_THRESHOLD`，默认 3 次）时触发验证码。前端通过 `X-Captcha-Id` 与 `X-Captcha-Answer` 头传递验证结果。
+
+```
+GET /api/v1/captcha
+```
+
+**成功响应** `200 OK`:
+```json
+{
+  "captcha_id": "uuid-string",
+  "image": "data:image/png;base64,..."
+}
+```
+
+**请求头（提交验证码时）**:
+
+| 请求头 | 说明 |
+|--------|------|
+| `X-Captcha-Id` | 获取验证码时返回的 captcha_id |
+| `X-Captcha-Answer` | 用户输入的验证码答案 |
 
 ---
 
@@ -1022,6 +1125,24 @@ Authorization: Bearer <access_token>
 }
 ```
 
+### 质量指标查询
+
+获取代码质量仪表盘的指标数据。
+
+```
+GET /api/v1/admin/quality/api/metrics
+Authorization: Bearer <access_token>
+```
+
+### 周度质量报告
+
+获取代码质量仪表盘的周度报告。
+
+```
+GET /api/v1/admin/quality/api/report/weekly
+Authorization: Bearer <access_token>
+```
+
 ---
 
 ## 错误处理
@@ -1065,10 +1186,17 @@ Authorization: Bearer <access_token>
 
 ## 限流说明
 
-API请求受频率限制：
+API请求受多层限流保护（默认值见 `config.go`，可通过环境变量调整）：
 
-- **未认证端点**: 100次/分钟/IP
-- **认证端点**: 200次/分钟/用户
-- **管理员端点**: 500次/分钟/用户
+| 限流层 | 作用域 | 默认限额 | 配置项 |
+|--------|--------|----------|--------|
+| 全局HTTP中间件 | 所有路由 | 100 请求/分钟 | `RATE_LIMIT_REQUESTS` / `RATE_LIMIT_WINDOW` |
+| 敏感端点中间件 | register / login / forgot-password / reset-password | 全局限额的 1/10（默认 10 请求/分钟） | 自动派生 |
+| 业务层登录限流 | login（per IP） | 硬编码 20 次/10 分钟 | 不受 `RATE_LIMIT_REQUESTS` 控制 |
+| 业务层邮件限流 | 邮件发送（per address） | 硬编码 5 次/小时 | 不受 `RATE_LIMIT_REQUESTS` 控制 |
+
+- 探针端点 `/healthz`、`/readyz` **绕过所有限流**
+- `RATE_LIMIT_REQUESTS=0` 仅禁用前两层（全局 + 敏感端点），不影响业务层限流
+- E2E 测试如需完全禁用业务层限流，请使用 `scripts/run_e2e_no_ratelimit.sh`
 
 超限返回 `429 Too Many Requests`。

@@ -76,20 +76,11 @@ sso/
 │   │   ├── router.go           # 路由注册：中间件链 + 路由分组
 │   │   └── server.go           # HTTP服务器生命周期管理
 │   │
-│   ├── audit/                  # 审计子系统
-│   │   ├── compliance/         # 合规性检查
-│   │   ├── configaudit/        # 配置审计
-│   │   ├── depscan/            # 依赖扫描
-│   │   ├── monitor/            # 安全监控
-│   │   ├── pentest/            # 渗透测试
-│   │   ├── perftest/           # 性能测试
-│   │   ├── scanner/            # 漏洞扫描
-│   │   └── report/             # 审计报告生成
+│   ├── audit/                  # 审计子系统（仅 service/audit.go 实现，非独立目录）
 │   │
 │   ├── cache/                  # 缓存层
 │   │   ├── redis.go            # Redis客户端实现
-│   │   ├── memory.go           # 内存缓存回退
-│   │   ├── lru.go              # LRU淘汰策略
+│   │   ├── lru.go              # LRU淘汰策略（内存回退）
 │   │   └── redis_test.go
 │   │
 │   ├── captcha/                # 验证码服务
@@ -108,8 +99,10 @@ sso/
 │   │   ├── keyloader.go        # 密钥加载
 │   │   └── *_test.go
 │   │
-│   ├── errors/                 # 统一错误定义
-│   │   └── errors.go           # 错误常量和类型
+│   ├── errors/                 # 统一错误定义 + 多语言消息
+│   │   ├── errors.go           # 错误常量和类型
+│   │   ├── messages.go         # 多语言消息
+│   │   └── locales/            # zh-CN.json, en-US.json
 │   │
 │   ├── handler/                # HTTP处理器
 │   │   ├── register.go         # 注册处理器
@@ -123,7 +116,11 @@ sso/
 │   │   ├── admin.go            # 管理员处理器
 │   │   ├── wellknown.go        # OIDC Discovery
 │   │   ├── metrics.go          # 指标处理器
+│   │   ├── init.go             # 初始化面板处理器
+│   │   ├── setup.go            # 配置向导处理器
+│   │   ├── captcha.go          # 验证码处理器
 │   │   ├── helpers.go          # 辅助函数
+│   │   ├── templates/          # 内嵌的初始化页面模板
 │   │   └── *_test.go
 │   │
 │   ├── logging/                # 日志工具
@@ -141,28 +138,40 @@ sso/
 │   │   ├── requestid.go        # 请求ID中间件
 │   │   ├── ratelimit.go        # 限流中间件（分片锁优化）
 │   │   ├── ratelimit_distributed.go # Redis分布式限流
+│   │   ├── recover.go          # panic恢复中间件
 │   │   ├── language.go         # 语言中间件
 │   │   └── middleware_test.go
 │   │
 │   ├── model/                  # 数据模型
-│   │   ├── user.go             # 用户模型
-│   │   ├── token.go            # Token模型
-│   │   ├── client.go           # OAuth客户端模型
-│   │   └── request.go          # 请求/响应模型
+│   │   ├── model.go            # 用户/Token/请求等模型
+│   │   ├── audit.go            # 审计事件模型（含事件类型常量）
+│   │   ├── mfa.go              # MFA模型
+│   │   └── key.go              # 密钥版本模型
+│   │
+│   ├── quality/                # 代码质量仪表盘
+│   │   └── dashboard/          # 质量指标API和报告
 │   │
 │   ├── service/                # 业务逻辑层
 │   │   ├── interfaces.go       # Service接口定义
 │   │   ├── auth.go             # 认证服务
 │   │   ├── auth_login.go       # 登录逻辑（含业务层限流）
+│   │   ├── auth_token.go       # Token服务
 │   │   ├── login_ratelimit.go  # 登录限流（Redis, per IP）
 │   │   ├── email_ratelimit.go  # 邮件限流（per email）
 │   │   ├── oauth.go            # OAuth服务
 │   │   ├── user.go             # 用户服务
 │   │   ├── email.go            # 邮件服务
 │   │   ├── mfa.go              # MFA服务
+│   │   ├── mfa_recovery.go     # MFA恢复码
+│   │   ├── mfa_setup.go        # MFA设置流程
 │   │   ├── social.go           # 第三方登录服务
 │   │   ├── admin.go            # 管理员服务
 │   │   ├── audit.go            # 审计服务
+│   │   ├── keyrotation.go      # 密钥轮换服务
+│   │   ├── init.go             # 初始化服务
+│   │   ├── email/              # 邮件模板引擎
+│   │   │   ├── engine.go
+│   │   │   └── templates/      # base.html + verification/ + password_reset/
 │   │   └── *_test.go
 │   │
 │   ├── store/                  # 数据存储层
@@ -171,17 +180,27 @@ sso/
 │   │   │   ├── postgres.go
 │   │   │   ├── user.go
 │   │   │   ├── token.go
-│   │   │   └── postgres_test.go
-│   │   ├── memory/             # 内存存储实现（开发/测试）
+│   │   │   ├── client.go
+│   │   │   ├── audit.go
+│   │   │   ├── key.go
+│   │   │   ├── mfa_recovery.go
+│   │   │   ├── verification.go
+│   │   │   ├── quality_metrics.go
+│   │   │   └── *_test.go       # 集成测试（build tag: integration）
 │   │   └── mock/               # Mock实现（单元测试）
 │   │       └── mock.go
+│   │
+│   ├── testing/                # 测试基础设施
+│   │   ├── coverage/           # 覆盖率分析工具
+│   │   └── e2e/                # E2E 测试运行器和隔离工具
 │   │
 │   ├── util/                   # 工具模块
 │   │   ├── auditutil/          # 审计日志工具
 │   │   ├── handlerutil/        # Handler响应工具
 │   │   ├── serviceutil/        # Service错误处理工具
 │   │   ├── retryutil/          # 重试工具
-│   │   └── testutil/           # 测试辅助工具
+│   │   ├── safego/             # 安全 goroutine（panic recovery）
+│   │   └── testutil/           # 测试辅助工具（DB/Redis连接重试）
 │   │
 │   └── validator/              # 输入验证
 │       ├── validator.go        # 验证函数
@@ -190,29 +209,27 @@ sso/
 ├── test/                       # E2E测试
 │   └── e2e/                    # 端到端测试（//go:build e2e）
 │
-├── migrations/                 # 数据库迁移
-│   ├── 000001_init.up.sql
-│   └── 000001_init.down.sql
+├── migrations/                 # 数据库迁移（001-015，3位序号命名）
 │
 ├── docker/                     # Docker配置
 │   ├── Dockerfile
 │   ├── Dockerfile.dev
-│   └── docker-compose.yml
+│   ├── docker-compose.yml
+│   ├── docker-compose.test.yml
+│   └── docker-compose.truenas.yml
 │
 ├── scripts/                    # 工具脚本
 │   ├── generate-keys.sh
 │   ├── prepare-e2e-test.sh     # E2E测试数据准备
 │   ├── cleanup-e2e-test.sh     # E2E测试数据清理
-│   └── run_e2e_no_ratelimit.sh # E2E服务启动（处理限流）
+│   ├── run_e2e_no_ratelimit.sh # E2E服务启动（处理限流）
+│   ├── generate_secrets.sh     # 生产密钥生成
+│   ├── check_production_env.sh # 生产环境检查
+│   └── deploy-truenas.sh       # TrueNAS 部署
 │
-├── keys/                       # RSA密钥（不提交）
-│   ├── private.pem
-│   └── public.pem
+├── keys/                       # RSA密钥（脚本生成，不提交）
 │
-├── static/                     # 静态资源
-├── templates/                  # 模板文件
-├── testdata/                   # 测试数据
-├── sdks/                       # SDK客户端（Go, JS, Python, Rust）
+├── sdks/                       # SDK客户端（Go/JS/Kotlin/Python/Rust/Swift）
 ├── loadtest/                   # 压力测试（k6脚本）
 └── docs/                       # 文档
 ```
@@ -536,14 +553,15 @@ type Client struct {
 ### 连接池配置
 
 ```go
-// PostgreSQL连接池
-db.SetMaxOpenConns(50)        // 最大打开连接数
-db.SetMaxIdleConns(25)        // 最大空闲连接数
-db.SetConnMaxLifetime(5*time.Minute)  // 连接最大生命周期
+// PostgreSQL连接池（默认值见 config.go）
+db.SetMaxOpenConns(100)              // 最大打开连接数（DB_MAX_OPEN_CONNS）
+db.SetMaxIdleConns(50)               // 最大空闲连接数（DB_MAX_IDLE_CONNS）
+db.SetConnMaxLifetime(5*time.Minute) // 连接最大生命周期（DB_CONN_MAX_LIFETIME）
+db.SetConnMaxIdleTime(1*time.Minute) // 连接最大空闲时间（DB_CONN_MAX_IDLE_TIME）
 
 // Redis连接池
-poolSize: 100                 // 连接池大小
-minIdleConns: 10              // 最小空闲连接
+poolSize: 10                  // 连接池大小（REDIS_POOL_SIZE）
+minIdleConns: 5               // 最小空闲连接（REDIS_MIN_IDLE_CONNS）
 ```
 
 ## 监控设计

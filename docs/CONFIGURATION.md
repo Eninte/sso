@@ -36,18 +36,24 @@ DB_PORT=5432                # 数据库端口
 DB_NAME=sso                 # 数据库名称
 DB_USER=sso                 # 数据库用户
 DB_PASSWORD=changeme        # 数据库密码
-DB_SSL_MODE=require         # SSL模式
-DB_MAX_OPEN_CONNS=50        # 最大打开连接数
-DB_MAX_IDLE_CONNS=25        # 最大空闲连接数
+DB_SSL_MODE=require         # SSL模式（代码默认 prefer，生产建议 require）
+DB_MAX_OPEN_CONNS=100       # 最大打开连接数
+DB_MAX_IDLE_CONNS=50        # 最大空闲连接数
 DB_CONN_MAX_LIFETIME=5m     # 连接最大生命周期
+DB_CONN_MAX_IDLE_TIME=1m    # 连接最大空闲时间
 DB_QUERY_TIMEOUT=10s        # 查询超时时间
 ```
 
 ### 3. Redis配置
 ```bash
+REDIS_ENABLE=true           # 是否启用Redis缓存
 REDIS_HOST=localhost        # Redis主机
 REDIS_PORT=6379             # Redis端口
 REDIS_PASSWORD=             # Redis密码
+REDIS_DB=0                  # Redis数据库编号 (0-15)
+REDIS_CONN_TIMEOUT=5s       # Redis连接超时
+REDIS_POOL_SIZE=10          # Redis连接池大小
+REDIS_MIN_IDLE_CONNS=5      # Redis最小空闲连接数
 ```
 
 ### 4. JWT配置
@@ -56,45 +62,73 @@ JWT_PRIVATE_KEY_PATH=./keys/private.pem  # JWT私钥路径
 JWT_PUBLIC_KEY_PATH=./keys/public.pem    # JWT公钥路径
 JWT_ACCESS_TOKEN_TTL=15m   # Access Token有效期
 JWT_REFRESH_TOKEN_TTL=168h # Refresh Token有效期
-JWT_ISSUER=sso              # Token签发者标识
+JWT_ISSUER=sso              # Token签发者标识（生产必须自定义，不能用默认值 sso）
 KEY_ROTATION_ENABLED=false  # 是否启用密钥轮换
 KEY_ROTATION_INTERVAL=2160h # 密钥轮换周期
 KEY_TRANSITION_PERIOD=24h   # 密钥过渡期时长
+JWT_TRANSITION_PUBKEY_PATHS=  # 密钥轮换期间的旧公钥路径（逗号分隔）
 ```
 
 ### 5. 安全配置
 ```bash
-BCRYPT_COST=12              # bcrypt成本因子
+BCRYPT_COST=12              # bcrypt成本因子（生产必须 >= 12）
 RATE_LIMIT_REQUESTS=100     # 限流: 每个时间窗口的请求数
 RATE_LIMIT_WINDOW=1m        # 限流时间窗口
 MAX_LOGIN_ATTEMPTS=5        # 最大登录失败次数
 LOCKOUT_DURATION=30m        # 账户锁定时长
+MFA_RECOVERY_HMAC_KEY=     # MFA恢复码HMAC密钥（生产必须设置强密钥）
+TRUSTED_PROXIES=            # 受信代理IP（CIDR，逗号分隔，留空则不信任 X-Real-IP 头）
 ```
 
-### 6. SMTP配置
+### 6. 验证码配置（防机器人）
 ```bash
-SMTP_HOST=smtp.example.com  # SMTP服务器地址
-SMTP_PORT=465               # SMTP端口
+CAPTCHA_ENABLED=true            # 是否启用验证码
+CAPTCHA_TTL=5m                  # 验证码有效期
+CAPTCHA_FAIL_THRESHOLD=3        # 连续失败N次后触发验证码
+CAPTCHA_FAIL_WINDOW=15m         # 失败计数窗口
+```
+
+### 7. SMTP配置
+```bash
+SMTP_HOST=smtp.example.com  # SMTP服务器地址（代码默认 localhost，生产必须自定义）
+SMTP_PORT=587               # SMTP端口（25/465/587，代码默认 587）
 SMTP_USER=                  # SMTP用户名
 SMTP_PASSWORD=              # SMTP密码
 SMTP_FROM=noreply@example.com  # 发件人地址
 ```
 
-### 7. CORS配置
+### 8. 第三方登录配置
+```bash
+GOOGLE_CLIENT_ID=          # Google OAuth 客户端ID
+GOOGLE_CLIENT_SECRET=      # Google OAuth 客户端密钥
+GITHUB_CLIENT_ID=          # GitHub OAuth 客户端ID
+GITHUB_CLIENT_SECRET=      # GitHub OAuth 客户端密钥
+```
+
+### 9. CORS配置
 ```bash
 CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8080
 ```
 
-### 8. Metrics配置
+### 10. Metrics配置
 ```bash
 METRICS_USERNAME=metrics    # Metrics Basic Auth用户名
 METRICS_PASSWORD=changeme   # Metrics Basic Auth密码
 ```
 
-### 9. E2E测试配置
+### 11. E2E测试配置
 ```bash
-E2E_ADMIN_EMAIL=admin@example.com    # 测试管理员邮箱
-E2E_ADMIN_PASSWORD=Admin123!         # 测试管理员密码
+E2E_ADMIN_EMAIL=system@eninte.com    # 测试管理员邮箱（与 scripts/prepare-e2e-test.sh 默认值一致）
+E2E_ADMIN_PASSWORD=Admin1234!        # 测试管理员密码
+```
+
+### 12. 部署模式配置
+```bash
+LAN_DEPLOYMENT=false        # LAN部署模式：放宽生产环境部分校验（DB_SSL_MODE、CORS、JWT_ISSUER 等）
+                            # 仅用于内网部署场景，正式生产环境不要启用
+SHUTDOWN_TIMEOUT=30s        # 优雅关闭超时时间
+ENV_FILE_PATH=              # 自定义 .env 文件路径（默认当前目录或 /app/.env）
+SKIP_ENV_FILE=              # 非空时跳过加载 .env 文件
 ```
 
 ## 环境差异对照表

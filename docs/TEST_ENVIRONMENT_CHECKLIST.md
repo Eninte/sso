@@ -130,7 +130,7 @@ SMTP_FROM=system@eninte.com
 
 ```bash
 export E2E_ADMIN_EMAIL="system@eninte.com"
-export E2E_ADMIN_PASSWORD="Admin123!"
+export E2E_ADMIN_PASSWORD="Admin1234!"
 ```
 
 ## 🔍 当前发现的问题

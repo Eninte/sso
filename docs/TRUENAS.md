@@ -292,9 +292,9 @@ LOCKOUT_DURATION=30m
 # MFA配置（⚠️ 生产环境必须设置强密钥，否则恢复码可被伪造）
 MFA_RECOVERY_HMAC_KEY=your_strong_hmac_key_here
 
-# 邮件配置
+# 邮件配置（代码默认 587/STARTTLS，如使用 SSL 改为 465）
 SMTP_HOST=smtp.example.com
-SMTP_PORT=465
+SMTP_PORT=587
 SMTP_USER=your_smtp_username
 SMTP_PASSWORD=your_smtp_password
 SMTP_FROM=noreply@yourdomain.com

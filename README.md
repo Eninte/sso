@@ -1,10 +1,10 @@
 # SSO 单点登录服务
 
-[![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat&logo=go)](https://golang.org/)
+[![Go Version](https://img.shields.io/badge/Go-1.26.5-00ADD8?style=flat&logo=go)](https://golang.org/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://img.shields.io/badge/CI-Passing-brightgreen.svg)](.github/workflows/ci.yml)
 
-生产级单点登录(SSO)微服务，基于Go 1.26+构建，支持OAuth 2.0和OpenID Connect协议。为内部和外部应用提供统一、安全的认证服务。
+生产级单点登录(SSO)微服务，基于Go 1.26.5构建，支持OAuth 2.0和OpenID Connect协议。为内部和外部应用提供统一、安全的认证服务。
 
 ## 功能特性
 
@@ -50,7 +50,7 @@
 
 ### 前置要求
 
-- Go 1.26+
+- Go 1.26.5+（CI 使用 1.26.5）
 - Docker & Docker Compose
 - PostgreSQL 15+
 - Redis 7+
@@ -278,45 +278,76 @@ make docker-logs
 | GET | /auth/{provider} | 第三方登录入口 | 否 |
 | GET | /auth/{provider}/callback | 第三方回调 | 否 |
 
+### 初始化端点
+
+| 方法 | 路径 | 描述 | 认证 |
+|------|------|------|------|
+| GET | /init | 初始化面板页面（无管理员时可用） | 否 |
+| GET | /api/v1/init/status | 系统初始化状态 | 否 |
+| POST | /api/v1/init/admin | 创建管理员账户 | 否 |
+| POST | /api/v1/init/client | 创建 OAuth 客户端 | 否 |
+
+### 验证码端点
+
+| 方法 | 路径 | 描述 | 认证 |
+|------|------|------|------|
+| GET | /api/v1/captcha | 获取图形验证码（注册/登录失败触发） | 否 |
+
+### 探针端点（绕过限流与 metrics，供 k8s 使用）
+
+| 方法 | 路径 | 描述 | 认证 |
+|------|------|------|------|
+| GET | /healthz | 存活探针（liveness） | 否 |
+| GET | /readyz | 就绪探针（检查 DB 连通性） | 否 |
+
 ### 管理员端点（需认证+管理员权限）
 
 | 方法 | 路径 | 描述 | 认证 |
 |------|------|------|------|
-| GET | /admin/health | 系统健康检查 | 是 |
-| POST | /admin/cleanup | 清理过期数据 | 是 |
-| GET | /admin/users | 用户列表（分页） | 是 |
-| GET | /admin/users/{id} | 用户详情 | 是 |
-| POST | /admin/users/{id}/disable | 禁用用户 | 是 |
-| POST | /admin/users/{id}/enable | 启用用户 | 是 |
-| DELETE | /admin/users/{id} | 删除用户 | 是 |
-| GET | /admin/audit-logs | 审计日志（分页） | 是 |
+| GET | /api/v1/admin/health | 系统健康检查 | 是 |
+| POST | /api/v1/admin/cleanup | 清理过期数据 | 是 |
+| GET | /api/v1/admin/users | 用户列表（分页） | 是 |
+| GET | /api/v1/admin/users/{id} | 用户详情 | 是 |
+| POST | /api/v1/admin/users/{id}/disable | 禁用用户 | 是 |
+| POST | /api/v1/admin/users/{id}/enable | 启用用户 | 是 |
+| DELETE | /api/v1/admin/users/{id} | 删除用户 | 是 |
+| GET | /api/v1/admin/audit-logs | 审计日志（分页） | 是 |
+| GET | /api/v1/admin/quality/api/metrics | 质量指标查询 | 是 |
+| GET | /api/v1/admin/quality/api/report/weekly | 周度质量报告 | 是 |
 
 ## 目录结构
 
 ```
 sso/
 ├── cmd/
-│   └── server/
-│       └── main.go              # 服务入口
+│   ├── server/                  # 服务入口
+│   ├── coverage-check/          # 覆盖率阈值检查工具
+│   └── analyze-store-coverage/  # Store 层覆盖率分析工具
 ├── internal/
-│   ├── cache/                   # Redis缓存层
+│   ├── app/                     # 组合根（路由、依赖装配、服务器生命周期）
+│   ├── cache/                   # Redis + LRU 内存缓存层
+│   ├── captcha/                 # 图形验证码服务
+│   ├── common/                  # 公共工具（语言检测、随机数）
 │   ├── config/                  # 配置管理
-│   ├── crypto/                  # 加密工具（JWT、密码哈希）
-│   ├── errors/                  # 统一错误定义
-│   ├── handler/                 # HTTP处理器
-│   ├── logging/                 # 日志工具
+│   ├── crypto/                  # 加密工具（JWT、密码哈希、密钥加载）
+│   ├── errors/                  # 统一错误定义 + 多语言消息
+│   ├── handler/                 # HTTP处理器（含初始化面板模板）
+│   ├── logging/                 # 日志工具 + 敏感信息脱敏
 │   ├── metrics/                 # Prometheus指标
-│   ├── middleware/              # HTTP中间件
+│   ├── middleware/              # HTTP中间件（认证、限流、CORS、安全头等）
 │   ├── model/                   # 数据模型
-│   ├── service/                 # 业务逻辑层
-│   ├── store/                   # 数据存储层
+│   ├── quality/                 # 代码质量仪表盘
+│   ├── service/                 # 业务逻辑层（含邮件模板引擎）
+│   ├── store/                   # 数据存储层（Postgres 实现 + Mock）
+│   ├── util/                    # 工具模块（auditutil/handlerutil/serviceutil/retryutil/testutil/safego）
 │   └── validator/               # 输入验证
-├── migrations/                  # 数据库迁移脚本
+├── migrations/                  # 数据库迁移脚本（001-015）
 ├── scripts/                     # 工具脚本
 ├── docker/                      # Docker配置
-├── keys/                        # RSA密钥（不提交）
-├── static/                      # 静态资源
-├── templates/                   # 模板文件
+├── sdks/                        # 多语言 SDK（Go/JS/Kotlin/Python/Rust/Swift）
+├── loadtest/                    # k6 压力测试脚本
+├── test/e2e/                    # E2E 端到端测试
+├── keys/                        # RSA密钥（脚本生成，不提交）
 └── docs/                        # 项目文档
 ```
 
@@ -359,23 +390,44 @@ sso/
 |------|------|--------|----------|
 | SERVER_HOST | 服务器监听地址 | 0.0.0.0 | - |
 | SERVER_PORT | 服务器端口 | 9090 | - |
+| SERVER_ENV | 运行环境 | development | 生产用 `production` |
 | DB_HOST | 数据库主机 | localhost | - |
 | DB_PORT | 数据库端口 | 5432 | - |
 | DB_NAME | 数据库名称 | sso | - |
 | DB_PASSWORD | 数据库密码 | - | **必填** |
-| DB_SSL_MODE | 数据库SSL模式 | require | **必须为require** |
+| DB_SSL_MODE | 数据库SSL模式 | prefer | **必须为require或更高** |
+| DB_MAX_OPEN_CONNS | 最大打开连接数 | 100 | - |
+| DB_MAX_IDLE_CONNS | 最大空闲连接数 | 50 | - |
+| REDIS_ENABLE | 是否启用Redis | true | - |
+| REDIS_HOST | Redis主机 | localhost | - |
+| REDIS_PASSWORD | Redis密码 | - | 生产建议设置 |
 | JWT_PRIVATE_KEY_PATH | JWT私钥路径 | ./keys/private.pem | - |
 | JWT_PUBLIC_KEY_PATH | JWT公钥路径 | ./keys/public.pem | - |
+| JWT_ACCESS_TOKEN_TTL | Access Token有效期 | 15m | - |
+| JWT_REFRESH_TOKEN_TTL | Refresh Token有效期 | 168h (7天) | - |
+| JWT_ISSUER | Token签发者 | sso | 生产必须自定义 |
+| KEY_ROTATION_ENABLED | 是否启用密钥轮换 | false | - |
 | BCRYPT_COST | bcrypt成本因子 | 12 | **必须>=12** |
+| RATE_LIMIT_REQUESTS | 限流请求数/窗口 | 100 | - |
+| RATE_LIMIT_WINDOW | 限流时间窗口 | 1m | - |
+| MAX_LOGIN_ATTEMPTS | 最大登录失败次数 | 5 | - |
+| LOCKOUT_DURATION | 账户锁定时长 | 30m | - |
+| TRUSTED_PROXIES | 受信代理IP（CIDR） | - | 反代后必填 |
+| MFA_RECOVERY_HMAC_KEY | MFA恢复码HMAC密钥 | - | **生产必须设置** |
+| CAPTCHA_ENABLED | 是否启用验证码 | true | - |
+| CAPTCHA_FAIL_THRESHOLD | 触发验证码失败次数 | 3 | - |
 | CORS_ALLOWED_ORIGINS | 允许的跨域源 | http://localhost:3000 | **必填** |
-| MAX_LOGIN_ATTEMPTS | 最大登录尝试次数 | 5 | - |
-| METRICS_USERNAME | Metrics Basic Auth用户名 | - | 生产环境建议设置 |
-| METRICS_PASSWORD | Metrics Basic Auth密码 | - | 生产环境建议设置 |
-| SMTP_HOST | SMTP服务器地址 | - | **邮件功能必填** |
-| SMTP_PORT | SMTP端口 | 25/465/587 | **邮件功能必填** |
+| METRICS_USERNAME | Metrics Basic Auth用户名 | - | 生产建议设置 |
+| METRICS_PASSWORD | Metrics Basic Auth密码 | - | 生产建议设置 |
+| SMTP_HOST | SMTP服务器地址 | localhost | **邮件功能必填** |
+| SMTP_PORT | SMTP端口 | 587 | **邮件功能必填** |
 | SMTP_USER | SMTP用户名 | - | **邮件功能必填** |
 | SMTP_PASSWORD | SMTP密码/授权码 | - | **邮件功能必填** |
-| SMTP_FROM | 发件人邮箱地址 | - | **邮件功能必填** |
+| SMTP_FROM | 发件人邮箱地址 | noreply@example.com | **邮件功能必填** |
+| GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET | Google登录凭据 | - | Google登录必填 |
+| GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET | GitHub登录凭据 | - | GitHub登录必填 |
+| LAN_DEPLOYMENT | LAN部署模式（放宽生产校验） | false | 仅内网部署使用 |
+| SHUTDOWN_TIMEOUT | 优雅关闭超时 | 30s | - |
 
 完整配置说明和环境差异对照请参考：[配置管理指南](docs/CONFIGURATION.md)
 

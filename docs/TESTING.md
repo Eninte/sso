@@ -218,9 +218,8 @@ func TestParallel(t *testing.T) {
 E2E测试验证完整的用户流程，包括注册、登录、Token管理、OAuth授权等。测试需要真实的服务运行环境。
 
 **当前测试状态**：
-- 总测试数：156个
-- 通过率：94.9% (148/156)
-- 执行时间：约75秒
+- 测试状态以最新 CI 运行为准（GitHub Actions 的 E2E Tests 作业）
+- 测试文件覆盖：auth_flow、token、oauth_flow、mfa_flow、admin_flow、email_verify、password_reset、password_change、social_flow、concurrency、error_boundary
 
 ### 快速开始
 
@@ -298,19 +297,19 @@ psql "$DATABASE_URL" -c "UPDATE users SET email_verified=true WHERE email LIKE '
 
 ### 测试覆盖范围
 
-| 测试类别 | 测试数 | 说明 |
-|---------|--------|------|
-| 健康检查 | 2 | 服务健康状态检查 |
-| 注册流程 | 8 | 用户注册、验证 |
-| 登录流程 | 12 | 登录、多设备登录 |
-| Token管理 | 18 | Token验证、刷新、撤销 |
-| 邮箱验证 | 10 | 邮箱验证流程 |
-| 密码重置 | 12 | 忘记密码、重置密码 |
-| 管理员功能 | 15 | 用户管理、审计日志 |
-| OAuth流程 | 20 | OAuth授权流程 |
-| 并发测试 | 25 | 并发注册、登录、刷新 |
-| 安全测试 | 18 | SQL注入、XSS、边界值 |
-| 错误处理 | 16 | 异常情况处理 |
+| 测试类别 | 测试文件 | 说明 |
+|---------|----------|------|
+| 健康检查/注册/登录 | `auth_flow_test.go` | 服务健康、注册、验证、登录、多设备登录 |
+| Token管理 | `token_test.go` | Token验证、刷新、撤销 |
+| 邮箱验证 | `email_verify_test.go` | 邮箱验证流程 |
+| 密码重置 | `password_reset_test.go` | 忘记密码、重置密码 |
+| 密码修改 | `password_change_test.go` | 修改密码流程 |
+| 管理员功能 | `admin_flow_test.go` | 用户管理、审计日志 |
+| OAuth流程 | `oauth_flow_test.go` | OAuth授权流程（含公共/机密客户端） |
+| MFA流程 | `mfa_flow_test.go` | TOTP 设置、验证、恢复码 |
+| 第三方登录 | `social_flow_test.go` | 社交登录骨架测试 |
+| 并发测试 | `concurrency_test.go` | 并发注册、登录、刷新 |
+| 安全/错误处理 | `error_boundary_test.go` | SQL注入、XSS、边界值、异常情况 |
 
 ### 常见问题
 

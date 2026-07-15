@@ -28,9 +28,9 @@ make test-e2e-cleanup
 ```
 
 **E2E测试状态**：
-- 总测试数：156个
-- 通过率：94.9% (148/156)
-- 测试覆盖：注册、登录、Token、OAuth、MFA、管理员、并发、安全
+- 测试状态以最新 CI 运行为准（GitHub Actions 的 E2E Tests 作业）
+- 测试覆盖：注册、登录、Token、OAuth、MFA、管理员、密码重置/修改、社交登录、并发、安全
+- 历史失败（TOTP 重放断言、管理员路由前缀等）已在最近的修复中解决，CI 全绿
 
 **测试数据准备机制**：
 - 使用PostgreSQL触发器自动验证 `@example.com` 测试用户

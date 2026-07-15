@@ -45,8 +45,8 @@ Templates (模板文件)
 
 ```env
 # SMTP服务器配置
-SMTP_HOST=smtp.example.com          # SMTP服务器地址
-SMTP_PORT=25                         # SMTP端口 (25/465/587)
+SMTP_HOST=smtp.example.com          # SMTP服务器地址（代码默认 localhost）
+SMTP_PORT=587                        # SMTP端口 (25/465/587，代码默认 587)
 SMTP_USER=noreply@example.com       # SMTP用户名
 SMTP_PASSWORD=your-password-here     # SMTP密码或授权码
 SMTP_FROM=noreply@example.com       # 发件人邮箱地址

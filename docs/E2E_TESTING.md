@@ -46,7 +46,7 @@ make test-e2e
 make test-e2e-cleanup
 ```
 
-### 方法2：使用一键命令
+### 方法3：使用一键命令
 
 ```bash
 # 启动服务
@@ -99,9 +99,9 @@ psql "$DATABASE_URL" -c "UPDATE users SET email_verified=true WHERE email LIKE '
 E2E测试需要以下环境变量（在 `.env.test` 中配置）：
 
 ```bash
-# 管理员账户（必须）
+# 管理员账户（必须，默认值与 scripts/prepare-e2e-test.sh 一致）
 E2E_ADMIN_EMAIL=system@eninte.com
-E2E_ADMIN_PASSWORD=Admin123!
+E2E_ADMIN_PASSWORD=Admin1234!
 
 # 数据库连接
 DB_HOST=192.168.1.3
@@ -112,6 +112,9 @@ DB_PASSWORD=sso
 
 # 限流配置（测试时必须为0）
 RATE_LIMIT_REQUESTS=0
+
+# 验证码（E2E 测试时关闭，CI 也已配置 CAPTCHA_ENABLED=false）
+CAPTCHA_ENABLED=false
 ```
 
 ### 服务启动
@@ -145,34 +148,27 @@ SSO服务有4层独立限流，`RATE_LIMIT_REQUESTS=0` 仅禁用前两层：
 
 ### 当前测试覆盖
 
-- **总测试数**：156个
-- **通过率**：94.9% (148/156)
-- **失败数**：8个
+测试状态以最新 CI 运行为准，可在 GitHub Actions 的 E2E Tests 作业中查看历史结果。
 
 ### 测试分类
 
-| 测试类别 | 测试数 | 说明 |
-|---------|--------|------|
-| 健康检查 | 2 | 服务健康状态检查 |
-| 注册流程 | 8 | 用户注册、验证 |
-| 登录流程 | 12 | 登录、多设备登录 |
-| Token管理 | 18 | Token验证、刷新、撤销 |
-| 邮箱验证 | 10 | 邮箱验证流程 |
-| 密码重置 | 12 | 忘记密码、重置密码 |
-| 管理员功能 | 15 | 用户管理、审计日志 |
-| OAuth流程 | 20 | OAuth授权流程 |
-| 并发测试 | 25 | 并发注册、登录、刷新 |
-| 安全测试 | 18 | SQL注入、XSS、边界值 |
-| 错误处理 | 16 | 异常情况处理 |
+| 测试类别 | 说明 | 测试文件 |
+|---------|------|----------|
+| 健康检查 | 服务健康状态检查 | `auth_flow_test.go` |
+| 注册流程 | 用户注册、验证 | `auth_flow_test.go` |
+| 登录流程 | 登录、多设备登录 | `auth_flow_test.go` |
+| Token管理 | Token验证、刷新、撤销 | `token_test.go` |
+| 邮箱验证 | 邮箱验证流程 | `email_verify_test.go` |
+| 密码重置 | 忘记密码、重置密码 | `password_reset_test.go` |
+| 密码修改 | 修改密码流程 | `password_change_test.go` |
+| 管理员功能 | 用户管理、审计日志 | `admin_flow_test.go` |
+| OAuth流程 | OAuth 授权流程（含公共/机密客户端） | `oauth_flow_test.go` |
+| MFA流程 | TOTP 设置、验证、恢复码 | `mfa_flow_test.go` |
+| 第三方登录 | 社交登录骨架测试 | `social_flow_test.go` |
+| 并发测试 | 并发注册、登录、刷新 | `concurrency_test.go` |
+| 安全测试 | SQL注入、XSS、边界值 | `error_boundary_test.go` |
 
-### 已知失败测试
-
-以下8个测试失败是预期的业务逻辑问题，不影响核心功能：
-
-1. **TestAdminUnauthorized** - 权限检查返回401而非403
-2. **TestResendVerificationEmail** - 重发验证邮件返回500
-3. **TestForgotPassword** - 无效邮箱格式验证
-4. **TestTokenPermissions** - 权限检查返回401而非403
+> 注：早期文档中列出的"已知失败测试"已在最近的修复中解决（含 TOTP 重放断言、管理员路由前缀等），CI 全绿。
 
 ## 常见问题
 
