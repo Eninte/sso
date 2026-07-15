@@ -51,12 +51,13 @@ func createBenchTestUser(b *testing.B, store *mock.Store, email, password string
 	}
 
 	user := &model.User{
-		ID:           "bench-user-" + email,
-		Email:        email,
-		PasswordHash: hashedPassword,
-		Status:       model.UserStatusActive,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		ID:            "bench-user-" + email,
+		Email:         email,
+		PasswordHash:  hashedPassword,
+		EmailVerified: true,
+		Status:        model.UserStatusActive,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
 	}
 	store.AddUser(user)
 	return user

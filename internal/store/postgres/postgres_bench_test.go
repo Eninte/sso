@@ -61,6 +61,11 @@ func BenchmarkStore_CreateUser(b *testing.B) {
 	defer db.Close()
 	ctx := context.Background()
 
+	// 预清理历史残留数据，避免邮箱唯一约束冲突
+	if _, err := db.ExecContext(ctx, "DELETE FROM users WHERE email LIKE 'bench-create-%@%'"); err != nil {
+		b.Fatalf("预清理失败: %v", err)
+	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		email := fmt.Sprintf("bench-create-%d@example.com", i)
