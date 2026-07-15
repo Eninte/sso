@@ -38,8 +38,5 @@ test/e2e/
 # 许可证文件
 LICENSE
 
-# Go模块校验文件（go.mod已足够）
-go.sum
-
 # 其他Git配置文件
 .gitignore
