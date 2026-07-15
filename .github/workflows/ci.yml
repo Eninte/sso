@@ -44,7 +44,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26.4'
+          go-version: '1.26.5'
           cache: true
 
       - name: Install gotestsum
@@ -76,18 +76,16 @@ jobs:
           TEST_CONN_MAX_RETRIES: "3"
           TEST_CONN_BASE_DELAY: "500ms"
           TEST_CONN_TIMEOUT: "30s"
-        # gotestsum --rerun-fails 提供 CI 层整体重跑（最多 2 次），
-        # 测试内重试（retryutil.ExponentialBackoffRetry）解决单测抖动，
-        # CI 层重跑解决偶发基础设施故障
         # 覆盖率统计排除：
         #   - app 组合根（由 E2E 覆盖）
         #   - store/mock（生成代码）
         #   - sdks/（客户端 SDK，独立于 SSO 服务）
         #   - internal/testing/（测试基础设施，非业务代码）
+        #   - cmd/（可执行入口，由 E2E 覆盖）
         # -p 1 禁用包级并行：多个测试包共享同一 PostgreSQL（store/handler/service），
         # 并行执行时 cleanup（DELETE ... LIKE 'test-%'）会互相删除数据导致失败
         run: |
-          PACKAGES=$(go list ./... | grep -v '/internal/app' | grep -v '/store/mock' | grep -v '/sdks/' | grep -v '/internal/testing/' | tr '\n' ' ')
+          PACKAGES=$(go list ./... | grep -v '/internal/app' | grep -v '/store/mock' | grep -v '/sdks/' | grep -v '/internal/testing/' | grep -v '/cmd/' | tr '\n' ' ')
           gotestsum --junitfile test-results.xml --format pkgname --rerun-fails=2 --packages="$PACKAGES" -- \
             -race -p 1 -timeout 180s -tags=integration -coverprofile=coverage.out $PACKAGES
 
@@ -124,7 +122,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26.4'
+          go-version: '1.26.5'
           cache: true
 
       - name: Install golangci-lint
@@ -147,7 +145,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26.4'
+          go-version: '1.26.5'
           cache: true
 
       - name: Install and run gosec
@@ -206,7 +204,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26.4'
+          go-version: '1.26.5'
           cache: true
 
       - name: Install gotestsum
@@ -324,7 +322,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26.4'
+          go-version: '1.26.5'
           cache: true
 
       - name: Build

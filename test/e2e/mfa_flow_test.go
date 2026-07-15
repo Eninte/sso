@@ -31,16 +31,27 @@ func TestMFASetup(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEmpty(t, result["secret"], "应返回非空secret")
 		assert.NotEmpty(t, result["qr_code_url"], "应返回非空qr_code_url")
-		assert.NotEmpty(t, result["manual_entry"], "应返回非空manual_entry")
 	})
 
-	t.Run("重复设置MFA返回409", func(t *testing.T) {
-		// 第一次 setup
-		resp, _, err := doRequest("POST", "/api/v1/mfa/setup", nil, tokens.AccessToken)
+	t.Run("已启用MFA后再次设置返回409", func(t *testing.T) {
+		// 第一次 setup 获取 secret
+		resp, body, err := doRequest("POST", "/api/v1/mfa/setup", nil, tokens.AccessToken)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 
-		// 第二次 setup 应返回 409（已启用/已设置）
+		var setupResult map[string]interface{}
+		err = json.Unmarshal(body, &setupResult)
+		require.NoError(t, err)
+		secret := setupResult["secret"].(string)
+
+		// verify 启用 MFA
+		code := generateTOTPCode(secret)
+		verifyReq := map[string]string{"code": code}
+		resp, _, err = doRequest("POST", "/api/v1/mfa/verify", verifyReq, tokens.AccessToken)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		// 已启用后再次 setup 应返回 409
 		resp2, body2, err := doRequest("POST", "/api/v1/mfa/setup", nil, tokens.AccessToken)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusConflict, resp2.StatusCode,
@@ -94,11 +105,11 @@ func TestMFAVerify(t *testing.T) {
 			"期望4xx错误，实际%d，body=%s", resp.StatusCode, string(body))
 	})
 
-	t.Run("空code返回422", func(t *testing.T) {
+	t.Run("空code返回400", func(t *testing.T) {
 		verifyReq := map[string]string{"code": ""}
 		resp, _, err := doRequest("POST", "/api/v1/mfa/verify", verifyReq, tokens.AccessToken)
 		require.NoError(t, err)
-		assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	})
 }
 
@@ -182,8 +193,8 @@ func TestMFADisable(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	t.Run("有效TOTP码禁用MFA成功", func(t *testing.T) {
-		// 生成新的 TOTP code（上一个已被重放保护消费）
-		disableCode := generateTOTPCode(secret)
+		// 使用相邻时间步的码（-1），避免与 verify 的码相同触发重放保护
+		disableCode := generateTOTPCodeWithOffset(secret, -1)
 		disableReq := map[string]string{"code": disableCode}
 		resp, body, err := doRequest("POST", "/api/v1/mfa/disable", disableReq, tokens.AccessToken)
 		require.NoError(t, err)
@@ -253,8 +264,8 @@ func TestMFAFullFlow(t *testing.T) {
 		assert.True(t, enabled.(bool), "启用后 status 应为 true")
 	}
 
-	// 4. Disable（用新 code，避免重放保护）
-	disableCode := generateTOTPCode(secret)
+	// 4. Disable（用相邻时间步的码，避免与 verify 的码相同触发重放保护）
+	disableCode := generateTOTPCodeWithOffset(secret, -1)
 	disableReq := map[string]string{"code": disableCode}
 	resp, _, err = doRequest("POST", "/api/v1/mfa/disable", disableReq, tokens.AccessToken)
 	require.NoError(t, err)

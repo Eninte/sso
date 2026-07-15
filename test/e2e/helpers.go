@@ -413,6 +413,15 @@ func generateTestPassword() string {
 // 的 generateHOTP 保持一致，使用 HMAC-SHA1 + 30 秒时间步。
 // 用于 E2E 测试中 MFA verify/disable 流程。
 func generateTOTPCode(secret string) string {
+	return generateTOTPCodeWithOffset(secret, 0)
+}
+
+// generateTOTPCodeWithOffset 生成指定时间步偏移的 TOTP 码。
+// stepOffset 为相对于当前时间步的偏移（-1 = 上一个窗口，+1 = 下一个窗口）。
+// 用于 MFA verify 后立即 disable 的场景：服务端有重放保护，同一时间步的码
+// 验证后会被记录，再次使用会被拒绝。使用 -1/+1 偏移生成不同码可绕过重放保护，
+// 且仍在服务端 ±1 窗口容忍范围内（见 findMatchingTimeStep）。
+func generateTOTPCodeWithOffset(secret string, stepOffset int) string {
 	secret = strings.ToUpper(strings.TrimSpace(secret))
 	secretBytes, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(secret)
 	if err != nil {
@@ -420,10 +429,13 @@ func generateTOTPCode(secret string) string {
 	}
 
 	now := time.Now()
-	timeStep := uint64(now.Unix() / 30)
+	timeStep := int64(now.Unix()/30) + int64(stepOffset)
+	if timeStep < 0 {
+		timeStep = 0
+	}
 
 	buf := make([]byte, 8)
-	binary.BigEndian.PutUint64(buf, timeStep)
+	binary.BigEndian.PutUint64(buf, uint64(timeStep)) // #nosec G115 -- timeStep 已验证非负
 
 	mac := hmac.New(sha1.New, secretBytes) // #nosec G401 -- HMAC-SHA1 用于 HOTP（RFC 4226 标准）
 	mac.Write(buf)
