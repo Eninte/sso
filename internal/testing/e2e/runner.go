@@ -895,6 +895,7 @@ func (tr *TestRunner) GetTx() *sql.Tx {
 // DoHTTPRequest performs an HTTP request with automatic capture of request/response
 // data for failure logging. This is a convenience method for test code.
 func (tr *TestRunner) DoHTTPRequest(req *http.Request) (*http.Response, *HTTPRequestCapture, *HTTPResponseCapture, error) {
+	// #nosec G704 -- req.URL 由测试代码构造，指向本地 SSO 服务，不涉及外部 SSRF 风险
 	resp, err := tr.httpClient.Do(req)
 	reqCapture, respCapture := tr.CaptureHTTPRequestResponse(req, resp)
 	return resp, reqCapture, respCapture, err

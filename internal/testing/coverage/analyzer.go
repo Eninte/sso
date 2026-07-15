@@ -128,6 +128,7 @@ func NewCoverageAnalyzer(threshold float64, criticalPaths []string) *CoverageAna
 //   - error: 错误信息
 func (ca *CoverageAnalyzer) Analyze(profilePath string) (*CoverageReport, error) {
 	// 打开覆盖率文件
+	// #nosec G304 -- profilePath 来自命令行参数或 CI 配置，非用户输入
 	file, err := os.Open(profilePath)
 	if err != nil {
 		return nil, apperrors.Wrap(

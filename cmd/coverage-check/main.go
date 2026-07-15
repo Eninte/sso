@@ -212,6 +212,7 @@ func isSpace(c byte) bool {
 
 // generateHTMLReport 生成HTML报告
 func generateHTMLReport(reporter *coverage.Reporter, report *coverage.CoverageReport, outputPath string) error {
+	// #nosec G304 -- outputPath 来自命令行 -output 参数，非用户输入
 	file, err := os.Create(outputPath)
 	if err != nil {
 		return fmt.Errorf("failed to create HTML file: %w", err)
@@ -227,6 +228,7 @@ func generateHTMLReport(reporter *coverage.Reporter, report *coverage.CoverageRe
 
 // generateJSONReport 生成JSON报告
 func generateJSONReport(reporter *coverage.Reporter, report *coverage.CoverageReport, outputPath string) error {
+	// #nosec G304 -- outputPath 来自命令行 -output 参数，非用户输入
 	file, err := os.Create(outputPath)
 	if err != nil {
 		return fmt.Errorf("failed to create JSON file: %w", err)
@@ -260,6 +262,7 @@ func performDiffAnalysis(analyzer *coverage.CoverageAnalyzer, current *coverage.
 
 // exportTrendData 导出趋势数据
 func exportTrendData(report *coverage.CoverageReport, outputPath string) error {
+	// #nosec G304 -- outputPath 来自命令行 -output 参数，非用户输入
 	file, err := os.Create(outputPath)
 	if err != nil {
 		return fmt.Errorf("failed to create trend data file: %w", err)
@@ -282,6 +285,7 @@ func exportTrendData(report *coverage.CoverageReport, outputPath string) error {
 
 // exportChartData 导出图表数据
 func exportChartData(report *coverage.CoverageReport, outputPath string) error {
+	// #nosec G304 -- outputPath 来自命令行 -output 参数，非用户输入
 	file, err := os.Create(outputPath)
 	if err != nil {
 		return fmt.Errorf("failed to create chart data file: %w", err)
