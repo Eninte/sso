@@ -243,6 +243,31 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 
 	// Phase 3: Delete remaining tables in dependency order (foreign keys first).
 	// audit_logs is excluded here — it was handled in Phase 2.
+	if err := ih.deleteRemainingTables(ctx, pattern); err != nil {
+		return err
+	}
+
+	// Phase 4: If extraUserIDs were provided, poll briefly for async audit
+	// writes, then sweep in a loop.  The poll lets the async worker flush
+	// naturally; the sweep loop catches writes that arrive during or after
+	// the poll.
+	//
+	// KNOWN LIMITATION: This is best-effort.  Database polling cannot prove
+	// the producer queue is empty — a write may commit after the sweep
+	// loop exits.  For tests that exercise async audit paths (e.g.
+	// TestAdminDeleteUser), prefer CleanupTestDataByPatternWithRetry which
+	// runs the full cleanup multiple times.
+	if len(extraUserIDs) > 0 {
+		return ih.sweepAsyncAuditLogs(ctx, extraUserIDs)
+	}
+
+	return nil
+}
+
+// deleteRemainingTables deletes rows matching pattern from all non-audit tables
+// in dependency order (foreign keys first). UUID columns are cast to text so
+// LIKE works on PostgreSQL.
+func (ih *IsolationHelper) deleteRemainingTables(ctx context.Context, pattern string) error {
 	tables := []tableCleanupDef{
 		{
 			table:    "verification_tokens",
@@ -297,91 +322,86 @@ func (ih *IsolationHelper) CleanupTestDataByPattern(ctx context.Context, pattern
 			return fmt.Errorf("cleanup %s failed: %w", t.table, err)
 		}
 	}
+	return nil
+}
 
-	// Phase 4: If extraUserIDs were provided, poll briefly for async audit
-	// writes, then sweep in a loop.  The poll lets the async worker flush
-	// naturally; the sweep loop catches writes that arrive during or after
-	// the poll.
-	//
-	// KNOWN LIMITATION: This is best-effort.  Database polling cannot prove
-	// the producer queue is empty — a write may commit after the sweep
-	// loop exits.  For tests that exercise async audit paths (e.g.
-	// TestAdminDeleteUser), prefer CleanupTestDataByPatternWithRetry which
-	// runs the full cleanup multiple times.
-	if len(extraUserIDs) > 0 {
-		ih.pollAsyncAuditWrites(ctx, extraUserIDs)
+// sweepAsyncAuditLogs polls for async audit writes and sweeps them in a loop.
+//
+// The poll lets the async worker flush naturally; the sweep loop catches
+// writes that arrive during or after the poll.  This is best-effort —
+// database polling cannot prove the producer queue is empty.
+func (ih *IsolationHelper) sweepAsyncAuditLogs(ctx context.Context, extraUserIDs []string) error {
+	ih.pollAsyncAuditWrites(ctx, extraUserIDs)
 
-		sweepTimeout := ih.sweepTimeout()
-		if deadline, ok := ctx.Deadline(); ok {
-			if remaining := time.Until(deadline); remaining < sweepTimeout {
-				sweepTimeout = remaining
-			}
+	sweepTimeout := ih.sweepTimeout()
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining < sweepTimeout {
+			sweepTimeout = remaining
 		}
-		// Use context.Background() so the sweep is not canceled when the
-		// parent context is canceled — cleanup should always run to
-		// completion.  We still respect the parent's deadline (above) to
-		// avoid exceeding the declared total budget.
-		sweepCtx, sweepCancel := context.WithTimeout(context.Background(), sweepTimeout)
-		defer sweepCancel()
+	}
+	// Use context.Background() so the sweep is not canceled when the
+	// parent context is canceled — cleanup should always run to
+	// completion.  We still respect the parent's deadline (above) to
+	// avoid exceeding the declared total budget.
+	sweepCtx, sweepCancel := context.WithTimeout(context.Background(), sweepTimeout)
+	defer sweepCancel()
 
-		const sweepDrainWindow = 200 * time.Millisecond
-		consecutiveEmpty := 0
-		for {
-			deleted, err := ih.deleteAuditLogsByUserIDs(sweepCtx, extraUserIDs)
-			if err != nil {
-				return fmt.Errorf("audit-log sweep failed: %w", err)
-			}
-			if deleted > 0 {
-				consecutiveEmpty = 0
-			} else {
-				consecutiveEmpty++
-				if consecutiveEmpty >= 2 {
-					break
-				}
-			}
-			select {
-			case <-sweepCtx.Done():
-				return fmt.Errorf("audit-log sweep timed out: some async audit logs may not have been cleaned up")
-			case <-ih.clock.After(sweepDrainWindow):
-			}
-		}
-		// Post-sweep check: if records still exist, signal the caller to retry.
-		remaining, err := ih.countAuditLogsByUserIDs(sweepCtx, extraUserIDs)
+	const sweepDrainWindow = 200 * time.Millisecond
+	consecutiveEmpty := 0
+	for {
+		deleted, err := ih.deleteAuditLogsByUserIDs(sweepCtx, extraUserIDs)
 		if err != nil {
-			return fmt.Errorf("audit-log post-sweep count failed: %w", err)
+			return fmt.Errorf("audit-log sweep failed: %w", err)
 		}
-		if remaining > 0 {
-			return ErrResidualAuditLogs
+		if deleted > 0 {
+			consecutiveEmpty = 0
+		} else {
+			consecutiveEmpty++
+			if consecutiveEmpty >= 2 {
+				break
+			}
 		}
-
-		// Drain window: wait briefly for writes that committed between the
-		// last sweep DELETE and the COUNT query, then sweep once more.
-		// This narrows the race window but cannot eliminate it entirely —
-		// the producer may still write after this re-check.
-		const postCountDrain = 200 * time.Millisecond
 		select {
 		case <-sweepCtx.Done():
-			// Cannot confirm late writes are clean — signal retry.
-			return fmt.Errorf("audit-log post-count drain interrupted: %w", sweepCtx.Err())
-		case <-ih.clock.After(postCountDrain):
-			deleted, err := ih.deleteAuditLogsByUserIDs(sweepCtx, extraUserIDs)
+			return fmt.Errorf("audit-log sweep timed out: some async audit logs may not have been cleaned up")
+		case <-ih.clock.After(sweepDrainWindow):
+		}
+	}
+	// Post-sweep check: if records still exist, signal the caller to retry.
+	remaining, err := ih.countAuditLogsByUserIDs(sweepCtx, extraUserIDs)
+	if err != nil {
+		return fmt.Errorf("audit-log post-sweep count failed: %w", err)
+	}
+	if remaining > 0 {
+		return ErrResidualAuditLogs
+	}
+
+	// Drain window: wait briefly for writes that committed between the
+	// last sweep DELETE and the COUNT query, then sweep once more.
+	// This narrows the race window but cannot eliminate it entirely —
+	// the producer may still write after this re-check.
+	const postCountDrain = 200 * time.Millisecond
+	select {
+	case <-sweepCtx.Done():
+		// Cannot confirm late writes are clean — signal retry.
+		return fmt.Errorf("audit-log post-count drain interrupted: %w", sweepCtx.Err())
+	case <-ih.clock.After(postCountDrain):
+		deleted, err := ih.deleteAuditLogsByUserIDs(sweepCtx, extraUserIDs)
+		if err != nil {
+			return fmt.Errorf("audit-log post-count re-sweep failed: %w", err)
+		}
+		if deleted > 0 {
+			// Caught a late write. Re-count to give WithRetry a
+			// chance to do another full attempt.
+			remaining, err := ih.countAuditLogsByUserIDs(sweepCtx, extraUserIDs)
 			if err != nil {
-				return fmt.Errorf("audit-log post-count re-sweep failed: %w", err)
+				return fmt.Errorf("audit-log post-count re-check failed: %w", err)
 			}
-			if deleted > 0 {
-				// Caught a late write. Re-count to give WithRetry a
-				// chance to do another full attempt.
-				remaining, err := ih.countAuditLogsByUserIDs(sweepCtx, extraUserIDs)
-				if err != nil {
-					return fmt.Errorf("audit-log post-count re-check failed: %w", err)
-				}
-				if remaining > 0 {
-					return ErrResidualAuditLogs
-				}
+			if remaining > 0 {
+				return ErrResidualAuditLogs
 			}
 		}
 	}
-
 	return nil
 }
 

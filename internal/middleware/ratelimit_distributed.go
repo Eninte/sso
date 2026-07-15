@@ -112,6 +112,7 @@ func (drl *DistributedRateLimiter) Allow(ctx context.Context, clientIP string) (
 	windowStart := now.Add(-drl.window)
 
 	// 生成唯一 member，避免同纳秒请求的 ZAdd 覆盖
+	// #nosec G404 -- member 仅用作 Redis ZSet 的唯一标识，不涉及密码学安全场景
 	member := fmt.Sprintf("%d:%d", now.UnixNano(), rand.Int63())
 
 	// 使用 Lua 脚本原子执行：清理过期记录 → 检查计数 → 添加记录
