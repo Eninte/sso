@@ -80,9 +80,9 @@ func TestClient_Register(t *testing.T) {
 
 func TestClient_Register_EmailExists(t *testing.T) {
 	server := mockServer(func(w http.ResponseWriter, r *http.Request) {
+		// 服务端 writeValidationError 返回 {"error": "<message>"} 格式（无 code 字段）
 		jsonResponse(w, http.StatusConflict, map[string]string{
-			"code":    "EMAIL_EXISTS",
-			"message": "邮箱已存在",
+			"error": "邮箱已存在",
 		})
 	})
 	defer server.Close()
@@ -94,7 +94,8 @@ func TestClient_Register_EmailExists(t *testing.T) {
 	ssoErr, ok := err.(*sdk.Error)
 	require.True(t, ok)
 	assert.True(t, ssoErr.IsConflict())
-	assert.Equal(t, sdk.ErrCodeEmailExists, ssoErr.Code)
+	// error 字段为消息文本，code 应为空
+	assert.Equal(t, "邮箱已存在", ssoErr.Message)
 }
 
 // ============================================================================
@@ -237,6 +238,45 @@ func TestClient_RefreshToken_NoRefreshToken(t *testing.T) {
 }
 
 // ============================================================================
+// ExchangeCode 测试
+// ============================================================================
+
+func TestClient_ExchangeCode(t *testing.T) {
+	server := mockServer(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "POST", r.Method)
+		assert.Equal(t, "/api/v1/token", r.URL.Path)
+
+		// 服务端使用 handlerutil.WriteJSONSuccess 包裹响应，格式为 {"data": {...}}
+		jsonResponse(w, http.StatusOK, map[string]interface{}{
+			"data": map[string]interface{}{
+				"access_token":  "access-oauth-123",
+				"refresh_token": "refresh-oauth-456",
+				"token_type":    "Bearer",
+				"expires_in":    3600,
+				"scope":         "openid profile",
+			},
+		})
+	})
+	defer server.Close()
+
+	client := sdk.NewClient(server.URL)
+	resp, err := client.ExchangeCode(context.Background(),
+		"auth-code-abc",
+		"client-123",
+		"client-secret-xyz",
+		"http://localhost:8080/callback",
+		"code-verifier-123",
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, "access-oauth-123", resp.AccessToken)
+	assert.Equal(t, "refresh-oauth-456", resp.RefreshToken)
+	assert.Equal(t, "Bearer", resp.TokenType)
+	assert.Equal(t, 3600, resp.ExpiresIn)
+	assert.Equal(t, "openid profile", resp.Scope)
+}
+
+// ============================================================================
 // ForgotPassword / ResetPassword 测试
 // ============================================================================
 
@@ -355,11 +395,12 @@ func TestClient_MFAStatus(t *testing.T) {
 
 func TestClient_AdminHealth(t *testing.T) {
 	server := mockServer(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/admin/health", r.URL.Path)
+		assert.Equal(t, "/api/v1/admin/health", r.URL.Path)
 		jsonResponse(w, http.StatusOK, sdk.HealthResponse{
-			Status:   "ok",
-			Database: "connected",
-			Version:  "1.0.0",
+			Status:    "ok",
+			Database:  "connected",
+			Version:   "1.0.0",
+			BuildTime: "2026-07-15T00:00:00Z",
 		})
 	})
 	defer server.Close()
@@ -370,11 +411,13 @@ func TestClient_AdminHealth(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "ok", resp.Status)
 	assert.Equal(t, "connected", resp.Database)
+	assert.Equal(t, "1.0.0", resp.Version)
+	assert.Equal(t, "2026-07-15T00:00:00Z", resp.BuildTime)
 }
 
 func TestClient_ListUsers(t *testing.T) {
 	server := mockServer(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/admin/users", r.URL.Path)
+		assert.Equal(t, "/api/v1/admin/users", r.URL.Path)
 		assert.Equal(t, "1", r.URL.Query().Get("page"))
 		assert.Equal(t, "10", r.URL.Query().Get("pageSize"))
 
@@ -400,7 +443,8 @@ func TestClient_ListUsers(t *testing.T) {
 
 func TestClient_DisableUser(t *testing.T) {
 	server := mockServer(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/admin/users/disable", r.URL.Path)
+		// 路径参数形式：/api/v1/admin/users/{id}/disable
+		assert.Equal(t, "/api/v1/admin/users/user-123/disable", r.URL.Path)
 		jsonResponse(w, http.StatusOK, sdk.MessageResponse{
 			Message: "用户已禁用",
 		})
@@ -412,6 +456,43 @@ func TestClient_DisableUser(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "用户已禁用", resp.Message)
+}
+
+func TestClient_EnableUser(t *testing.T) {
+	server := mockServer(func(w http.ResponseWriter, r *http.Request) {
+		// 路径参数形式：/api/v1/admin/users/{id}/enable
+		assert.Equal(t, "/api/v1/admin/users/user-456/enable", r.URL.Path)
+		jsonResponse(w, http.StatusOK, sdk.MessageResponse{
+			Message: "用户已启用",
+		})
+	})
+	defer server.Close()
+
+	client := sdk.NewClient(server.URL, sdk.WithAccessToken("admin-token"))
+	resp, err := client.EnableUser(context.Background(), "user-456")
+
+	require.NoError(t, err)
+	assert.Equal(t, "用户已启用", resp.Message)
+}
+
+func TestClient_GetUser(t *testing.T) {
+	server := mockServer(func(w http.ResponseWriter, r *http.Request) {
+		// 路径参数形式：/api/v1/admin/users/{id}
+		assert.Equal(t, "/api/v1/admin/users/user-789", r.URL.Path)
+		jsonResponse(w, http.StatusOK, sdk.UserItem{
+			ID:     "user-789",
+			Email:  "test@example.com",
+			Status: "active",
+		})
+	})
+	defer server.Close()
+
+	client := sdk.NewClient(server.URL, sdk.WithAccessToken("admin-token"))
+	resp, err := client.GetUser(context.Background(), "user-789")
+
+	require.NoError(t, err)
+	assert.Equal(t, "user-789", resp.ID)
+	assert.Equal(t, "test@example.com", resp.Email)
 }
 
 // ============================================================================

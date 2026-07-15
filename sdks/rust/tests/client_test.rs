@@ -214,7 +214,7 @@ mod mock_tests {
     async fn test_admin_health() {
         let mut server = Server::new_async().await;
         server
-            .mock("GET", "/admin/health")
+            .mock("GET", "/api/v1/admin/health")
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(r#"{"status":"ok","timestamp":"2026-01-01T00:00:00Z","database":"pg","version":"1.0"}"#)
@@ -226,6 +226,81 @@ mod mock_tests {
         let resp = client.admin_health().await.unwrap();
 
         assert_eq!(resp.status, "ok");
+    }
+
+    #[tokio::test]
+    async fn test_admin_cleanup() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("POST", "/api/v1/admin/cleanup")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"message":"cleanup done"}"#)
+            .create_async()
+            .await;
+
+        let client = SSOClient::new(&server.url());
+        client.set_tokens("tok", "r", 900).await;
+        let resp = client.admin_cleanup().await.unwrap();
+
+        assert_eq!(resp.message, "cleanup done");
+    }
+
+    #[tokio::test]
+    async fn test_get_user() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("GET", "/api/v1/admin/users/u1")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"id":"u1","email":"a@b.com","email_verified":true,"mfa_enabled":false,"status":"active","created_at":"","updated_at":""}"#)
+            .create_async()
+            .await;
+
+        let client = SSOClient::new(&server.url());
+        client.set_tokens("tok", "r", 900).await;
+        let resp = client.get_user("u1").await.unwrap();
+
+        assert_eq!(resp.id, "u1");
+        assert_eq!(resp.email, "a@b.com");
+    }
+
+    #[tokio::test]
+    async fn test_disable_user() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("POST", "/api/v1/admin/users/u1/disable")
+            .match_body(mockito::Matcher::Missing)
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"message":"user disabled"}"#)
+            .create_async()
+            .await;
+
+        let client = SSOClient::new(&server.url());
+        client.set_tokens("tok", "r", 900).await;
+        let resp = client.disable_user("u1").await.unwrap();
+
+        assert_eq!(resp.message, "user disabled");
+    }
+
+    #[tokio::test]
+    async fn test_enable_user() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("POST", "/api/v1/admin/users/u1/enable")
+            .match_body(mockito::Matcher::Missing)
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"message":"user enabled"}"#)
+            .create_async()
+            .await;
+
+        let client = SSOClient::new(&server.url());
+        client.set_tokens("tok", "r", 900).await;
+        let resp = client.enable_user("u1").await.unwrap();
+
+        assert_eq!(resp.message, "user enabled");
     }
 
     #[tokio::test]
@@ -270,7 +345,7 @@ mod mock_tests {
     async fn test_list_users() {
         let mut server = Server::new_async().await;
         server
-            .mock("GET", "/admin/users?page=1&pageSize=10")
+            .mock("GET", "/api/v1/admin/users?page=1&pageSize=10")
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(r#"{"users":[{"id":"u1","email":"a@b.com","email_verified":true,"mfa_enabled":false,"status":"active","created_at":"","updated_at":""}],"total":1,"page":1,"page_size":10,"total_pages":1}"#)

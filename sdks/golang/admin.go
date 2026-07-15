@@ -2,7 +2,8 @@ package sdk
 
 import (
 	"context"
-	"fmt"
+	"net/url"
+	"strconv"
 )
 
 // ============================================================================
@@ -11,7 +12,7 @@ import (
 
 // AdminHealth 管理员健康检查
 func (c *Client) AdminHealth(ctx context.Context) (*HealthResponse, error) {
-	body, err := c.doGet(ctx, "/admin/health", true)
+	body, err := c.doGet(ctx, "/api/v1/admin/health", true)
 	if err != nil {
 		return nil, err
 	}
@@ -21,7 +22,7 @@ func (c *Client) AdminHealth(ctx context.Context) (*HealthResponse, error) {
 
 // AdminCleanup 清理过期数据
 func (c *Client) AdminCleanup(ctx context.Context) (*MessageResponse, error) {
-	body, err := c.doPost(ctx, "/admin/cleanup", nil, true)
+	body, err := c.doPost(ctx, "/api/v1/admin/cleanup", nil, true)
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +32,11 @@ func (c *Client) AdminCleanup(ctx context.Context) (*MessageResponse, error) {
 
 // ListUsers 获取用户列表（分页）
 func (c *Client) ListUsers(ctx context.Context, page, pageSize int) (*UserListResponse, error) {
-	path := fmt.Sprintf("/admin/users?page=%d&pageSize=%d", page, pageSize)
+	// 使用 url.Values 构造查询串，避免手动拼接
+	values := url.Values{}
+	values.Set("page", strconv.Itoa(page))
+	values.Set("pageSize", strconv.Itoa(pageSize))
+	path := "/api/v1/admin/users?" + values.Encode()
 
 	body, err := c.doGet(ctx, path, true)
 	if err != nil {
@@ -42,8 +47,9 @@ func (c *Client) ListUsers(ctx context.Context, page, pageSize int) (*UserListRe
 }
 
 // GetUser 获取用户详情
+// 服务端使用路径参数 /api/v1/admin/users/{id}
 func (c *Client) GetUser(ctx context.Context, userID string) (*UserItem, error) {
-	path := fmt.Sprintf("/admin/users?id=%s", userID)
+	path := "/api/v1/admin/users/" + url.PathEscape(userID)
 
 	body, err := c.doGet(ctx, path, true)
 	if err != nil {
@@ -54,10 +60,11 @@ func (c *Client) GetUser(ctx context.Context, userID string) (*UserItem, error) 
 }
 
 // DisableUser 禁用用户
+// 服务端使用路径参数 /api/v1/admin/users/{id}/disable，无需请求体
 func (c *Client) DisableUser(ctx context.Context, userID string) (*MessageResponse, error) {
-	body, err := c.doPost(ctx, "/admin/users/disable", DisableUserRequest{
-		UserID: userID,
-	}, true)
+	path := "/api/v1/admin/users/" + url.PathEscape(userID) + "/disable"
+
+	body, err := c.doPost(ctx, path, nil, true)
 	if err != nil {
 		return nil, err
 	}
@@ -66,10 +73,11 @@ func (c *Client) DisableUser(ctx context.Context, userID string) (*MessageRespon
 }
 
 // EnableUser 启用用户
+// 服务端使用路径参数 /api/v1/admin/users/{id}/enable，无需请求体
 func (c *Client) EnableUser(ctx context.Context, userID string) (*MessageResponse, error) {
-	body, err := c.doPost(ctx, "/admin/users/enable", EnableUserRequest{
-		UserID: userID,
-	}, true)
+	path := "/api/v1/admin/users/" + url.PathEscape(userID) + "/enable"
+
+	body, err := c.doPost(ctx, path, nil, true)
 	if err != nil {
 		return nil, err
 	}

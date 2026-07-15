@@ -7,6 +7,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
 import com.google.gson.reflect.TypeToken
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 // ============================================================================
@@ -275,13 +276,17 @@ class SSOClient(
     fun mfaStatus(): MFAStatusResponse = request("GET", "/api/v1/mfa/status", auth = true)
 
     // 管理员
-    fun adminHealth(): HealthResponse = request("GET", "/admin/health", auth = true)
+    fun adminHealth(): HealthResponse = request("GET", "/api/v1/admin/health", auth = true)
     fun listUsers(page: Int = 1, pageSize: Int = 20): UserListResponse =
-        request("GET", "/admin/users?page=$page&pageSize=$pageSize", auth = true)
+        request("GET", "/api/v1/admin/users?page=$page&pageSize=$pageSize", auth = true)
     fun disableUser(userId: String): MessageResponse =
-        request("POST", "/admin/users/disable", mapOf("user_id" to userId), auth = true)
+        request("POST", "/api/v1/admin/users/${encodePath(userId)}/disable", auth = true)
     fun enableUser(userId: String): MessageResponse =
-        request("POST", "/admin/users/enable", mapOf("user_id" to userId), auth = true)
+        request("POST", "/api/v1/admin/users/${encodePath(userId)}/enable", auth = true)
+
+    // 对路径参数做 URL 编码，避免特殊字符破坏路径
+    private fun encodePath(value: String): String =
+        URLEncoder.encode(value, "UTF-8")
 
     // OIDC
     fun discovery(): DiscoveryResponse = request("GET", "/.well-known/openid-configuration")

@@ -110,7 +110,7 @@ type UserInfo struct {
 	Sub           string   `json:"sub"`
 	Email         string   `json:"email"`
 	EmailVerified bool     `json:"email_verified"`
-	Scopes        []string `json:"scopes,omitempty"`
+	Scope         []string `json:"scope,omitempty"`
 }
 
 // MessageResponse 通用消息响应
@@ -162,6 +162,7 @@ type HealthResponse struct {
 	Timestamp string `json:"timestamp"`
 	Database  string `json:"database"`
 	Version   string `json:"version"`
+	BuildTime string `json:"build_time"`
 }
 
 // DiscoveryResponse OIDC Discovery响应

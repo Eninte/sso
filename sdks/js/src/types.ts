@@ -87,7 +87,8 @@ export interface UserInfo {
   sub: string;
   email: string;
   email_verified: boolean;
-  scopes?: string[];
+  // 服务端返回单数 key "scope"（值为字符串数组），详见 userinfo handler
+  scope?: string[];
 }
 
 export interface MessageResponse {

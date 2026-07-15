@@ -455,12 +455,12 @@ impl SSOClient {
     // =======================================================================
 
     pub async fn admin_health(&self) -> Result<HealthResponse, SSOError> {
-        self.request(Method::GET, "/admin/health", None::<&()>, true)
+        self.request(Method::GET, "/api/v1/admin/health", None::<&()>, true)
             .await
     }
 
     pub async fn admin_cleanup(&self) -> Result<MessageResponse, SSOError> {
-        self.request(Method::POST, "/admin/cleanup", None::<&()>, true)
+        self.request(Method::POST, "/api/v1/admin/cleanup", None::<&()>, true)
             .await
     }
 
@@ -469,37 +469,27 @@ impl SSOClient {
         page: u64,
         page_size: u64,
     ) -> Result<UserListResponse, SSOError> {
-        let path = format!("/admin/users?page={page}&pageSize={page_size}");
+        // 服务端使用 camelCase 的 pageSize 作为查询参数名
+        let path = format!("/api/v1/admin/users?page={page}&pageSize={page_size}");
         self.request(Method::GET, &path, None::<&()>, true).await
     }
 
     pub async fn get_user(&self, user_id: &str) -> Result<UserItem, SSOError> {
-        let path = format!("/admin/users?id={}", url_encode(user_id));
+        // 使用路径参数：GET /api/v1/admin/users/{id}
+        let path = format!("/api/v1/admin/users/{}", url_encode(user_id));
         self.request(Method::GET, &path, None::<&()>, true).await
     }
 
     pub async fn disable_user(&self, user_id: &str) -> Result<MessageResponse, SSOError> {
-        self.request(
-            Method::POST,
-            "/admin/users/disable",
-            Some(&DisableUserRequest {
-                user_id: user_id.to_string(),
-            }),
-            true,
-        )
-        .await
+        // 使用路径参数，无需请求体：POST /api/v1/admin/users/{id}/disable
+        let path = format!("/api/v1/admin/users/{}/disable", url_encode(user_id));
+        self.request(Method::POST, &path, None::<&()>, true).await
     }
 
     pub async fn enable_user(&self, user_id: &str) -> Result<MessageResponse, SSOError> {
-        self.request(
-            Method::POST,
-            "/admin/users/enable",
-            Some(&EnableUserRequest {
-                user_id: user_id.to_string(),
-            }),
-            true,
-        )
-        .await
+        // 使用路径参数，无需请求体：POST /api/v1/admin/users/{id}/enable
+        let path = format!("/api/v1/admin/users/{}/enable", url_encode(user_id));
+        self.request(Method::POST, &path, None::<&()>, true).await
     }
 
     // =======================================================================

@@ -192,19 +192,35 @@ public actor SSOClient {
     // =======================================================================
 
     public func adminHealth() async throws -> HealthResponse {
-        try await request(method: "GET", path: "/admin/health", auth: true)
+        try await request(method: "GET", path: "/api/v1/admin/health", auth: true)
     }
 
     public func listUsers(page: Int = 1, pageSize: Int = 20) async throws -> UserListResponse {
-        try await request(method: "GET", path: "/admin/users?page=\(page)&pageSize=\(pageSize)", auth: true)
+        try await request(
+            method: "GET",
+            path: "/api/v1/admin/users?page=\(page)&pageSize=\(pageSize)",
+            auth: true
+        )
     }
 
     public func disableUser(userId: String) async throws -> MessageResponse {
-        try await request(method: "POST", path: "/admin/users/disable", body: ["user_id": userId], auth: true)
+        // userId 作为路径参数传递，需进行 URL 编码
+        let encoded = userId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? userId
+        return try await request(
+            method: "POST",
+            path: "/api/v1/admin/users/\(encoded)/disable",
+            auth: true
+        )
     }
 
     public func enableUser(userId: String) async throws -> MessageResponse {
-        try await request(method: "POST", path: "/admin/users/enable", body: ["user_id": userId], auth: true)
+        // userId 作为路径参数传递，需进行 URL 编码
+        let encoded = userId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? userId
+        return try await request(
+            method: "POST",
+            path: "/api/v1/admin/users/\(encoded)/enable",
+            auth: true
+        )
     }
 
     // =======================================================================

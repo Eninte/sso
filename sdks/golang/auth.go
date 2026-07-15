@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -70,6 +71,8 @@ func (c *Client) RefreshToken(ctx context.Context) (*TokenResponse, error) {
 }
 
 // ExchangeCode 用授权码交换Token（OAuth2）
+// 服务端响应使用 handlerutil.WriteJSONSuccess 包裹，格式为 {"data": {...}}，
+// 需先解析外层结构，再取 data 字段反序列化为 TokenResponse。
 func (c *Client) ExchangeCode(ctx context.Context, code, clientID, clientSecret, redirectURI, codeVerifier string) (*TokenResponse, error) {
 	body, err := c.doPost(ctx, "/api/v1/token", TokenRequest{
 		GrantType:    "authorization_code",
@@ -83,12 +86,15 @@ func (c *Client) ExchangeCode(ctx context.Context, code, clientID, clientSecret,
 		return nil, err
 	}
 
-	var resp TokenResponse
-	if err := json.Unmarshal(body, &resp); err != nil {
+	// 剥离 data 包装层
+	var wrapper struct {
+		Data TokenResponse `json:"data"`
+	}
+	if err := json.Unmarshal(body, &wrapper); err != nil {
 		return nil, fmt.Errorf("sso: parse token response: %w", err)
 	}
 
-	return &resp, nil
+	return &wrapper.Data, nil
 }
 
 // RevokeToken 撤销Token（登出）
@@ -145,7 +151,13 @@ func (c *Client) ResetPassword(ctx context.Context, token, userID, newPassword s
 
 // VerifyEmail 验证邮箱
 func (c *Client) VerifyEmail(ctx context.Context, token, userID string) (*MessageResponse, error) {
-	body, err := c.doGet(ctx, fmt.Sprintf("/api/v1/verify-email?token=%s&user_id=%s", token, userID), false)
+	// 使用 url.Values 构造查询串，避免手动拼接导致编码问题
+	values := url.Values{}
+	values.Set("token", token)
+	values.Set("user_id", userID)
+	path := "/api/v1/verify-email?" + values.Encode()
+
+	body, err := c.doGet(ctx, path, false)
 	if err != nil {
 		return nil, err
 	}

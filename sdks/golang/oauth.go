@@ -2,7 +2,7 @@ package sdk
 
 import (
 	"context"
-	"fmt"
+	"net/url"
 )
 
 // ============================================================================
@@ -11,8 +11,14 @@ import (
 
 // Authorize 获取OAuth2授权码
 func (c *Client) Authorize(ctx context.Context, clientID, redirectURI, scope, state string) (*AuthorizeResponse, error) {
-	path := fmt.Sprintf("/api/v1/authorize?client_id=%s&redirect_uri=%s&response_type=code&scope=%s&state=%s",
-		clientID, redirectURI, scope, state)
+	// 使用 url.Values 构造查询串，避免手动拼接导致编码问题
+	values := url.Values{}
+	values.Set("client_id", clientID)
+	values.Set("redirect_uri", redirectURI)
+	values.Set("response_type", "code")
+	values.Set("scope", scope)
+	values.Set("state", state)
+	path := "/api/v1/authorize?" + values.Encode()
 
 	body, err := c.doGet(ctx, path, true)
 	if err != nil {
@@ -24,8 +30,16 @@ func (c *Client) Authorize(ctx context.Context, clientID, redirectURI, scope, st
 
 // AuthorizeWithPKCE 获取OAuth2授权码（带PKCE）
 func (c *Client) AuthorizeWithPKCE(ctx context.Context, clientID, redirectURI, scope, state, codeChallenge string) (*AuthorizeResponse, error) {
-	path := fmt.Sprintf("/api/v1/authorize?client_id=%s&redirect_uri=%s&response_type=code&scope=%s&state=%s&code_challenge=%s&code_challenge_method=S256",
-		clientID, redirectURI, scope, state, codeChallenge)
+	// 使用 url.Values 构造查询串，避免手动拼接导致编码问题
+	values := url.Values{}
+	values.Set("client_id", clientID)
+	values.Set("redirect_uri", redirectURI)
+	values.Set("response_type", "code")
+	values.Set("scope", scope)
+	values.Set("state", state)
+	values.Set("code_challenge", codeChallenge)
+	values.Set("code_challenge_method", "S256")
+	path := "/api/v1/authorize?" + values.Encode()
 
 	body, err := c.doGet(ctx, path, true)
 	if err != nil {

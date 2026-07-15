@@ -60,13 +60,13 @@ def test_set_clear_tokens():
     assert c.access_token == ""
 
 def test_register():
+    # 服务端注册响应只有 message 字段（防用户枚举），不返回 data
     url, svr = run_mock_server({
-        "POST:/api/v1/register": lambda _: (201, {"message": "ok", "data": {"user_id": "u1", "email": "t@e.com"}}),
+        "POST:/api/v1/register": lambda _: (201, {"message": "ok"}),
     })
     try:
         r = SSOClient(url).register("t@e.com", "P@ss1")
         assert r.message == "ok"
-        assert r.data.user_id == "u1"
     finally:
         svr.shutdown()
 
@@ -112,12 +112,16 @@ def test_login_fail():
         svr.shutdown()
 
 def test_user_info():
+    # 服务端返回 scope 单数，类型为 list
     url, svr = run_mock_server({
-        "GET:/api/v1/userinfo": lambda _: (200, {"sub": "u1", "email": "t@e.com", "email_verified": True}),
+        "GET:/api/v1/userinfo": lambda _: (200, {
+            "sub": "u1", "email": "t@e.com", "email_verified": True, "scope": ["read", "write"],
+        }),
     })
     try:
         r = SSOClient(url, access_token="tok").user_info()
         assert r.sub == "u1"
+        assert r.scope == ["read", "write"]
     finally:
         svr.shutdown()
 
@@ -171,7 +175,7 @@ def test_mfa_status():
 
 def test_admin_health():
     url, svr = run_mock_server({
-        "GET:/admin/health": lambda _: (200, {"status": "ok", "database": "pg", "version": "1"}),
+        "GET:/api/v1/admin/health": lambda _: (200, {"status": "ok", "database": "pg", "version": "1"}),
     })
     try:
         r = SSOClient(url, access_token="a").admin_health()
@@ -181,11 +185,96 @@ def test_admin_health():
 
 def test_list_users():
     url, svr = run_mock_server({
-        "GET:/admin/users": lambda _: (200, {"users": [{"id": "u1"}], "total": 1, "page": 1, "page_size": 10}),
+        "GET:/api/v1/admin/users": lambda _: (200, {"users": [{"id": "u1"}], "total": 1, "page": 1, "page_size": 10}),
     })
     try:
         r = SSOClient(url, access_token="a").list_users(1, 10)
         assert r.total == 1
+    finally:
+        svr.shutdown()
+
+def test_get_user():
+    # 路径参数方式获取单个用户
+    url, svr = run_mock_server({
+        "GET:/api/v1/admin/users/u1": lambda _: (200, {
+            "id": "u1", "email": "t@e.com", "email_verified": True,
+            "mfa_enabled": False, "status": "active",
+            "created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z",
+        }),
+    })
+    try:
+        r = SSOClient(url, access_token="a").get_user("u1")
+        assert r.id == "u1"
+        assert r.email == "t@e.com"
+    finally:
+        svr.shutdown()
+
+def test_disable_user():
+    # 路径参数方式禁用用户
+    url, svr = run_mock_server({
+        "POST:/api/v1/admin/users/u1/disable": lambda _: (200, {"message": "用户已禁用"}),
+    })
+    try:
+        r = SSOClient(url, access_token="a").disable_user("u1")
+        assert r.message == "用户已禁用"
+    finally:
+        svr.shutdown()
+
+def test_enable_user():
+    # 路径参数方式启用用户
+    url, svr = run_mock_server({
+        "POST:/api/v1/admin/users/u1/enable": lambda _: (200, {"message": "用户已启用"}),
+    })
+    try:
+        r = SSOClient(url, access_token="a").enable_user("u1")
+        assert r.message == "用户已启用"
+    finally:
+        svr.shutdown()
+
+def test_admin_cleanup():
+    url, svr = run_mock_server({
+        "POST:/api/v1/admin/cleanup": lambda _: (200, {"message": "清理完成"}),
+    })
+    try:
+        r = SSOClient(url, access_token="a").admin_cleanup()
+        assert r.message == "清理完成"
+    finally:
+        svr.shutdown()
+
+def test_exchange_code():
+    # 服务端 authorization_code 响应包了一层 data
+    url, svr = run_mock_server({
+        "POST:/api/v1/token": lambda _: (200, {
+            "data": {
+                "access_token": "at1", "refresh_token": "rt1",
+                "token_type": "Bearer", "expires_in": 3600, "scope": "read write",
+            },
+        }),
+    })
+    try:
+        c = SSOClient(url)
+        r = c.exchange_code("code1", "cid", "csec", "https://app.example.com/cb")
+        assert r.access_token == "at1"
+        assert r.refresh_token == "rt1"
+        assert c.access_token == "at1"
+    finally:
+        svr.shutdown()
+
+def test_exchange_code_with_pkce():
+    # PKCE 场景下的授权码交换
+    url, svr = run_mock_server({
+        "POST:/api/v1/token": lambda _: (200, {
+            "data": {
+                "access_token": "at2", "refresh_token": "rt2",
+                "token_type": "Bearer", "expires_in": 3600, "scope": "read",
+            },
+        }),
+    })
+    try:
+        c = SSOClient(url)
+        r = c.exchange_code("code2", "cid", "csec", "https://app.example.com/cb", "verifier123")
+        assert r.access_token == "at2"
+        assert c.access_token == "at2"
     finally:
         svr.shutdown()
 

@@ -12,7 +12,7 @@ from threading import Lock
 
 from .errors import SSOError, parse_error
 from .models import (
-    TokenResponse, RegisterResponse, RegisterData, UserInfo, MessageResponse,
+    TokenResponse, RegisterResponse, UserInfo, MessageResponse,
     MFASetupResponse, MFAStatusResponse, AuthorizeResponse,
     UserListResponse, UserItem, HealthResponse, DiscoveryResponse, JWKSResponse, JWK,
 )
@@ -104,11 +104,8 @@ class SSOClient:
 
     def register(self, email: str, password: str) -> RegisterResponse:
         resp = self._request("POST", "/api/v1/register", {"email": email, "password": password})
-        data = resp.get("data", {})
-        return RegisterResponse(
-            message=resp.get("message", ""),
-            data=RegisterData(user_id=data.get("user_id", ""), email=data.get("email", "")) if data else None,
-        )
+        # 服务端注册响应只返回 message（防用户枚举），不返回 data
+        return RegisterResponse(message=resp.get("message", ""))
 
     def login(self, email: str, password: str) -> TokenResponse:
         resp = self._request("POST", "/api/v1/login", {"email": email, "password": password})
@@ -143,7 +140,10 @@ class SSOClient:
         if code_verifier:
             body["code_verifier"] = code_verifier
         resp = self._request("POST", "/api/v1/token", body)
-        return self._to_token_response(resp)
+        # 服务端 authorization_code 响应包了一层 data，需要剥离后读取 token
+        data = resp.get("data", resp)
+        self.set_tokens(data["access_token"], data["refresh_token"], data["expires_in"])
+        return self._to_token_response(data)
 
     def revoke_token(self) -> MessageResponse:
         if not self._access_token:
@@ -181,7 +181,7 @@ class SSOClient:
             sub=resp.get("sub", ""),
             email=resp.get("email", ""),
             email_verified=resp.get("email_verified", False),
-            scopes=resp.get("scopes", []),
+            scope=resp.get("scope", []),
         )
 
     def change_password(self, old_password: str, new_password: str) -> MessageResponse:
@@ -242,7 +242,7 @@ class SSOClient:
     # =======================================================================
 
     def admin_health(self) -> HealthResponse:
-        resp = self._request("GET", "/admin/health", auth=True)
+        resp = self._request("GET", "/api/v1/admin/health", auth=True)
         return HealthResponse(
             status=resp.get("status", ""),
             timestamp=resp.get("timestamp", ""),
@@ -251,11 +251,11 @@ class SSOClient:
         )
 
     def admin_cleanup(self) -> MessageResponse:
-        resp = self._request("POST", "/admin/cleanup", auth=True)
+        resp = self._request("POST", "/api/v1/admin/cleanup", auth=True)
         return MessageResponse(message=resp.get("message", ""))
 
     def list_users(self, page: int = 1, page_size: int = 20) -> UserListResponse:
-        resp = self._request("GET", f"/admin/users?page={page}&pageSize={page_size}", auth=True)
+        resp = self._request("GET", f"/api/v1/admin/users?page={page}&pageSize={page_size}", auth=True)
         users = [UserItem(**u) for u in resp.get("users", [])]
         return UserListResponse(
             users=users, total=resp.get("total", 0),
@@ -264,7 +264,9 @@ class SSOClient:
         )
 
     def get_user(self, user_id: str) -> UserItem:
-        resp = self._request("GET", f"/admin/users?id={user_id}", auth=True)
+        # 使用路径参数，用 urllib.parse.quote 编码避免特殊字符问题
+        encoded_id = urllib.parse.quote(str(user_id))
+        resp = self._request("GET", f"/api/v1/admin/users/{encoded_id}", auth=True)
         data = {}
         for k, field in UserItem.__dataclass_fields__.items():
             default = field.default if field.default is not field.default_factory else ""
@@ -272,11 +274,15 @@ class SSOClient:
         return UserItem(**data)
 
     def disable_user(self, user_id: str) -> MessageResponse:
-        resp = self._request("POST", "/admin/users/disable", {"user_id": user_id}, auth=True)
+        # 使用路径参数，不再通过 body 传递 user_id
+        encoded_id = urllib.parse.quote(str(user_id))
+        resp = self._request("POST", f"/api/v1/admin/users/{encoded_id}/disable", auth=True)
         return MessageResponse(message=resp.get("message", ""))
 
     def enable_user(self, user_id: str) -> MessageResponse:
-        resp = self._request("POST", "/admin/users/enable", {"user_id": user_id}, auth=True)
+        # 使用路径参数，不再通过 body 传递 user_id
+        encoded_id = urllib.parse.quote(str(user_id))
+        resp = self._request("POST", f"/api/v1/admin/users/{encoded_id}/enable", auth=True)
         return MessageResponse(message=resp.get("message", ""))
 
     # =======================================================================

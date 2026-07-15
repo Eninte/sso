@@ -206,27 +206,30 @@ export class SSOClient {
   // =======================================================================
 
   async adminHealth(): Promise<HealthResponse> {
-    return this.request<HealthResponse>('GET', '/admin/health', undefined, true);
+    return this.request<HealthResponse>('GET', '/api/v1/admin/health', undefined, true);
   }
 
   async adminCleanup(): Promise<MessageResponse> {
-    return this.request<MessageResponse>('POST', '/admin/cleanup', undefined, true);
+    return this.request<MessageResponse>('POST', '/api/v1/admin/cleanup', undefined, true);
   }
 
   async listUsers(page: number, pageSize: number): Promise<UserListResponse> {
-    return this.request<UserListResponse>('GET', `/admin/users?page=${page}&pageSize=${pageSize}`, undefined, true);
+    return this.request<UserListResponse>('GET', `/api/v1/admin/users?page=${page}&pageSize=${pageSize}`, undefined, true);
   }
 
   async getUser(userId: string): Promise<UserItem> {
-    return this.request<UserItem>('GET', `/admin/users?id=${userId}`, undefined, true);
+    // 使用路径参数（服务端契约：GET /api/v1/admin/users/{id}）
+    return this.request<UserItem>('GET', `/api/v1/admin/users/${encodeURIComponent(userId)}`, undefined, true);
   }
 
   async disableUser(userId: string): Promise<MessageResponse> {
-    return this.request<MessageResponse>('POST', '/admin/users/disable', { user_id: userId }, true);
+    // 使用路径参数，不发送请求体（服务端契约：POST /api/v1/admin/users/{id}/disable）
+    return this.request<MessageResponse>('POST', `/api/v1/admin/users/${encodeURIComponent(userId)}/disable`, undefined, true);
   }
 
   async enableUser(userId: string): Promise<MessageResponse> {
-    return this.request<MessageResponse>('POST', '/admin/users/enable', { user_id: userId }, true);
+    // 使用路径参数，不发送请求体（服务端契约：POST /api/v1/admin/users/{id}/enable）
+    return this.request<MessageResponse>('POST', `/api/v1/admin/users/${encodeURIComponent(userId)}/enable`, undefined, true);
   }
 
   // =======================================================================

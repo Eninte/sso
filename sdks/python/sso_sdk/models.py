@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass
@@ -16,15 +15,9 @@ class TokenResponse:
 
 
 @dataclass
-class RegisterData:
-    user_id: str = ""
-    email: str = ""
-
-
-@dataclass
 class RegisterResponse:
+    # 服务端注册响应只有 message 字段（防用户枚举），不返回 data
     message: str = ""
-    data: Optional[RegisterData] = None
 
 
 @dataclass
@@ -32,7 +25,8 @@ class UserInfo:
     sub: str = ""
     email: str = ""
     email_verified: bool = False
-    scopes: list[str] = field(default_factory=list)
+    # 服务端返回 scope 单数，类型为 list
+    scope: list[str] = field(default_factory=list)
 
 
 @dataclass

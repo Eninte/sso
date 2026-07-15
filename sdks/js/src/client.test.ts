@@ -295,13 +295,15 @@ describe('SSOClient', () => {
 
     beforeAll(async () => {
       server = await mockServer((req) => {
-        if (req.url === '/admin/health') {
+        // 健康检查：GET /api/v1/admin/health
+        if (req.url === '/api/v1/admin/health') {
           return {
             status: 200,
             body: { status: 'ok', database: 'connected', version: '1.0.0' },
           };
         }
-        if (req.url?.startsWith('/admin/users?page=')) {
+        // 用户列表：GET /api/v1/admin/users?page=1&pageSize=10
+        if (req.url?.startsWith('/api/v1/admin/users?page=')) {
           return {
             status: 200,
             body: {
@@ -312,7 +314,22 @@ describe('SSOClient', () => {
             },
           };
         }
-        return { status: 200, body: { message: '用户已禁用' } };
+        // 获取单个用户：GET /api/v1/admin/users/{id}
+        if (req.method === 'GET' && req.url?.match(/^\/api\/v1\/admin\/users\/[^/]+$/)) {
+          return {
+            status: 200,
+            body: { id: 'u1', email: 'a@b.com', email_verified: true, mfa_enabled: false, status: 'active', created_at: '', updated_at: '' },
+          };
+        }
+        // 禁用用户：POST /api/v1/admin/users/{id}/disable
+        if (req.method === 'POST' && req.url?.endsWith('/disable')) {
+          return { status: 200, body: { message: '用户已禁用' } };
+        }
+        // 启用用户：POST /api/v1/admin/users/{id}/enable
+        if (req.method === 'POST' && req.url?.endsWith('/enable')) {
+          return { status: 200, body: { message: '用户已启用' } };
+        }
+        return { status: 404, body: { code: 'NOT_FOUND', message: '路径不匹配' } };
       });
     });
 
@@ -330,10 +347,78 @@ describe('SSOClient', () => {
       expect(resp.total).toBe(1);
     });
 
-    it('禁用用户', async () => {
+    it('获取单个用户（路径参数）', async () => {
+      const client = createSSOClient(server.url, { accessToken: 'admin' });
+      const resp = await client.getUser('u1');
+      expect(resp.id).toBe('u1');
+      expect(resp.email).toBe('a@b.com');
+    });
+
+    it('禁用用户（路径参数，无请求体）', async () => {
       const client = createSSOClient(server.url, { accessToken: 'admin' });
       const resp = await client.disableUser('u1');
       expect(resp.message).toBe('用户已禁用');
+    });
+
+    it('启用用户（路径参数，无请求体）', async () => {
+      const client = createSSOClient(server.url, { accessToken: 'admin' });
+      const resp = await client.enableUser('u1');
+      expect(resp.message).toBe('用户已启用');
+    });
+  });
+
+  describe('admin - 路径参数验证', () => {
+    // 验证实际请求 URL 使用路径参数而非 query/body
+    let server: { url: string; close: () => void };
+    let capturedUrl: string | undefined;
+    let capturedBody: string;
+    let capturedMethod: string | undefined;
+
+    beforeAll(async () => {
+      server = await mockServer((req, body) => {
+        capturedUrl = req.url;
+        capturedBody = body;
+        capturedMethod = req.method;
+        return { status: 200, body: { message: 'ok' } };
+      });
+    });
+
+    afterAll(() => server.close());
+
+    it('getUser 使用路径参数 /api/v1/admin/users/{id}', async () => {
+      capturedUrl = undefined;
+      const client = createSSOClient(server.url, { accessToken: 'admin' });
+      await client.getUser('user-42');
+      expect(capturedUrl).toBe('/api/v1/admin/users/user-42');
+    });
+
+    it('getUser 对特殊字符进行 URL 编码', async () => {
+      capturedUrl = undefined;
+      const client = createSSOClient(server.url, { accessToken: 'admin' });
+      await client.getUser('a/b');
+      expect(capturedUrl).toBe('/api/v1/admin/users/a%2Fb');
+    });
+
+    it('disableUser 使用路径参数且无请求体', async () => {
+      capturedUrl = undefined;
+      capturedBody = '';
+      capturedMethod = undefined;
+      const client = createSSOClient(server.url, { accessToken: 'admin' });
+      await client.disableUser('user-42');
+      expect(capturedMethod).toBe('POST');
+      expect(capturedUrl).toBe('/api/v1/admin/users/user-42/disable');
+      expect(capturedBody).toBe('');
+    });
+
+    it('enableUser 使用路径参数且无请求体', async () => {
+      capturedUrl = undefined;
+      capturedBody = '';
+      capturedMethod = undefined;
+      const client = createSSOClient(server.url, { accessToken: 'admin' });
+      await client.enableUser('user-42');
+      expect(capturedMethod).toBe('POST');
+      expect(capturedUrl).toBe('/api/v1/admin/users/user-42/enable');
+      expect(capturedBody).toBe('');
     });
   });
 
