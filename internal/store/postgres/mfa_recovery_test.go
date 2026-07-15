@@ -1,3 +1,5 @@
+//go:build integration
+
 // Package postgres_test MFA恢复码存储单元测试
 package postgres_test
 

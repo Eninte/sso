@@ -1,3 +1,5 @@
+//go:build integration
+
 // Package postgres_test 审计日志SQL安全测试
 package postgres_test
 

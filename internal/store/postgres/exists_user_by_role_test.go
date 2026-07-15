@@ -1,3 +1,5 @@
+//go:build integration
+
 // Package postgres ExistsUserByRole 集成测试
 package postgres_test
 

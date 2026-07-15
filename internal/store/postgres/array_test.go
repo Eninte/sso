@@ -1,3 +1,5 @@
+//go:build integration
+
 // Package postgres PostgreSQL array adapter tests.
 package postgres
 

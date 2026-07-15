@@ -125,6 +125,56 @@ test-coverage: ## 生成测试覆盖率报告（HTML + JSON）并执行阈值检
 	@echo "✅ 覆盖率报告: coverage.html, coverage.json"
 	@echo "✅ 覆盖率检查通过"
 
+.PHONY: test-e2e-coverage
+test-e2e-coverage: ## 生成 E2E 测试覆盖率报告（需要服务运行中）
+	@echo ">>> 运行 E2E 测试并收集覆盖率..."
+	@E2E_ADMIN_EMAIL="system@eninte.com" E2E_ADMIN_PASSWORD="Admin1234!" \
+		RATE_LIMIT_REQUESTS=0 CAPTCHA_ENABLED=false \
+		DATABASE_URL="$(TEST_DATABASE_URL)" \
+		gotestsum --format pkgname -- \
+			-race -tags=e2e -timeout 300s \
+			-coverprofile=e2e-coverage.out \
+			-coverpkg=./internal/... \
+			./test/e2e/... || { \
+		echo "❌ E2E 覆盖率测试失败"; \
+		exit 1; \
+	}
+	@echo ">>> E2E 覆盖率函数级报告："
+	@go tool cover -func=e2e-coverage.out | grep "total:" || echo "(无覆盖率数据)"
+	@echo ">>> 生成 HTML 报告：e2e-coverage.html"
+	@go tool cover -html=e2e-coverage.out -o e2e-coverage.html
+	@echo "✅ E2E 覆盖率报告: e2e-coverage.html"
+
+.PHONY: test-coverage-full
+test-coverage-full: ## 合并单元/集成/E2E 覆盖率报告
+	@test -f .env.test || { echo "❌ .env.test 不存在，请参照 .env.example 创建"; exit 1; }
+	@echo ">>> [1/3] 运行单元+集成测试覆盖率..."
+	@set -a; source .env.test; set +a; \
+		DATABASE_URL="$(TEST_DATABASE_URL)" go test -race -tags=integration -timeout 180s \
+			-coverprofile=unit-coverage.out \
+			-coverpkg=./internal/... \
+			$$(go list ./internal/... | grep -v '/store/mock') ./cmd/... || { \
+		echo "❌ 单元+集成覆盖率测试失败"; \
+		exit 1; \
+	}
+	@echo ">>> [2/3] 运行 E2E 测试覆盖率..."
+	@E2E_ADMIN_EMAIL="system@eninte.com" E2E_ADMIN_PASSWORD="Admin1234!" \
+		RATE_LIMIT_REQUESTS=0 CAPTCHA_ENABLED=false \
+		DATABASE_URL="$(TEST_DATABASE_URL)" \
+		go test -race -tags=e2e -timeout 300s \
+			-coverprofile=e2e-coverage.out \
+			-coverpkg=./internal/... \
+			./test/e2e/... || { \
+		echo "❌ E2E 覆盖率测试失败"; \
+		exit 1; \
+	}
+	@echo ">>> [3/3] 合并覆盖率报告..."
+	@go tool cover -merge unit-coverage.out e2e-coverage.out -o full-coverage.out
+	@echo ">>> 合并后函数级覆盖率："
+	@go tool cover -func=full-coverage.out | grep "total:" || echo "(无覆盖率数据)"
+	@go tool cover -html=full-coverage.out -o full-coverage.html
+	@echo "✅ 合并覆盖率报告: full-coverage.html"
+
 .PHONY: test-report
 test-report: ## 生成JUnit XML测试报告
 	gotestsum --junitfile test-results.xml --format pkgname -- -race ./...

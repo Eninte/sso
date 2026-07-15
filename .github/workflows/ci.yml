@@ -161,6 +161,153 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
 
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: [lint]
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: sso
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: sso_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        env:
+          REDIS_PASSWORD: testpassword
+        options: >-
+          --health-cmd "redis-cli -a testpassword ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    env:
+      TEST_DATABASE_URL: postgres://sso:testpassword@localhost:5432/sso_test?sslmode=disable
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.4'
+          cache: true
+
+      - name: Install gotestsum
+        run: go install gotest.tools/gotestsum@latest
+
+      - name: Install golang-migrate
+        run: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+
+      - name: Generate JWT keys
+        run: |
+          mkdir -p keys
+          openssl genpkey -algorithm RSA -out keys/private.pem -pkeyopt rsa_keygen_bits:2048
+          openssl rsa -pubout -in keys/private.pem -out keys/public.pem
+
+      - name: Run database migrations
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+        run: migrate -path ./migrations -database "$DATABASE_URL" up
+
+      - name: Build SSO service
+        run: go build -o bin/sso cmd/server/main.go
+
+      - name: Start SSO service
+        env:
+          SERVER_HOST: "0.0.0.0"
+          SERVER_PORT: "9090"
+          SERVER_ENV: test
+          DB_HOST: localhost
+          DB_PORT: "5432"
+          DB_NAME: sso_test
+          DB_USER: sso
+          DB_PASSWORD: testpassword
+          DB_SSL_MODE: disable
+          REDIS_ENABLE: "true"
+          REDIS_HOST: localhost
+          REDIS_PORT: "6379"
+          REDIS_PASSWORD: testpassword
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+          JWT_PRIVATE_KEY_PATH: ./keys/private.pem
+          JWT_PUBLIC_KEY_PATH: ./keys/public.pem
+          BCRYPT_COST: "10"
+          RATE_LIMIT_REQUESTS: "0"
+          RATE_LIMIT_WINDOW: 1m
+          MFA_RECOVERY_HMAC_KEY: test-hmac-key-for-ci
+          METRICS_USERNAME: metrics
+          METRICS_PASSWORD: test123
+          CORS_ALLOWED_ORIGINS: http://localhost:3000
+          CAPTCHA_ENABLED: "false"
+          STRICT_KEY_PERMISSIONS: "false"
+        run: |
+          ./bin/sso &
+          echo $! > sso.pid
+          # 等待服务健康检查通过（最多 30 秒）
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9090/health > /dev/null 2>&1; then
+              echo "SSO service is healthy"
+              break
+            fi
+            echo "Waiting for SSO service... ($i/30)"
+            sleep 1
+          done
+          if ! curl -sf http://localhost:9090/health > /dev/null 2>&1; then
+            echo "SSO service failed to start"
+            exit 1
+          fi
+
+      - name: Prepare E2E test data
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+          E2E_ADMIN_EMAIL: system@eninte.com
+          E2E_ADMIN_PASSWORD: Admin1234!
+        run: make test-e2e-prepare
+
+      - name: Run E2E tests
+        env:
+          E2E_ADMIN_EMAIL: system@eninte.com
+          E2E_ADMIN_PASSWORD: Admin1234!
+          RATE_LIMIT_REQUESTS: "0"
+          CAPTCHA_ENABLED: "false"
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+        run: |
+          gotestsum --junitfile e2e-results.xml --format pkgname -- \
+            -race -tags=e2e ./test/e2e/...
+
+      - name: Upload E2E test report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-results
+          path: e2e-results.xml
+
+      - name: Cleanup E2E test data
+        if: always()
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+        run: make test-e2e-cleanup
+
+      - name: Stop SSO service
+        if: always()
+        run: |
+          if [ -f sso.pid ]; then
+            kill $(cat sso.pid) 2>/dev/null || true
+            rm -f sso.pid
+          fi
+
   build:
     name: Build
     runs-on: ubuntu-latest

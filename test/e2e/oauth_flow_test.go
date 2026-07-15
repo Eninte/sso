@@ -206,41 +206,147 @@ func TestOAuthState(t *testing.T) {
 }
 
 // ============================================================================
-// 完整OAuth流程测试（模拟）
+// 完整OAuth流程测试（使用预置真实客户端）
 // ============================================================================
 
-func TestFullOAuthFlow_Simulated(t *testing.T) {
-	// 这个测试模拟完整OAuth流程，但不依赖真实的OAuth客户端
-	// 主要用于验证API端点存在且基本逻辑正确
+// TestFullOAuthFlow_PublicClient 公共客户端完整流程
+// 使用 prepare-e2e-test.sh 预置的 public-test-client（公共客户端，无需 secret，必须 PKCE）
+func TestFullOAuthFlow_PublicClient(t *testing.T) {
+	verifier, challenge := generatePKCEPair()
 
-	t.Run("授权端点可访问", func(t *testing.T) {
+	t.Run("授权端点接受公共客户端+PKCE", func(t *testing.T) {
 		params := url.Values{
-			"response_type": {"code"},
-			"client_id":     {"test-client"},
-			"redirect_uri":  {"http://localhost:3000/callback"},
-			"scope":         {"openid"},
-			"state":         {"test"},
+			"response_type":         {"code"},
+			"client_id":             {"public-test-client"},
+			"redirect_uri":          {"http://localhost:3000/callback"},
+			"scope":                 {"openid"},
+			"state":                 {"test-state"},
+			"code_challenge":        {challenge},
+			"code_challenge_method": {"S256"},
 		}
 
 		resp, _, err := doRequest("GET", "/api/v1/authorize?"+params.Encode(), nil, "")
 		require.NoError(t, err)
 
-		// 端点应该存在（不是404或500）
-		assert.NotEqual(t, http.StatusNotFound, resp.StatusCode)
-		assert.NotEqual(t, http.StatusInternalServerError, resp.StatusCode)
+		// 公共客户端合法请求应进入授权流程（非 404/500）
+		// 未登录用户可能返回 401 或重定向到登录页，二者均合法
+		assert.NotEqual(t, http.StatusNotFound, resp.StatusCode, "端点应存在")
+		assert.NotEqual(t, http.StatusInternalServerError, resp.StatusCode, "不应返回500")
 	})
 
-	t.Run("Token端点可访问", func(t *testing.T) {
-		req := map[string]string{
-			"grant_type": "authorization_code",
-			"code":       "test-code",
+	t.Run("Token端点处理无效授权码", func(t *testing.T) {
+		req := tokenExchangeRequest{
+			GrantType:    "authorization_code",
+			Code:         "invalid-test-code",
+			RedirectURI:  "http://localhost:3000/callback",
+			ClientID:     "public-test-client",
+			CodeVerifier: verifier,
 		}
 
 		resp, _, err := doRequest("POST", "/api/v1/token", req, "")
 		require.NoError(t, err)
 
-		// 端点应该存在
-		assert.NotEqual(t, http.StatusNotFound, resp.StatusCode)
+		// 端点应存在（非 404），无效 code 应返回 400 而非 404
+		assert.NotEqual(t, http.StatusNotFound, resp.StatusCode, "Token端点应存在")
+		assert.True(t, resp.StatusCode >= 400, "无效code应返回4xx错误")
+	})
+}
+
+// TestFullOAuthFlow_PublicClient_PKCE 公共客户端 PKCE 参数验证
+// 验证 PKCE 参数被正确处理：有 PKCE 时进入流程，无 PKCE 时公共客户端应被拒绝
+func TestFullOAuthFlow_PublicClient_PKCE(t *testing.T) {
+	t.Run("无PKCE公共客户端应被拒绝", func(t *testing.T) {
+		// 公共客户端不带 code_challenge 应被拒绝（PKCE 必须）
+		params := url.Values{
+			"response_type": {"code"},
+			"client_id":     {"public-test-client"},
+			"redirect_uri":  {"http://localhost:3000/callback"},
+			"scope":         {"openid"},
+			"state":         {"test-state"},
+			// 故意不传 code_challenge 和 code_challenge_method
+		}
+
+		resp, _, err := doRequest("GET", "/api/v1/authorize?"+params.Encode(), nil, "")
+		require.NoError(t, err)
+
+		// 公共客户端无 PKCE 应返回 4xx 错误（非 404/500）
+		assert.NotEqual(t, http.StatusNotFound, resp.StatusCode, "端点应存在")
+		assert.True(t, resp.StatusCode >= 400, "公共客户端无PKCE应被拒绝（4xx）")
+	})
+
+	t.Run("有效PKCE参数被接受", func(t *testing.T) {
+		_, challenge := generatePKCEPair()
+		params := url.Values{
+			"response_type":         {"code"},
+			"client_id":             {"public-test-client"},
+			"redirect_uri":          {"http://localhost:3000/callback"},
+			"scope":                 {"openid"},
+			"state":                 {"test-state"},
+			"code_challenge":        {challenge},
+			"code_challenge_method": {"S256"},
+		}
+
+		resp, _, err := doRequest("GET", "/api/v1/authorize?"+params.Encode(), nil, "")
+		require.NoError(t, err)
+
+		// 有效 PKCE 应进入授权流程（非 404/500）
+		assert.NotEqual(t, http.StatusNotFound, resp.StatusCode, "端点应存在")
+		assert.NotEqual(t, http.StatusInternalServerError, resp.StatusCode, "有效PKCE不应返回500")
+	})
+}
+
+// TestFullOAuthFlow_ConfidentialClient 机密客户端完整流程
+// 使用 prepare-e2e-test.sh 预置的 confidential-test-client（secret=test-client-secret-12345）
+func TestFullOAuthFlow_ConfidentialClient(t *testing.T) {
+	t.Run("机密客户端授权端点可访问", func(t *testing.T) {
+		params := url.Values{
+			"response_type": {"code"},
+			"client_id":     {"confidential-test-client"},
+			"redirect_uri":  {"http://localhost:3000/callback"},
+			"scope":         {"openid"},
+			"state":         {"test-state"},
+		}
+
+		resp, _, err := doRequest("GET", "/api/v1/authorize?"+params.Encode(), nil, "")
+		require.NoError(t, err)
+
+		// 机密客户端合法请求应进入授权流程（非 404/500）
+		assert.NotEqual(t, http.StatusNotFound, resp.StatusCode, "端点应存在")
+		assert.NotEqual(t, http.StatusInternalServerError, resp.StatusCode, "不应返回500")
+	})
+
+	t.Run("机密客户端Token端点验证secret", func(t *testing.T) {
+		// 使用正确 secret，但无效 code
+		req := tokenExchangeRequest{
+			GrantType:    "authorization_code",
+			Code:         "invalid-test-code",
+			RedirectURI:  "http://localhost:3000/callback",
+			ClientID:     "confidential-test-client",
+			ClientSecret: "test-client-secret-12345",
+		}
+
+		resp, _, err := doRequest("POST", "/api/v1/token", req, "")
+		require.NoError(t, err)
+
+		// 端点应存在（非 404），无效 code 应返回 400
+		assert.NotEqual(t, http.StatusNotFound, resp.StatusCode, "Token端点应存在")
+		assert.True(t, resp.StatusCode >= 400, "无效code应返回4xx错误")
+	})
+
+	t.Run("机密客户端错误secret应被拒绝", func(t *testing.T) {
+		req := tokenExchangeRequest{
+			GrantType:    "authorization_code",
+			Code:         "test-code",
+			RedirectURI:  "http://localhost:3000/callback",
+			ClientID:     "confidential-test-client",
+			ClientSecret: "wrong-secret",
+		}
+
+		resp, _, err := doRequest("POST", "/api/v1/token", req, "")
+		require.NoError(t, err)
+
+		// 错误 secret 应返回 4xx（401 或 400）
+		assert.True(t, resp.StatusCode >= 400, "错误secret应返回4xx错误")
 	})
 }
 

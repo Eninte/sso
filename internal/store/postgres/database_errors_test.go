@@ -1,3 +1,5 @@
+//go:build integration
+
 // Package postgres PostgreSQL error mapping tests.
 package postgres
 

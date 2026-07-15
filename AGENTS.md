@@ -37,6 +37,26 @@ make test-e2e-cleanup
 - 不污染生产代码，测试后可完全移除
 - 详细说明：`docs/E2E_TESTING.md`
 
+**覆盖率报告**：
+
+```bash
+make test-coverage          # 单元+集成覆盖率（阈值 80%）
+make test-e2e-coverage      # E2E 覆盖率（针对 internal/... ）
+make test-coverage-full     # 合并单元+集成+E2E 覆盖率
+```
+
+**测试分层**：
+
+| 层级 | Build Tag | 命令 | 说明 |
+|------|-----------|------|------|
+| 单元测试 | 无 | `make test-unit` 或 `go test -short ./...` | 无外部依赖，使用 mock |
+| 集成测试 | `//go:build integration` | `make test-integration` | 需要真实 PostgreSQL/Redis |
+| E2E 测试 | `//go:build e2e` | `make test-e2e` | 需要运行中的 SSO 服务 |
+
+- `internal/store/postgres/*_test.go` 使用 `integration` tag（需真实 DB）
+- `test/e2e/*_test.go` 使用 `e2e` tag（需运行服务）
+- 其他 `internal/**/*_test.go` 为单元测试（无 tag）
+
 ## 构建与运行
 
 ```bash

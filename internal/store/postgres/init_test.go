@@ -1,3 +1,5 @@
+//go:build integration
+
 // Package postgres_test 测试初始化
 // 自动加载 .env.test 中的 DATABASE_URL，避免每次手动设置环境变量
 package postgres_test

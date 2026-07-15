@@ -1,3 +1,5 @@
+//go:build integration
+
 // Package postgres_test PostgreSQL存储基准测试
 package postgres_test
 

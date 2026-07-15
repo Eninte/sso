@@ -6,7 +6,14 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha1" // #nosec G505 -- SHA1 用于 HOTP 算法（RFC 4226），与生产代码 mfa_setup.go 一致
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base32"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -399,6 +406,50 @@ func generateUniqueEmail(prefix string) string {
 // generateTestPassword 生成测试密码
 func generateTestPassword() string {
 	return "TestPassword123!"
+}
+
+// generateTOTPCode 根据密钥生成当前时间窗口的 TOTP 6 位码。
+// 实现 RFC 6238（基于 RFC 4226 HOTP），与生产代码 internal/service/mfa_setup.go
+// 的 generateHOTP 保持一致，使用 HMAC-SHA1 + 30 秒时间步。
+// 用于 E2E 测试中 MFA verify/disable 流程。
+func generateTOTPCode(secret string) string {
+	secret = strings.ToUpper(strings.TrimSpace(secret))
+	secretBytes, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(secret)
+	if err != nil {
+		return "000000" // 解码失败返回无效码，让测试失败而非 panic
+	}
+
+	now := time.Now()
+	timeStep := uint64(now.Unix() / 30)
+
+	buf := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf, timeStep)
+
+	mac := hmac.New(sha1.New, secretBytes) // #nosec G401 -- HMAC-SHA1 用于 HOTP（RFC 4226 标准）
+	mac.Write(buf)
+	sum := mac.Sum(nil)
+
+	offset := sum[len(sum)-1] & 0x0f
+	code := binary.BigEndian.Uint32(sum[offset:offset+4]) & 0x7fffffff
+
+	return fmt.Sprintf("%06d", code%1000000)
+}
+
+// generatePKCEPair 生成 PKCE code_verifier 和 code_challenge（S256）。
+// code_verifier 为 base64url 编码的 32 字节随机数（43 字符），
+// code_challenge 为 code_verifier 的 SHA256 哈希的 base64url 编码。
+// 用于 OAuth 2.0 PKCE 扩展（RFC 7636）。
+func generatePKCEPair() (verifier, challenge string) {
+	b := make([]byte, 32) // #nosec G404 -- 测试用随机数，非安全场景
+	if _, err := rand.Read(b); err != nil {
+		// 测试环境下 rand.Read 极少失败；失败时用固定 verifier 让测试继续
+		verifier = "test-verifier-fallback-0000000000000000000000"
+	} else {
+		verifier = base64.RawURLEncoding.EncodeToString(b)
+	}
+	h := sha256.Sum256([]byte(verifier))
+	challenge = base64.RawURLEncoding.EncodeToString(h[:])
+	return
 }
 
 // ============================================================================

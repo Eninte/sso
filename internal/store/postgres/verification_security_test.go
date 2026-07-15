@@ -1,3 +1,5 @@
+//go:build integration
+
 // Package postgres PostgreSQL 验证令牌存储安全测试
 package postgres
 
