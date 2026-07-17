@@ -77,11 +77,11 @@ func (h *APIDocsHandler) HandlePage(w http.ResponseWriter, r *http.Request) {
 	// 渲染页面
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = apiDocsTmpl.Execute(w, map[string]string{
-		"Nonce":        nonce,
-		"BaseURL":      h.baseURL,
-		"SpecURL":      "/api/v1/admin/api-docs/openapi.json",
-		"ScalarJSURL":  "/api/v1/admin/api-docs/scalar.js",
-		"Version":      h.version,
+		"Nonce":       nonce,
+		"BaseURL":     h.baseURL,
+		"SpecURL":     "/api/v1/admin/api-docs/openapi.json",
+		"ScalarJSURL": "/api/v1/admin/api-docs/scalar.js",
+		"Version":     h.version,
 	})
 }
 
