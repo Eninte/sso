@@ -1,0 +1,796 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "SSO 服务 API",
+    "description": "Go 1.26+ 单点登录服务，提供 OAuth 2.0 / OpenID Connect 认证功能。\n\n**认证方式**：除公开端点外，所有受保护端点需在 `Authorization` 头中携带 Bearer Access Token。\n\n**调试入口**：管理员访问 `/api/v1/admin/api-docs` 查看，规范文件 `/api/v1/admin/api-docs/openapi.json`。",
+    "version": "1.0.0",
+    "contact": {
+      "name": "SSO Maintainer"
+    }
+  },
+  "tags": [
+    { "name": "健康检查", "description": "服务健康与就绪探针" },
+    { "name": "OIDC Discovery", "description": "OpenID Connect 发现端点" },
+    { "name": "认证", "description": "注册、登录、Token、登出" },
+    { "name": "用户", "description": "用户信息、密码、邮箱验证" },
+    { "name": "MFA", "description": "多因子认证（TOTP）" },
+    { "name": "OAuth", "description": "OAuth 2.0 授权码流程" },
+    { "name": "第三方登录", "description": "Google / GitHub 社交登录" },
+    { "name": "验证码", "description": "自适应图形验证码" },
+    { "name": "管理员", "description": "用户管理、审计日志、系统健康（需管理员角色）" },
+    { "name": "初始化", "description": "首次部署初始化面板（仅本地）" }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["健康检查"],
+        "summary": "服务健康状态",
+        "description": "返回服务存活状态，不依赖数据库。",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "服务正常",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HealthResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "tags": ["健康检查"],
+        "summary": "K8s liveness 探针",
+        "description": "绕过限流和 metrics 中间件，专用于 K8s liveness 探针。",
+        "security": [],
+        "responses": { "200": { "description": "存活" } }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "tags": ["健康检查"],
+        "summary": "K8s readiness 探针",
+        "description": "检查数据库连接，绕过限流和 metrics 中间件。",
+        "security": [],
+        "responses": {
+          "200": { "description": "就绪" },
+          "503": { "description": "数据库不可用" }
+        }
+      }
+    },
+    "/.well-known/openid-configuration": {
+      "get": {
+        "tags": ["OIDC Discovery"],
+        "summary": "OIDC Discovery 配置",
+        "description": "返回 OIDC 发现文档，列出所有端点、支持的 scope、签名算法等。",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OIDC 配置",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/OIDCDiscovery" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/jwks.json": {
+      "get": {
+        "tags": ["OIDC Discovery"],
+        "summary": "JWKS 公钥集",
+        "description": "返回用于验证 JWT 签名的 RSA 公钥集合（支持密钥轮换）。",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "JWKS 集合",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/JWKS" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/register": {
+      "post": {
+        "tags": ["认证"],
+        "summary": "用户注册",
+        "description": "注册新用户。失败次数达阈值时需提供验证码头。",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RegisterRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "注册成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RegisterResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "409": { "description": "邮箱已存在" }
+        }
+      }
+    },
+    "/api/v1/login": {
+      "post": {
+        "tags": ["认证"],
+        "summary": "用户登录",
+        "description": "邮箱密码登录，返回 access/refresh token。失败 5 次锁定 30 分钟。",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LoginRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "登录成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TokenResponse" }
+              }
+            }
+          },
+          "401": { "description": "凭据无效" },
+          "403": { "description": "账户锁定/禁用/邮箱未验证" }
+        }
+      }
+    },
+    "/api/v1/token": {
+      "post": {
+        "tags": ["认证"],
+        "summary": "Token 端点",
+        "description": "支持 authorization_code、refresh_token 两种 grant_type。",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/TokenRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Token 响应",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TokenResponse" }
+              }
+            }
+          },
+          "400": { "description": "无效请求或客户端" },
+          "401": { "description": "凭据无效" }
+        }
+      }
+    },
+    "/api/v1/token/revoke": {
+      "post": {
+        "tags": ["认证"],
+        "summary": "撤销 Token",
+        "description": "RFC 7009 Token 撤销端点。",
+        "security": [],
+        "responses": { "200": { "description": "撤销成功" } }
+      }
+    },
+    "/api/v1/userinfo": {
+      "get": {
+        "tags": ["用户"],
+        "summary": "用户信息",
+        "description": "OIDC UserInfo 端点，5 分钟缓存，密码/角色变更时失效。",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "用户信息",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UserInfo" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/change-password": {
+      "post": {
+        "tags": ["用户"],
+        "summary": "修改密码",
+        "description": "已登录用户修改密码，需提供当前密码。",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ChangePasswordRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "修改成功" },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/forgot-password": {
+      "post": {
+        "tags": ["用户"],
+        "summary": "忘记密码",
+        "description": "发送密码重置邮件。敏感端点限流。",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": { "type": "string", "format": "email" }
+                },
+                "required": ["email"]
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "邮件已发送（无论邮箱是否存在）" } }
+      }
+    },
+    "/api/v1/reset-password": {
+      "post": {
+        "tags": ["用户"],
+        "summary": "重置密码",
+        "description": "使用邮件中的 token 重置密码。敏感端点限流。",
+        "security": [],
+        "responses": {
+          "200": { "description": "重置成功" },
+          "400": { "$ref": "#/components/responses/BadRequest" }
+        }
+      }
+    },
+    "/api/v1/verify-email": {
+      "get": {
+        "tags": ["用户"],
+        "summary": "验证邮箱",
+        "description": "通过邮件 token 验证邮箱。",
+        "security": [],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "验证成功" },
+          "400": { "$ref": "#/components/responses/BadRequest" }
+        }
+      }
+    },
+    "/api/v1/verify-email/send": {
+      "post": {
+        "tags": ["用户"],
+        "summary": "重发验证邮件",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "已发送" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/logout-all": {
+      "post": {
+        "tags": ["认证"],
+        "summary": "登出所有会话",
+        "description": "撤销当前用户的所有 refresh token。",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "登出成功" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/authorize": {
+      "get": {
+        "tags": ["OAuth"],
+        "summary": "OAuth 授权端点",
+        "description": "OAuth 2.0 授权码流程入口，支持 PKCE。",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "response_type", "in": "query", "required": true, "schema": { "type": "string", "enum": ["code"] } },
+          { "name": "client_id", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "redirect_uri", "in": "query", "required": true, "schema": { "type": "string", "format": "uri" } },
+          { "name": "scope", "in": "query", "schema": { "type": "string" } },
+          { "name": "state", "in": "query", "schema": { "type": "string" } },
+          { "name": "code_challenge", "in": "query", "schema": { "type": "string" } },
+          { "name": "code_challenge_method", "in": "query", "schema": { "type": "string", "enum": ["S256"] } }
+        ],
+        "responses": {
+          "302": { "description": "重定向到 redirect_uri 并附带 code" },
+          "400": { "$ref": "#/components/responses/BadRequest" }
+        }
+      }
+    },
+    "/api/v1/authorize/approve": {
+      "post": {
+        "tags": ["OAuth"],
+        "summary": "批准授权",
+        "description": "用户确认授权后调用，返回授权码。",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "已批准" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/mfa/setup": {
+      "post": {
+        "tags": ["MFA"],
+        "summary": "启用 MFA",
+        "description": "生成 TOTP 密钥和恢复码（恢复码用 HMAC-SHA256 哈希存储）。",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "MFA 设置信息",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/MFASetupResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/mfa/verify": {
+      "post": {
+        "tags": ["MFA"],
+        "summary": "验证 MFA",
+        "description": "验证 TOTP 6 位码完成绑定。",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "验证成功" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/mfa/disable": {
+      "post": {
+        "tags": ["MFA"],
+        "summary": "禁用 MFA",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "已禁用" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/mfa/status": {
+      "get": {
+        "tags": ["MFA"],
+        "summary": "MFA 状态",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "MFA 状态",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/MFAStatus" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/providers": {
+      "get": {
+        "tags": ["第三方登录"],
+        "summary": "可用登录提供商",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "提供商列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "type": "object", "properties": { "id": { "type": "string" }, "name": { "type": "string" } } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/{provider}": {
+      "get": {
+        "tags": ["第三方登录"],
+        "summary": "发起第三方登录",
+        "parameters": [
+          { "name": "provider", "in": "path", "required": true, "schema": { "type": "string", "enum": ["google", "github"] } }
+        ],
+        "security": [],
+        "responses": { "302": { "description": "重定向到第三方" } }
+      }
+    },
+    "/auth/{provider}/callback": {
+      "get": {
+        "tags": ["第三方登录"],
+        "summary": "第三方登录回调",
+        "parameters": [
+          { "name": "provider", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "code", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "state", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "security": [],
+        "responses": { "302": { "description": "重定向并携带 token" } }
+      }
+    },
+    "/api/v1/captcha": {
+      "get": {
+        "tags": ["验证码"],
+        "summary": "获取验证码",
+        "description": "返回图形验证码图片（base64）和 captcha_id。",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "验证码信息",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CaptchaResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/health": {
+      "get": {
+        "tags": ["管理员"],
+        "summary": "系统健康（管理员）",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "系统健康详情" },
+          "403": { "description": "需要管理员角色" }
+        }
+      }
+    },
+    "/api/v1/admin/users": {
+      "get": {
+        "tags": ["管理员"],
+        "summary": "用户列表",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "size", "in": "query", "schema": { "type": "integer", "default": 20 } },
+          { "name": "q", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "用户列表" },
+          "403": { "description": "需要管理员角色" }
+        }
+      }
+    },
+    "/api/v1/admin/users/{id}": {
+      "get": {
+        "tags": ["管理员"],
+        "summary": "用户详情",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": { "200": { "description": "用户详情" }, "404": { "description": "用户不存在" } }
+      },
+      "delete": {
+        "tags": ["管理员"],
+        "summary": "删除用户",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": { "204": { "description": "已删除" }, "404": { "description": "用户不存在" } }
+      }
+    },
+    "/api/v1/admin/users/{id}/disable": {
+      "post": {
+        "tags": ["管理员"],
+        "summary": "禁用用户",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": { "200": { "description": "已禁用" } }
+      }
+    },
+    "/api/v1/admin/users/{id}/enable": {
+      "post": {
+        "tags": ["管理员"],
+        "summary": "启用用户",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": { "200": { "description": "已启用" } }
+      }
+    },
+    "/api/v1/admin/audit-logs": {
+      "get": {
+        "tags": ["管理员"],
+        "summary": "审计日志",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "size", "in": "query", "schema": { "type": "integer", "default": 50 } },
+          { "name": "user_id", "in": "query", "schema": { "type": "string" } },
+          { "name": "event", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "审计日志列表" } }
+      }
+    },
+    "/api/v1/admin/cleanup": {
+      "post": {
+        "tags": ["管理员"],
+        "summary": "清理过期数据",
+        "description": "清理过期的 refresh token、密码重置 token 等。",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "200": { "description": "清理统计" } }
+      }
+    },
+    "/api/v1/admin/quality/api/metrics": {
+      "get": {
+        "tags": ["管理员"],
+        "summary": "质量指标（30天）",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "200": { "description": "质量指标列表" } }
+      }
+    },
+    "/api/v1/admin/quality/api/report/weekly": {
+      "get": {
+        "tags": ["管理员"],
+        "summary": "周报",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "200": { "description": "周报数据" } }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "tags": ["健康检查"],
+        "summary": "Prometheus 指标",
+        "description": "使用 Basic Auth 保护。",
+        "security": [{ "BasicAuth": [] }],
+        "responses": { "200": { "description": "Prometheus 格式指标" } }
+      }
+    },
+    "/init": {
+      "get": {
+        "tags": ["初始化"],
+        "summary": "初始化面板",
+        "description": "仅本地访问，无管理员时显示初始化页面。",
+        "security": [],
+        "responses": { "200": { "description": "HTML 页面" }, "403": { "description": "仅本地访问或已完成初始化" } }
+      }
+    },
+    "/api/v1/init/status": {
+      "get": {
+        "tags": ["初始化"],
+        "summary": "系统初始化状态",
+        "security": [],
+        "responses": { "200": { "description": "状态详情" }, "404": { "description": "已完成初始化" } }
+      }
+    },
+    "/api/v1/init/admin": {
+      "post": {
+        "tags": ["初始化"],
+        "summary": "创建管理员",
+        "security": [],
+        "responses": { "201": { "description": "创建成功" }, "403": { "description": "已完成初始化" } }
+      }
+    },
+    "/api/v1/init/client": {
+      "post": {
+        "tags": ["初始化"],
+        "summary": "创建 OAuth 客户端",
+        "security": [],
+        "responses": { "201": { "description": "创建成功" }, "403": { "description": "已完成初始化" } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Access Token (RS256 JWT)，通过 Authorization: Bearer <token> 携带"
+      },
+      "BasicAuth": {
+        "type": "http",
+        "scheme": "basic",
+        "description": "Metrics 端点 Basic Auth"
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "请求参数错误",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "未认证或 token 无效",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string", "description": "错误消息（本地化）" },
+          "code": { "type": "string", "description": "错误码" }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "example": "ok" },
+          "service": { "type": "string", "example": "sso" },
+          "timestamp": { "type": "string", "format": "date-time" }
+        }
+      },
+      "OIDCDiscovery": {
+        "type": "object",
+        "properties": {
+          "issuer": { "type": "string" },
+          "authorization_endpoint": { "type": "string" },
+          "token_endpoint": { "type": "string" },
+          "userinfo_endpoint": { "type": "string" },
+          "jwks_uri": { "type": "string" },
+          "revocation_endpoint": { "type": "string" },
+          "response_types_supported": { "type": "array", "items": { "type": "string" } },
+          "grant_types_supported": { "type": "array", "items": { "type": "string" } },
+          "scopes_supported": { "type": "array", "items": { "type": "string" } },
+          "id_token_signing_alg_values_supported": { "type": "array", "items": { "type": "string" } },
+          "code_challenge_methods_supported": { "type": "array", "items": { "type": "string" } },
+          "claims_supported": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "JWKS": {
+        "type": "object",
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kty": { "type": "string", "example": "RSA" },
+                "use": { "type": "string", "example": "sig" },
+                "kid": { "type": "string" },
+                "n": { "type": "string" },
+                "e": { "type": "string" }
+              }
+            }
+          }
+        }
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "required": ["email", "password"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "password": { "type": "string", "format": "password", "minLength": 8, "description": "至少 8 位，含大小写字母和数字" },
+          "name": { "type": "string" }
+        }
+      },
+      "RegisterResponse": {
+        "type": "object",
+        "properties": {
+          "message": { "type": "string" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "user_id": { "type": "string", "format": "uuid" },
+              "email": { "type": "string" }
+            }
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["email", "password"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "password": { "type": "string", "format": "password" }
+        }
+      },
+      "TokenRequest": {
+        "type": "object",
+        "required": ["grant_type"],
+        "properties": {
+          "grant_type": { "type": "string", "enum": ["authorization_code", "refresh_token"] },
+          "code": { "type": "string" },
+          "refresh_token": { "type": "string" },
+          "client_id": { "type": "string" },
+          "client_secret": { "type": "string" },
+          "redirect_uri": { "type": "string", "format": "uri" },
+          "code_verifier": { "type": "string", "description": "PKCE" }
+        }
+      },
+      "TokenResponse": {
+        "type": "object",
+        "properties": {
+          "access_token": { "type": "string" },
+          "token_type": { "type": "string", "example": "Bearer" },
+          "expires_in": { "type": "integer" },
+          "refresh_token": { "type": "string" },
+          "id_token": { "type": "string" },
+          "scope": { "type": "string" }
+        }
+      },
+      "UserInfo": {
+        "type": "object",
+        "properties": {
+          "sub": { "type": "string", "format": "uuid" },
+          "email": { "type": "string", "format": "email" },
+          "email_verified": { "type": "boolean" },
+          "name": { "type": "string" },
+          "picture": { "type": "string" },
+          "role": { "type": "string", "enum": ["user", "admin"] }
+        }
+      },
+      "ChangePasswordRequest": {
+        "type": "object",
+        "required": ["current_password", "new_password"],
+        "properties": {
+          "current_password": { "type": "string", "format": "password" },
+          "new_password": { "type": "string", "format": "password", "minLength": 8 }
+        }
+      },
+      "MFASetupResponse": {
+        "type": "object",
+        "properties": {
+          "secret": { "type": "string", "description": "TOTP 密钥（base32）" },
+          "qr_code": { "type": "string", "description": "otpauth URI" },
+          "recovery_codes": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "MFAStatus": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "recovery_codes_remaining": { "type": "integer" }
+        }
+      },
+      "CaptchaResponse": {
+        "type": "object",
+        "properties": {
+          "captcha_id": { "type": "string" },
+          "image": { "type": "string", "description": "base64 编码的 PNG 图片" },
+          "expires_in": { "type": "integer" }
+        }
+      }
+    }
+  }
+}

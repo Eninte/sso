@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSO API 文档 — Scalar</title>
+    <!-- Scalar JS 通过 //go:embed 内嵌并由同源路由 /api/v1/admin/api-docs/scalar.js 提供，完全离线 -->
+    <script nonce="{{.Nonce}}" src="{{.ScalarJSURL}}"></script>
+    <style nonce="{{.Nonce}}">
+        html, body { margin: 0; padding: 0; height: 100%; }
+        #scalar-container { height: 100vh; }
+    </style>
+</head>
+<body>
+<div id="scalar-container"></div>
+<script nonce="{{.Nonce}}">
+    // 渲染 Scalar API Reference
+    // configuration 详见 https://github.com/scalar/scalar
+    const configuration = {
+        spec: {
+            url: "{{.SpecURL}}",
+        },
+        // 站点主题
+        theme: 'modern',
+        // 默认暗色（管理员调试场景）
+        darkMode: true,
+        // 启用请求试用功能（核心调试能力）
+        hideModels: false,
+        // 集成自定义服务器列表（用户可在 Scalar UI 中切换）
+        servers: [
+            { url: "{{.BaseURL}}", name: "当前实例" }
+        ],
+        // 默认携带认证：从 localStorage 读取管理员 token
+        authentication: {
+            apiKey: {
+                token: localStorage.getItem('sso_admin_token') || ''
+            }
+        },
+        // 元数据
+        metaData: {
+            title: "SSO API 文档",
+            description: "OAuth 2.0 / OpenID Connect 单点登录服务 API"
+        },
+        // 显示下载 OpenAPI 规范的链接
+        hideDownloadButton: false,
+        // 不显示测试请求按钮的内嵌弹窗（直接在页面内联展示）
+        hideSidebar: false,
+        // 持久化设置
+        persistAuth: true,
+        // 集成提示：保存 token 到 localStorage
+        onSpecUpdate: () => {
+            const token = localStorage.getItem('sso_admin_token');
+            if (token) {
+                console.info('已加载管理员 token，调试请求将自动携带 Authorization: Bearer <token>');
+            }
+        }
+    };
+
+    // 初始化渲染
+    document.addEventListener('DOMContentLoaded', function() {
+        // Scalar API Reference Web Component
+        const apiReference = document.createElement('api-reference');
+        apiReference.setAttribute('data-configuration', JSON.stringify(configuration));
+        document.getElementById('scalar-container').appendChild(apiReference);
+    });
+</script>
+</body>
+</html>

@@ -35,6 +35,8 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 	metricsHandler := handler.NewMetricsHandler(svc.Metrics)
 	adminHandler := handler.NewAdminHandler(svc.Admin)
 	captchaHandler := handler.NewCaptchaHandler(svc.Captcha)
+	// API 文档调试前端（Scalar + OpenAPI），仅管理员可访问
+	apiDocsHandler := handler.NewAPIDocsHandler(cfg.BaseURL(), version)
 
 	// ==== 创建路由器 ====
 	router := mux.NewRouter()
@@ -185,6 +187,13 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 	// 质量仪表盘API端点
 	admin.HandleFunc("/quality/api/metrics", svc.Dashboard.HandleMetricsAPI).Methods("GET")
 	admin.HandleFunc("/quality/api/report/weekly", svc.Dashboard.HandleWeeklyReportAPI).Methods("GET")
+
+	// API 文档调试前端（Scalar + OpenAPI 3.0）
+	// 安全：继承 admin 路由的 AuthMiddleware + RequireAdmin，仅管理员可访问
+	// 离线模式：Scalar JS 通过 //go:embed 内嵌并由同源路由提供，主应用 CSP 无需放松
+	admin.HandleFunc("/api-docs", apiDocsHandler.HandlePage).Methods("GET")
+	admin.HandleFunc("/api-docs/openapi.json", apiDocsHandler.HandleSpec).Methods("GET")
+	admin.HandleFunc("/api-docs/scalar.js", apiDocsHandler.HandleScalarJS).Methods("GET")
 
 	// ==== 探针端点（独立路由器，绕过限流和metrics中间件） ====
 	// k8s liveness/readiness 探针频繁请求，若经过限流/metrics会干扰业务指标
