@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SSO API 文档 — Scalar</title>
+    <!-- Scalar 1.x 通过 meta[property=csp-nonce] 读取 nonce 并设置到其动态注入的 <style> 上 -->
+    <!-- 缺少此 meta 标签会导致 Scalar 注入的 style 元素无 nonce，被 CSP 阻止，样式完全失效 -->
+    <meta property="csp-nonce" content="{{.Nonce}}">
     <!-- Scalar JS 通过 //go:embed 内嵌并由同源路由 /api/v1/admin/api-docs/scalar.js 提供，完全离线 -->
     <script nonce="{{.Nonce}}" src="{{.ScalarJSURL}}"></script>
     <style nonce="{{.Nonce}}">
@@ -14,19 +17,19 @@
 <body>
 <div id="scalar-container"></div>
 <script nonce="{{.Nonce}}">
-    // 渲染 Scalar API Reference
-    // configuration 详见 https://github.com/scalar/scalar
-    const configuration = {
-        spec: {
-            url: "{{.SpecURL}}",
-        },
-        // 站点主题
-        theme: 'modern',
+    // 渲染 Scalar API Reference（Scalar 1.x 用 createApiReference 函数式 API）
+    // 配置文档：https://github.com/scalar/scalar
+    // 注意：Scalar 1.x 已移除 spec: {url} 结构，必须用顶层 url 字段
+    var configuration = {
+        // OpenAPI 规范 URL（Scalar 1.x 顶层字段，旧版 spec.url 已被 Zod 拒绝）
+        url: "{{.SpecURL}}",
+        // 主题（Scalar 1.x 内置 14 个：default, alternate, moon, purple, solarized, bluePlanet, deepSpace, saturn, kepler, elysiajs, fastify, mars, laserwave, none）
+        theme: 'purple',
         // 默认暗色（管理员调试场景）
         darkMode: true,
-        // 启用请求试用功能（核心调试能力）
+        // 显示数据模型（schemas）
         hideModels: false,
-        // 集成自定义服务器列表（用户可在 Scalar UI 中切换）
+        // 集成自定义服务器列表
         servers: [
             { url: "{{.BaseURL}}", name: "当前实例" }
         ],
@@ -43,26 +46,26 @@
         },
         // 显示下载 OpenAPI 规范的链接
         hideDownloadButton: false,
-        // 不显示测试请求按钮的内嵌弹窗（直接在页面内联展示）
+        // 显示侧边栏
         hideSidebar: false,
-        // 持久化设置
-        persistAuth: true,
-        // 集成提示：保存 token 到 localStorage
-        onSpecUpdate: () => {
-            const token = localStorage.getItem('sso_admin_token');
-            if (token) {
-                console.info('已加载管理员 token，调试请求将自动携带 Authorization: Bearer <token>');
-            }
-        }
+        // 持久化设置（localStorage）
+        persistAuth: true
     };
 
-    // 初始化渲染
-    document.addEventListener('DOMContentLoaded', function() {
-        // Scalar API Reference Web Component
-        const apiReference = document.createElement('api-reference');
-        apiReference.setAttribute('data-configuration', JSON.stringify(configuration));
-        document.getElementById('scalar-container').appendChild(apiReference);
-    });
+    // Scalar 1.x 推荐的初始化方式
+    // 脚本已在 body 末尾加载，此时 Scalar 全局对象已就绪
+    if (typeof Scalar !== 'undefined' && Scalar.createApiReference) {
+        Scalar.createApiReference('#scalar-container', configuration);
+    } else {
+        // 兜底：等待 DOMContentLoaded
+        document.addEventListener('DOMContentLoaded', function() {
+            if (typeof Scalar !== 'undefined' && Scalar.createApiReference) {
+                Scalar.createApiReference('#scalar-container', configuration);
+            } else {
+                console.error('Scalar 全局对象未加载，请检查 /api-docs/scalar.js 是否可访问');
+            }
+        });
+    }
 </script>
 </body>
 </html>
