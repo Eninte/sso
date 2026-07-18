@@ -98,7 +98,8 @@ func TestAPIDocs_AdminCanAccessHTML(t *testing.T) {
 	// 验证 HTML 内容
 	bodyStr := string(body)
 	assert.Contains(t, bodyStr, "<!DOCTYPE html>", "应为 HTML 文档")
-	assert.Contains(t, bodyStr, "api-reference", "应包含 Scalar web component")
+	assert.Contains(t, bodyStr, "Scalar.createApiReference", "应调用 Scalar 1.x 函数式初始化 API")
+	assert.Contains(t, bodyStr, `property="csp-nonce"`, "应包含 csp-nonce meta 标签")
 	assert.Contains(t, bodyStr, "/api/v1/admin/api-docs/openapi.json", "应注入 specURL")
 	assert.Contains(t, bodyStr, "/api/v1/admin/api-docs/scalar.js", "应注入 scalarJSURL")
 }

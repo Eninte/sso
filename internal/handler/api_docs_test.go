@@ -52,7 +52,8 @@ func TestAPIDocsHandler_HandlePage_ReturnsHTML(t *testing.T) {
 	body := rr.Body.String()
 	assert.Contains(t, body, "<!DOCTYPE html>", "应是 HTML 文档")
 	assert.Contains(t, body, "SSO API 文档", "应包含页面标题")
-	assert.Contains(t, body, "api-reference", "应包含 Scalar web component 标签")
+	assert.Contains(t, body, "Scalar.createApiReference", "应调用 Scalar 1.x 函数式初始化 API")
+	assert.Contains(t, body, `property="csp-nonce"`, "应包含 csp-nonce meta 标签（Scalar 1.x 通过它读取 nonce）")
 
 	// 验证模板变量注入
 	assert.Contains(t, body, testBaseURL, "应注入 baseURL")
