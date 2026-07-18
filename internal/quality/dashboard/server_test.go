@@ -46,8 +46,11 @@ func (f *fakeQualityStore) StoreMetrics(ctx context.Context, m *store.QualityMet
 	return nil
 }
 
+var errNoMetrics = errors.New("no metrics")
+
 func (f *fakeQualityStore) GetLatestMetrics(ctx context.Context) (*store.QualityMetrics, error) {
-	return nil, nil
+	// 返回哨兵错误，避免 nil+nil 触发 nilnil linter
+	return nil, errNoMetrics
 }
 
 func (f *fakeQualityStore) GetMetricsRange(ctx context.Context, from, to time.Time) ([]store.QualityMetrics, error) {
