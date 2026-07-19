@@ -165,7 +165,6 @@ func authMiddlewareWithBlacklist(jwtSvc *crypto.JWTService, blacklistedFunc func
 			}
 
 			// 4. 验证Token
-			//nolint:contextcheck // ValidateAccessToken 是纯内存操作（RLock + JWT parse），不涉及 I/O，不需要 ctx
 			claims, err := jwtSvc.ValidateAccessToken(token)
 			if err != nil {
 				if invalidTokenFunc != nil {

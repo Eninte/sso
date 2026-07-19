@@ -51,6 +51,10 @@ linters:
     - gocritic
     - goconst
     - testpackage
+    # contextcheck 对后台 goroutine 场景大量误报（worker、async email、fallback audit log 等）
+    # 项目用 // nosec G118 显式标注异步 context.Background() 用法，
+    # 并用 revive: context-as-argument 规则保证 ctx 作为参数传递的正确性
+    - contextcheck
 
 linters-settings:
   gocyclo:
