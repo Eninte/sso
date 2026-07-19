@@ -5,8 +5,11 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/example/sso/internal/common"
@@ -33,6 +36,7 @@ type AuditService struct {
 	logChan  chan *model.AuditLog
 	stopChan chan struct{}
 	wg       sync.WaitGroup
+	closed   atomic.Bool // 标记服务是否已关闭，防止 Close 后 Log 向已关闭 channel 发送 panic
 }
 
 // NewAuditService 创建审计日志服务
@@ -78,7 +82,12 @@ func (s *AuditService) worker(id int) {
 }
 
 // Close 关闭审计日志服务
+// 使用 atomic.Bool 的 CompareAndSwap 保证只关闭一次，防止重复 close panic
 func (s *AuditService) Close() {
+	if !s.closed.CompareAndSwap(false, true) {
+		// 已关闭，直接返回，避免重复 close panic
+		return
+	}
 	close(s.stopChan)
 	s.wg.Wait()
 	close(s.logChan)
@@ -86,6 +95,13 @@ func (s *AuditService) Close() {
 
 // Log 记录审计日志
 func (s *AuditService) Log(ctx context.Context, log *model.AuditLog) {
+	// 检查服务是否已关闭，避免向已关闭 channel 发送 panic
+	if s.closed.Load() {
+		// 服务已关闭，降级到 stderr，确保审计事件不丢失
+		fmt.Fprintf(os.Stderr, "[AUDIT_CLOSED] 审计服务已关闭，事件降级到stderr: %s user=%s\n", log.EventType, log.UserID)
+		return
+	}
+
 	// 生成日志ID
 	if log.ID == "" {
 		log.ID = generateAuditID()
@@ -120,6 +136,42 @@ func (s *AuditService) Log(ctx context.Context, log *model.AuditLog) {
 		// channel已满，降级处理：尝试同步存储或记录到slog
 		s.fallbackLog(ctx, log)
 	}
+}
+
+// LogSync 同步记录审计日志（用于关键事件）
+// 与 Log 不同，此方法同步存储到数据库并返回 error
+// 关键事件（如密码修改、MFA禁用）应使用此方法，确保审计日志不丢失
+// 实现 auditutil.SyncAuditLogger 接口
+func (s *AuditService) LogSync(ctx context.Context, log *model.AuditLog) error {
+	// 生成日志ID
+	if log.ID == "" {
+		log.ID = generateAuditID()
+	}
+
+	// 设置时间戳
+	if log.Timestamp.IsZero() {
+		log.Timestamp = time.Now()
+	}
+
+	// 序列化详情用于日志输出
+	detailsJSON, _ := json.Marshal(log.Details)
+
+	// 记录到slog
+	s.logger.InfoContext(ctx, "关键审计事件（同步）",
+		"id", log.ID,
+		"event_type", log.EventType,
+		"user_id", log.UserID,
+		"client_id", log.ClientID,
+		"ip_address", log.IPAddress,
+		"user_agent", log.UserAgent,
+		"details", string(detailsJSON),
+		"success", log.Success,
+		"timestamp", log.Timestamp,
+	)
+
+	// 同步存储到数据库，返回 error
+	// 关键事件必须确保日志写入存储，失败时调用者可回滚操作
+	return s.store.StoreAuditLog(ctx, log)
 }
 
 // fallbackLog 降级日志处理

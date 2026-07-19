@@ -271,13 +271,13 @@ func (s *SocialLoginService) HandleCallback(ctx context.Context, provider, code,
 	// 不接受客户端传入的redirectURI，防止开放重定向攻击
 	redirectURI := info.redirectURI
 
-	accessToken, err := s.exchangeCode(p, code, redirectURI)
+	accessToken, err := s.exchangeCode(ctx, p, code, redirectURI)
 	if err != nil {
 		// 外部OAuth调用失败，映射为具体错误码而非ErrInternal
 		return nil, apperrors.Wrap(apperrors.ErrCodeOAuthCodeExchangeFailed, "OAuth授权码交换失败", 400, err)
 	}
 
-	userInfo, err := s.getUserInfo(p, accessToken)
+	userInfo, err := s.getUserInfo(ctx, p, accessToken)
 	if err != nil {
 		return nil, apperrors.Wrap(apperrors.ErrCodeSocialLoginFailed, "社交登录失败", 400, err)
 	}
@@ -308,7 +308,7 @@ func (s *SocialLoginService) HandleCallback(ctx context.Context, provider, code,
 // 内部方法
 // ============================================================================
 
-func (s *SocialLoginService) exchangeCode(p *OAuthProvider, code, redirectURI string) (string, error) {
+func (s *SocialLoginService) exchangeCode(ctx context.Context, p *OAuthProvider, code, redirectURI string) (string, error) {
 	data := url.Values{
 		"client_id":     {p.ClientID},
 		"client_secret": {p.ClientSecret},
@@ -317,7 +317,7 @@ func (s *SocialLoginService) exchangeCode(p *OAuthProvider, code, redirectURI st
 		"redirect_uri":  {redirectURI},
 	}
 
-	req, err := http.NewRequest("POST", p.TokenURL, strings.NewReader(data.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", p.TokenURL, strings.NewReader(data.Encode()))
 	if err != nil {
 		return "", err
 	}
@@ -347,8 +347,8 @@ func (s *SocialLoginService) exchangeCode(p *OAuthProvider, code, redirectURI st
 	return "", ErrOAuthCodeInvalid
 }
 
-func (s *SocialLoginService) getUserInfo(p *OAuthProvider, accessToken string) (map[string]interface{}, error) {
-	req, err := http.NewRequest("GET", p.UserInfoURL, nil)
+func (s *SocialLoginService) getUserInfo(ctx context.Context, p *OAuthProvider, accessToken string) (map[string]interface{}, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", p.UserInfoURL, nil)
 	if err != nil {
 		return nil, err
 	}

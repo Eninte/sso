@@ -16,16 +16,18 @@ import (
 
 // 关键事件列表
 // 这些事件的审计日志失败会导致操作失败
+//
+// 注意：key 必须与 model 中定义的事件常量值一致，使用 string(model.EventXxx)
+// 避免硬编码字符串与常量漂移（历史 bug：曾用 "password_changed" 等错误字符串，
+// 与 model.EventPasswordChanged 的实际值 "security.password_changed" 不匹配）
 var criticalEvents = map[string]bool{
-	"password_changed":    true, // 密码修改
-	"mfa.disabled":        true, // MFA禁用
-	"mfa.enabled":         true, // MFA启用
-	"account.locked":      true, // 账户锁定
-	"account.disabled":    true, // 账户禁用
-	"admin.user_deleted":  true, // 管理员删除用户
-	"admin.role_changed":  true, // 管理员修改角色
-	"admin.user_disabled": true, // 管理员禁用用户
-	"admin.user_enabled":  true, // 管理员启用用户
+	string(model.EventPasswordChanged): true, // 密码修改
+	string(model.EventMFADisabled):     true, // MFA禁用
+	string(model.EventMFAEnabled):      true, // MFA启用
+	string(model.EventAccountLocked):   true, // 账户锁定
+	string(model.EventUserDeleted):     true, // 管理员删除用户
+	string(model.EventUserDisabled):    true, // 管理员禁用用户
+	string(model.EventUserEnabled):     true, // 管理员启用用户
 }
 
 // IsCriticalEvent 判断事件是否为关键事件
@@ -40,6 +42,14 @@ type AuditService interface {
 	// Log 记录审计日志
 	// 实现应该异步处理日志，不阻塞主流程
 	Log(ctx context.Context, log *model.AuditLog)
+}
+
+// SyncAuditLogger 定义同步审计日志记录接口（可选）
+// 实现此接口的审计服务可用于关键事件同步记录，确保日志不丢失
+type SyncAuditLogger interface {
+	// LogSync 同步记录审计日志并返回错误
+	// 关键事件应使用此方法，失败时调用者应回滚操作
+	LogSync(ctx context.Context, log *model.AuditLog) error
 }
 
 // LogWithFallback 使用回退处理的审计日志记录
@@ -170,7 +180,7 @@ func SafeAuditLog(ctx context.Context, auditSvc AuditService, event, userID stri
 // 参数:
 //   - ctx: 请求上下文
 //   - auditSvc: 审计服务实例（不能为nil）
-//   - event: 事件类型（如"password_changed"、"mfa.disabled"）
+//   - event: 事件类型（应使用 model.EventXxx 常量，如 string(model.EventPasswordChanged)）
 //   - userID: 用户ID（可以为空）
 //   - metadata: 事件元数据（可以为nil）
 //
@@ -185,7 +195,7 @@ func SafeAuditLog(ctx context.Context, auditSvc AuditService, event, userID stri
 //
 // 示例:
 //
-//	if err := auditutil.CriticalAuditLog(ctx, auditSvc, "password_changed", userID, map[string]interface{}{
+//	if err := auditutil.CriticalAuditLog(ctx, auditSvc, string(model.EventPasswordChanged), userID, map[string]interface{}{
 //	    "ip_address": ipAddress,
 //	}); err != nil {
 //	    // 审计日志失败，回滚密码修改
@@ -231,16 +241,28 @@ func CriticalAuditLog(ctx context.Context, auditSvc AuditService, event, userID 
 		Timestamp: time.Now(),
 	}
 
-	// 调用审计服务记录日志
-	// 注意：这里是同步调用，确保日志记录成功
-	auditSvc.Log(ctx, auditLog)
+	// 如果审计服务支持同步记录，则使用同步接口（关键事件必须同步）
+	// 这确保关键操作的审计日志真正写入存储，失败时调用者可回滚
+	if syncLogger, ok := auditSvc.(SyncAuditLogger); ok {
+		if err := syncLogger.LogSync(ctx, auditLog); err != nil {
+			// 同步记录失败，记录到stderr并返回error
+			fmt.Fprintf(os.Stderr, "[AUDIT_CRITICAL_FAILED] 关键审计日志记录失败: %v\n", err)
+			return apperrors.Wrap(apperrors.ErrCodeInternal, "关键审计日志记录失败", 500, err)
+		}
+		slog.InfoContext(ctx, "关键审计日志已记录",
+			"event", event,
+			"user_id", userID,
+			"success", success,
+		)
+		return nil
+	}
 
-	// 记录到slog以便调试
-	slog.InfoContext(ctx, "关键审计日志已记录",
+	// 降级：审计服务不支持同步记录，使用异步Log并记录警告
+	// 这不是理想行为（关键事件应同步），但保持向后兼容（如mock未实现LogSync）
+	slog.WarnContext(ctx, "审计服务不支持同步记录，关键事件降级为异步",
 		"event", event,
 		"user_id", userID,
-		"success", success,
 	)
-
+	auditSvc.Log(ctx, auditLog)
 	return nil
 }

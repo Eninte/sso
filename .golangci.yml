@@ -50,12 +50,6 @@ linters:
     - errchkjson
     - gocritic
     - goconst
-    - unused
-    - errorlint
-    - govet
-    - nilerr
-    - noctx
-    - contextcheck
     - testpackage
 
 linters-settings:

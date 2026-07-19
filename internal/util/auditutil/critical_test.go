@@ -24,6 +24,7 @@ func (m *mockAuditService) Log(ctx context.Context, log *model.AuditLog) {
 }
 
 // TestIsCriticalEvent 测试关键事件判断
+// 注意：事件字符串必须与 model.EventXxx 常量值一致
 func TestIsCriticalEvent(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -32,67 +33,68 @@ func TestIsCriticalEvent(t *testing.T) {
 	}{
 		{
 			name:     "密码修改_是关键事件",
-			event:    "password_changed",
+			event:    string(model.EventPasswordChanged),
 			expected: true,
 		},
 		{
 			name:     "MFA禁用_是关键事件",
-			event:    "mfa.disabled",
+			event:    string(model.EventMFADisabled),
 			expected: true,
 		},
 		{
 			name:     "MFA启用_是关键事件",
-			event:    "mfa.enabled",
+			event:    string(model.EventMFAEnabled),
 			expected: true,
 		},
 		{
 			name:     "账户锁定_是关键事件",
-			event:    "account.locked",
-			expected: true,
-		},
-		{
-			name:     "账户禁用_是关键事件",
-			event:    "account.disabled",
+			event:    string(model.EventAccountLocked),
 			expected: true,
 		},
 		{
 			name:     "管理员删除用户_是关键事件",
-			event:    "admin.user_deleted",
-			expected: true,
-		},
-		{
-			name:     "管理员修改角色_是关键事件",
-			event:    "admin.role_changed",
+			event:    string(model.EventUserDeleted),
 			expected: true,
 		},
 		{
 			name:     "管理员禁用用户_是关键事件",
-			event:    "admin.user_disabled",
+			event:    string(model.EventUserDisabled),
 			expected: true,
 		},
 		{
 			name:     "管理员启用用户_是关键事件",
-			event:    "admin.user_enabled",
+			event:    string(model.EventUserEnabled),
 			expected: true,
 		},
 		{
 			name:     "用户登录_不是关键事件",
-			event:    "user_login",
+			event:    string(model.EventUserLogin),
 			expected: false,
 		},
 		{
 			name:     "用户注册_不是关键事件",
-			event:    "user_register",
+			event:    string(model.EventUserRegister),
 			expected: false,
 		},
 		{
 			name:     "Token刷新_不是关键事件",
-			event:    "token_refresh",
+			event:    string(model.EventTokenRefresh),
 			expected: false,
 		},
 		{
 			name:     "未知事件_不是关键事件",
 			event:    "unknown_event",
+			expected: false,
+		},
+		// 历史错误字符串（曾误用为关键事件），现在应返回 false
+		{
+			name:     "历史错误字符串password_changed_不是关键事件",
+			event:    "password_changed",
+			expected: false,
+		},
+		{
+			name:     "历史错误字符串account.locked_不是关键事件",
+			event:    "account.locked",
 			expected: false,
 		},
 	}
@@ -116,13 +118,13 @@ func TestCriticalAuditLog_Success(t *testing.T) {
 		"success":    true,
 	}
 
-	err := auditutil.CriticalAuditLog(ctx, mockSvc, "password_changed", "user-123", metadata)
+	err := auditutil.CriticalAuditLog(ctx, mockSvc, string(model.EventPasswordChanged), "user-123", metadata)
 
 	assert.NoError(t, err, "关键审计日志应该成功记录")
 	assert.Len(t, mockSvc.logs, 1, "应该记录1条日志")
 
 	log := mockSvc.logs[0]
-	assert.Equal(t, "password_changed", log.EventType)
+	assert.Equal(t, string(model.EventPasswordChanged), log.EventType)
 	assert.Equal(t, "user-123", log.UserID)
 	assert.Equal(t, "192.168.1.1", log.IPAddress)
 	assert.Equal(t, "Mozilla/5.0", log.UserAgent)
@@ -133,7 +135,7 @@ func TestCriticalAuditLog_Success(t *testing.T) {
 func TestCriticalAuditLog_NilService(t *testing.T) {
 	ctx := context.Background()
 
-	err := auditutil.CriticalAuditLog(ctx, nil, "password_changed", "user-123", nil)
+	err := auditutil.CriticalAuditLog(ctx, nil, string(model.EventPasswordChanged), "user-123", nil)
 
 	assert.Error(t, err, "审计服务为nil时应该返回错误")
 	assert.Contains(t, err.Error(), "audit service required", "错误消息应该说明需要审计服务")
@@ -144,13 +146,13 @@ func TestCriticalAuditLog_WithoutMetadata(t *testing.T) {
 	ctx := context.Background()
 	mockSvc := &mockAuditService{}
 
-	err := auditutil.CriticalAuditLog(ctx, mockSvc, "mfa.disabled", "user-456", nil)
+	err := auditutil.CriticalAuditLog(ctx, mockSvc, string(model.EventMFADisabled), "user-456", nil)
 
 	assert.NoError(t, err)
 	assert.Len(t, mockSvc.logs, 1)
 
 	log := mockSvc.logs[0]
-	assert.Equal(t, "mfa.disabled", log.EventType)
+	assert.Equal(t, string(model.EventMFADisabled), log.EventType)
 	assert.Equal(t, "user-456", log.UserID)
 	assert.Empty(t, log.IPAddress)
 	assert.Empty(t, log.UserAgent)
@@ -168,13 +170,13 @@ func TestCriticalAuditLog_WithClientID(t *testing.T) {
 		"success":    false,
 	}
 
-	err := auditutil.CriticalAuditLog(ctx, mockSvc, "admin.user_deleted", "admin-789", metadata)
+	err := auditutil.CriticalAuditLog(ctx, mockSvc, string(model.EventUserDeleted), "admin-789", metadata)
 
 	assert.NoError(t, err)
 	assert.Len(t, mockSvc.logs, 1)
 
 	log := mockSvc.logs[0]
-	assert.Equal(t, "admin.user_deleted", log.EventType)
+	assert.Equal(t, string(model.EventUserDeleted), log.EventType)
 	assert.Equal(t, "admin-789", log.UserID)
 	assert.Equal(t, "oauth-client-123", log.ClientID)
 	assert.Equal(t, "10.0.0.1", log.IPAddress)
@@ -190,9 +192,9 @@ func TestCriticalAuditLog_MultipleEvents(t *testing.T) {
 		event  string
 		userID string
 	}{
-		{"password_changed", "user-1"},
-		{"mfa.enabled", "user-2"},
-		{"account.locked", "user-3"},
+		{string(model.EventPasswordChanged), "user-1"},
+		{string(model.EventMFAEnabled), "user-2"},
+		{string(model.EventAccountLocked), "user-3"},
 	}
 
 	for _, e := range events {
@@ -213,16 +215,15 @@ func TestCriticalAuditLog_EmptyUserID(t *testing.T) {
 	ctx := context.Background()
 	mockSvc := &mockAuditService{}
 
-	err := auditutil.CriticalAuditLog(ctx, mockSvc, "admin.role_changed", "", map[string]interface{}{
+	err := auditutil.CriticalAuditLog(ctx, mockSvc, string(model.EventUserDisabled), "", map[string]interface{}{
 		"target_user": "user-123",
-		"new_role":    "admin",
 	})
 
 	assert.NoError(t, err)
 	assert.Len(t, mockSvc.logs, 1)
 
 	log := mockSvc.logs[0]
-	assert.Equal(t, "admin.role_changed", log.EventType)
+	assert.Equal(t, string(model.EventUserDisabled), log.EventType)
 	assert.Empty(t, log.UserID)
 	assert.Contains(t, log.Details, "target_user")
 }

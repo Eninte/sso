@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -156,7 +157,7 @@ func (s *Store) GetWeeklyComparison(ctx context.Context) (*store.WeeklyCompariso
 	// 获取本周最新数据
 	current, err := s.GetLatestMetrics(ctx)
 	if err != nil {
-		if err == store.ErrNotFound {
+		if errors.Is(err, store.ErrNotFound) {
 			return &store.WeeklyComparison{}, nil
 		}
 		return nil, fmt.Errorf("get current metrics: %w", err)
@@ -186,7 +187,7 @@ func (s *Store) GetWeeklyComparison(ctx context.Context) (*store.WeeklyCompariso
 		&previous.LintViolations, &previous.GosecViolations, &previous.GocycloViolations,
 		&previous.QualityScore, &metadataJSON, &previous.CreatedAt,
 	)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return &store.WeeklyComparison{Current: current}, nil
 	}
 	if err != nil {

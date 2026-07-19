@@ -27,10 +27,11 @@ services:
       # ⚠️ 必须设置 DB_PASSWORD 环境变量
       # 设置方法: export DB_PASSWORD=your_secure_password
       - DB_PASSWORD=${DB_PASSWORD}
-      - DB_SSL_MODE=disable
+      - DB_SSL_MODE=prefer
       # Redis配置
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis_dev_password}
       # JWT配置
       - JWT_PRIVATE_KEY_PATH=/app/keys/private.pem
       - JWT_PUBLIC_KEY_PATH=/app/keys/public.pem
@@ -38,7 +39,7 @@ services:
       - JWT_REFRESH_TOKEN_TTL=168h
       - JWT_ISSUER=sso
       # 安全配置
-      - BCRYPT_COST=10
+      - BCRYPT_COST=12
       - RATE_LIMIT_REQUESTS=100
       - RATE_LIMIT_WINDOW=1m
       - MAX_LOGIN_ATTEMPTS=5
@@ -72,6 +73,7 @@ services:
       # ⚠️ 必须设置 DB_PASSWORD 环境变量
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
+      # ⚠️ 生产环境应移除端口暴露，仅容器间通信
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -93,13 +95,14 @@ services:
   redis:
     image: redis:7-alpine
     ports:
+      # ⚠️ 生产环境应移除端口暴露，仅容器间通信
       - "6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_dev_password}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_dev_password}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
