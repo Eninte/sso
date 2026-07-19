@@ -63,7 +63,9 @@ func (s *AuditService) startWorkers() {
 }
 
 // worker 审计日志处理worker
-func (s *AuditService) worker(id int) {
+// //nolint:contextcheck 整个函数：worker 是后台 goroutine，从 channel 消费日志，
+// 没有请求 ctx 可用，必须用 context.Background() 仓储
+func (s *AuditService) worker(id int) { //nolint:contextcheck // 后台 worker 无请求 ctx，必须用 context.Background()
 	defer s.wg.Done()
 	slogger := s.logger.With("worker_id", id)
 	slogger.Debug("审计日志worker启动")
@@ -74,6 +76,7 @@ func (s *AuditService) worker(id int) {
 			slogger.Debug("审计日志worker停止")
 			return
 		case log := <-s.logChan:
+			//nolint:contextcheck // worker 无请求 ctx，用独立 context.Background()
 			if err := s.store.StoreAuditLog(context.Background(), log); err != nil {
 				slogger.Error("存储审计日志失败", "error", err, "log_id", log.ID)
 			}

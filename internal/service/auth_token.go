@@ -191,6 +191,7 @@ func maskToken(token string) string {
 
 // ValidateToken 验证Token
 func (s *AuthService) ValidateToken(ctx context.Context, accessToken string) (*crypto.AccessTokenClaims, error) {
+	//nolint:contextcheck // ValidateAccessToken 是纯内存操作（RLock + JWT parse），不涉及 I/O，不需要 ctx
 	claims, err := s.jwtSvc.ValidateAccessToken(accessToken)
 	if err != nil {
 		return nil, serviceutil.WrapServiceError("验证access token", err)
