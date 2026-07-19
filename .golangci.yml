@@ -123,9 +123,5 @@ issues:
         - errcheck
         - gocognit
         - gocyclo
-    - path: internal/testing/coverage/
-      linters:
-        - revive
-        - gocognit
   max-issues-per-linter: 100
   max-same-issues: 10

@@ -1,17 +1,23 @@
-// Package metrics Prometheus指标服务
+// Package metrics Prometheus 指标服务
 // 提供服务监控指标
 package metrics
 
 import (
-	"math"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // ============================================================================
-// 指标类型
+// 指标类型（保留以兼容外部调用方）
 // ============================================================================
 
 // MetricType 指标类型
@@ -23,43 +29,35 @@ const (
 	Histogram MetricType = "histogram" // 直方图
 )
 
-var defaultHistogramBuckets = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, math.Inf(1)}
-
-// ============================================================================
-// 指标结构
-// ============================================================================
-
-// Metric 指标
-type Metric struct {
-	Name         string            // 指标名称
-	Help         string            // 指标说明
-	Type         MetricType        // 指标类型
-	Value        float64           // 当前值
-	Labels       map[string]string // 标签
-	Timestamp    time.Time         // 时间戳
-	Buckets      []float64         // 直方图桶上限
-	BucketCounts []uint64          // 直方图桶计数
-	Sum          float64           // 直方图观测值总和
-	Count        uint64            // 直方图观测次数
-}
-
 // ============================================================================
 // 指标服务
 // ============================================================================
 
-// Service Prometheus指标服务
+// Service Prometheus 指标服务
 type Service struct {
-	mu      sync.RWMutex
-	metrics map[string]*Metric
+	registry   *prometheus.Registry
+	mu         sync.RWMutex
+	counters   map[string]prometheus.Counter
+	gauges     map[string]prometheus.Gauge
+	histograms map[string]prometheus.Histogram
 }
 
 // NewService 创建指标服务
 func NewService() *Service {
+	registry := prometheus.NewRegistry()
+	// 自动采集 Go runtime + process 指标（官方库自带能力）
+	registry.MustRegister(
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+	)
+
 	svc := &Service{
-		metrics: make(map[string]*Metric),
+		registry:   registry,
+		counters:   make(map[string]prometheus.Counter),
+		gauges:     make(map[string]prometheus.Gauge),
+		histograms: make(map[string]prometheus.Histogram),
 	}
 
-	// 注册默认指标
 	svc.registerDefaults()
 
 	return svc
@@ -67,27 +65,27 @@ func NewService() *Service {
 
 // registerDefaults 注册默认指标
 func (s *Service) registerDefaults() {
-	// HTTP请求相关
-	s.Register("http_requests_total", "HTTP请求总数", Counter)
-	s.Register("http_request_duration_seconds", "HTTP请求耗时", Histogram)
-	s.Register("http_requests_in_flight", "当前处理中的HTTP请求数", Gauge)
+	// HTTP 请求相关
+	s.Register("http_requests_total", "HTTP 请求总数", Counter)
+	s.Register("http_request_duration_seconds", "HTTP 请求耗时", Histogram)
+	s.Register("http_requests_in_flight", "当前处理中的 HTTP 请求数", Gauge)
 
 	// 认证相关
 	s.Register("auth_login_total", "登录请求总数", Counter)
 	s.Register("auth_login_failed_total", "登录失败总数", Counter)
 	s.Register("auth_register_total", "注册请求总数", Counter)
-	s.Register("auth_token_refresh_total", "Token刷新总数", Counter)
-	s.Register("auth_token_revoke_total", "Token撤销总数", Counter)
+	s.Register("auth_token_refresh_total", "Token 刷新总数", Counter)
+	s.Register("auth_token_revoke_total", "Token 撤销总数", Counter)
 	s.Register("auth_account_locked_total", "账户锁定总数", Counter)
 
-	// OAuth相关
+	// OAuth 相关
 	s.Register("oauth_authorize_total", "授权请求总数", Counter)
-	s.Register("oauth_token_exchange_total", "Token交换总数", Counter)
+	s.Register("oauth_token_exchange_total", "Token 交换总数", Counter)
 	s.Register("oauth_code_invalid_total", "无效授权码总数", Counter)
 
 	// 安全相关
 	s.Register("security_rate_limit_total", "限流触发总数", Counter)
-	s.Register("security_invalid_token_total", "无效Token总数", Counter)
+	s.Register("security_invalid_token_total", "无效 Token 总数", Counter)
 	s.Register("security_password_mismatch_total", "密码不匹配总数", Counter)
 
 	// 系统相关
@@ -106,20 +104,30 @@ func (s *Service) Register(name, help string, metricType MetricType) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	metric := &Metric{
-		Name:      name,
-		Help:      help,
-		Type:      metricType,
-		Value:     0,
-		Labels:    make(map[string]string),
-		Timestamp: time.Now(),
+	switch metricType {
+	case Counter:
+		c := prometheus.NewCounter(prometheus.CounterOpts{
+			Name: name,
+			Help: help,
+		})
+		s.registry.MustRegister(c)
+		s.counters[name] = c
+	case Gauge:
+		g := prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: name,
+			Help: help,
+		})
+		s.registry.MustRegister(g)
+		s.gauges[name] = g
+	case Histogram:
+		h := prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    name,
+			Help:    help,
+			Buckets: prometheus.DefBuckets,
+		})
+		s.registry.MustRegister(h)
+		s.histograms[name] = h
 	}
-	if metricType == Histogram {
-		metric.Buckets = append([]float64(nil), defaultHistogramBuckets...)
-		metric.BucketCounts = make([]uint64, len(metric.Buckets))
-	}
-
-	s.metrics[name] = metric
 }
 
 // ============================================================================
@@ -132,128 +140,139 @@ func (s *Service) Increment(name string) {
 }
 
 // IncrementBy 增加指定值
+// 注：prometheus.Counter 不允许负值，负值调用会被忽略
 func (s *Service) IncrementBy(name string, value float64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-	if m, ok := s.metrics[name]; ok {
-		m.Value += value
-		m.Timestamp = time.Now()
+	if c, ok := s.counters[name]; ok && value >= 0 {
+		c.Add(value)
 	}
 }
 
 // Set 设置仪表盘值
 func (s *Service) Set(name string, value float64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-	if m, ok := s.metrics[name]; ok {
-		m.Value = value
-		m.Timestamp = time.Now()
+	if g, ok := s.gauges[name]; ok {
+		g.Set(value)
 	}
 }
 
 // Observe 记录直方图观测值
 func (s *Service) Observe(name string, value float64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-	if m, ok := s.metrics[name]; ok && m.Type == Histogram {
-		for i, bucket := range m.Buckets {
-			if value <= bucket {
-				m.BucketCounts[i]++
-			}
-		}
-		m.Sum += value
-		m.Count++
-		m.Timestamp = time.Now()
+	if h, ok := s.histograms[name]; ok {
+		h.Observe(value)
 	}
 }
 
-// Get 获取指标值
+// Get 获取指标当前值
+//   - Counter: 返回累计值
+//   - Gauge: 返回当前值
+//   - Histogram: 返回观测次数（_count）
 func (s *Service) Get(name string) float64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	if m, ok := s.metrics[name]; ok {
-		return m.Value
+	if c, ok := s.counters[name]; ok {
+		return testutil.ToFloat64(c)
+	}
+	if g, ok := s.gauges[name]; ok {
+		return testutil.ToFloat64(g)
+	}
+	if _, ok := s.histograms[name]; ok {
+		// Histogram 没有标量"当前值"，返回观测次数（_count 行）
+		return s.histogramCount(name)
+	}
+	return 0
+}
+
+// histogramCount 从 Prometheus 文本输出中提取指定 histogram 的 _count 值
+func (s *Service) histogramCount(name string) float64 {
+	output := s.ToPrometheusFormat()
+	prefix := name + "_count "
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				if v, err := strconv.ParseFloat(parts[1], 64); err == nil {
+					return v
+				}
+			}
+		}
 	}
 	return 0
 }
 
 // ============================================================================
-// Prometheus格式输出
+// Prometheus 格式输出
 // ============================================================================
 
-// ToPrometheusFormat 输出Prometheus格式
+// ToPrometheusFormat 输出 Prometheus 文本格式
+// 仅供测试与兼容旧调用使用；生产端点请使用 HTTPHandler
 func (s *Service) ToPrometheusFormat() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	output := ""
-	for _, m := range s.metrics {
-		// 输出HELP注释
-		output += "# HELP " + m.Name + " " + m.Help + "\n"
-
-		// 输出TYPE注释
-		output += "# TYPE " + m.Name + " " + string(m.Type) + "\n"
-
-		if m.Type == Histogram {
-			for i, bucket := range m.Buckets {
-				output += m.Name + "_bucket{le=\"" + formatBucket(bucket) + "\"} " + strconv.FormatUint(m.BucketCounts[i], 10) + "\n"
-			}
-			output += m.Name + "_sum " + formatFloat(m.Sum) + "\n"
-			output += m.Name + "_count " + strconv.FormatUint(m.Count, 10) + "\n"
-			continue
-		}
-
-		// 输出指标值
-		output += m.Name + " " + formatFloat(m.Value) + "\n"
-	}
-
-	return output
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+	s.HTTPHandler().ServeHTTP(rec, req)
+	return rec.Body.String()
 }
 
-// formatFloat 格式化浮点数
-func formatFloat(f float64) string {
-	return strconv.FormatFloat(f, 'f', -1, 64)
+// HTTPHandler 返回标准的 Prometheus /metrics HTTP handler
+func (s *Service) HTTPHandler() http.Handler {
+	return promhttp.HandlerFor(s.registry, promhttp.HandlerOpts{
+		EnableOpenMetrics: true,
+	})
 }
 
-// formatBucket 格式化直方图桶边界
-func formatBucket(f float64) string {
-	if math.IsInf(f, 1) {
-		return "+Inf"
-	}
-	return formatFloat(f)
+// Registry 返回底层 prometheus.Registry，用于自定义采集器注册
+func (s *Service) Registry() *prometheus.Registry {
+	return s.registry
 }
 
 // ============================================================================
-// HTTP请求指标中间件
+// HTTP 请求指标中间件
 // ============================================================================
 
-// HTTPMiddleware HTTP请求指标中间件
+// HTTPMiddleware HTTP 请求指标中间件
 func (s *Service) HTTPMiddleware(next http.Handler) http.Handler {
+	// 在中间件装配时加 RLock 读取指标引用，避免与并发 Register 的数据竞争。
+	// 实际使用中 Register 仅在 NewService 初始化期间调用，此处加锁仅为防御性编程。
+	s.mu.RLock()
+	inFlight := s.gauges["http_requests_in_flight"]
+	reqTotal := s.counters["http_requests_total"]
+	reqDuration := s.histograms["http_request_duration_seconds"]
+	s.mu.RUnlock()
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
 		// 增加正在处理的请求数
-		s.Increment("http_requests_in_flight")
-		defer s.IncrementBy("http_requests_in_flight", -1)
+		if inFlight != nil {
+			inFlight.Inc()
+			defer inFlight.Dec()
+		}
 
-		// 包装ResponseWriter以捕获状态码
-		wrapped := &responseWriter{ResponseWriter: w, statusCode: 200}
+		// 包装 ResponseWriter 以捕获状态码
+		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 
 		// 处理请求
 		next.ServeHTTP(wrapped, r)
 
 		// 记录指标
-		s.Increment("http_requests_total")
-		duration := time.Since(start).Seconds()
-		s.Observe("http_request_duration_seconds", duration)
+		if reqTotal != nil {
+			reqTotal.Inc()
+		}
+		if reqDuration != nil {
+			reqDuration.Observe(time.Since(start).Seconds())
+		}
 	})
 }
 
-// responseWriter 包装http.ResponseWriter
+// responseWriter 包装 http.ResponseWriter
 type responseWriter struct {
 	http.ResponseWriter
 	statusCode int

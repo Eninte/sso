@@ -1,5 +1,5 @@
 // Package handler 指标处理器
-// 提供Prometheus指标端点
+// 提供 Prometheus 指标端点
 package handler
 
 import (
@@ -13,23 +13,23 @@ import (
 // ============================================================================
 
 // MetricsHandler 指标处理器
-// 认证由外部BasicAuth中间件处理
+// 认证由外部 BasicAuth 中间件处理
 type MetricsHandler struct {
-	metrics *metrics.Service
+	handler http.Handler
 }
 
 // NewMetricsHandler 创建指标处理器
+// 在构造时缓存官方 promhttp.Handler，避免每次请求重新创建
 func NewMetricsHandler(metrics *metrics.Service) *MetricsHandler {
 	return &MetricsHandler{
-		metrics: metrics,
+		handler: metrics.HTTPHandler(),
 	}
 }
 
 // HandleMetrics 处理指标请求
 // GET /metrics
-// 认证由BasicAuth中间件处理
+// 认证由 BasicAuth 中间件处理
 func (h *MetricsHandler) HandleMetrics(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(h.metrics.ToPrometheusFormat()))
+	// 直接委托给官方 promhttp.Handler，由其设置正确的 Content-Type 与状态码
+	h.handler.ServeHTTP(w, r)
 }

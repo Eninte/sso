@@ -80,8 +80,7 @@ SSO 服务是一个生产级单点登录（Single Sign-On）微服务，基于 G
 SSO/
 ├── cmd/
 │   ├── server/                    # 服务主入口
-│   ├── coverage-check/            # 覆盖率阈值检查工具
-│   ├── analyze-store-coverage/    # Store 层覆盖率分析工具
+│   ├── api_docs_preview/          # API 文档本地预览（开发工具）
 │   └── mockserver/                # Mock 服务器
 ├── internal/
 │   ├── app/                       # 组合根
@@ -239,6 +238,8 @@ make bench-report                   # 生成基准测试报告到 docs/reports/
 ### 6.3 覆盖率要求
 
 - 整体覆盖率 >= 80%
+- 覆盖率检查使用 Go 标准工具链：`go test -coverprofile` + `go tool cover -func/-html/-merge`
+- 阈值强制：Makefile `test-coverage` / `test-coverage-check` 目标提取 `go tool cover -func` 的 total 值，低于 80% 时退出非零码
 - 覆盖率统计排除：`internal/app`（由 E2E 覆盖）、`internal/store/mock`（生成代码）、`internal/testing/`（测试基础设施）、`cmd/`（入口）、`sdks/`（客户端 SDK）
 
 ### 6.4 E2E 测试流程

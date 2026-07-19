@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -626,4 +627,33 @@ func (nrc *NamespacedRedisClient) namespaceKey(key string) string {
 // GetNamespace returns the current namespace.
 func (nrc *NamespacedRedisClient) GetNamespace() string {
 	return nrc.namespace
+}
+
+// ============================================================================
+// Test Identifier Helpers
+// ============================================================================
+
+// SanitizeTestName converts a test name to a safe identifier component,
+// replacing non-alphanumeric characters with hyphens.
+// Exported so external test suites (e.g., test/e2e) can generate
+// testIDs compatible with the cleanup framework.
+func SanitizeTestName(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('-')
+		}
+	}
+	return b.String()
+}
+
+// GenerateTestID produces a unique test identifier in the same format used
+// by the cleanup framework. External test suites can call this to generate
+// a testID that is compatible with CleanupTestDataByPattern.
+//
+// Format: e2e_<unix_nano>_<sanitized_test_name>
+func GenerateTestID(testName string) string {
+	return fmt.Sprintf("e2e_%d_%s", time.Now().UnixNano(), SanitizeTestName(testName))
 }

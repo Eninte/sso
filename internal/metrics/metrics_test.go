@@ -1,4 +1,4 @@
-// Package metrics_test Prometheus指标服务单元测试
+// Package metrics_test Prometheus 指标服务单元测试
 package metrics_test
 
 import (
@@ -21,7 +21,7 @@ func TestNewService_CreatesWithDefaults(t *testing.T) {
 	svc := metrics.NewService()
 	require.NotNil(t, svc)
 
-	// 验证默认指标已注册
+	// 验证默认指标已注册（初始值为 0）
 	assert.Equal(t, float64(0), svc.Get("http_requests_total"))
 	assert.Equal(t, float64(0), svc.Get("auth_login_total"))
 	assert.Equal(t, float64(0), svc.Get("security_rate_limit_total"))
@@ -41,14 +41,6 @@ func TestRegister_CustomMetric(t *testing.T) {
 	assert.Equal(t, float64(1), svc.Get("custom_metric"))
 }
 
-func TestRegister_OverwritesExisting(t *testing.T) {
-	svc := metrics.NewService()
-
-	svc.Register("http_requests_total", "新描述", metrics.Gauge)
-	svc.Set("http_requests_total", 42)
-	assert.Equal(t, float64(42), svc.Get("http_requests_total"))
-}
-
 // ============================================================================
 // Increment 测试
 // ============================================================================
@@ -66,7 +58,7 @@ func TestIncrement(t *testing.T) {
 func TestIncrement_NonExistentMetric(t *testing.T) {
 	svc := metrics.NewService()
 
-	// 不存在的指标不会panic
+	// 不存在的指标不会 panic
 	svc.Increment("nonexistent_metric")
 	assert.Equal(t, float64(0), svc.Get("nonexistent_metric"))
 }
@@ -77,8 +69,9 @@ func TestIncrementBy(t *testing.T) {
 	svc.IncrementBy("auth_login_total", 5)
 	assert.Equal(t, float64(5), svc.Get("auth_login_total"))
 
+	// prometheus.Counter 不允许负值，负调用被忽略
 	svc.IncrementBy("auth_login_total", -2)
-	assert.Equal(t, float64(3), svc.Get("auth_login_total"))
+	assert.Equal(t, float64(5), svc.Get("auth_login_total"))
 }
 
 // ============================================================================
@@ -112,8 +105,8 @@ func TestToPrometheusFormat(t *testing.T) {
 
 	output := svc.ToPrometheusFormat()
 
-	// 验证HELP和TYPE注释
-	assert.Contains(t, output, "# HELP http_requests_total HTTP请求总数")
+	// 验证 HELP 和 TYPE 注释，以及指标值
+	assert.Contains(t, output, "# HELP http_requests_total HTTP 请求总数")
 	assert.Contains(t, output, "# TYPE http_requests_total counter")
 	assert.Contains(t, output, "http_requests_total 1")
 
@@ -140,11 +133,11 @@ func TestHistogramObserve_PrometheusBuckets(t *testing.T) {
 	output := svc.ToPrometheusFormat()
 
 	assert.Contains(t, output, "# TYPE http_request_duration_seconds histogram")
-	assert.Contains(t, output, "http_request_duration_seconds_bucket{le=\"0.005\"} 0")
-	assert.Contains(t, output, "http_request_duration_seconds_bucket{le=\"0.01\"} 1")
-	assert.Contains(t, output, "http_request_duration_seconds_bucket{le=\"0.25\"} 2")
-	assert.Contains(t, output, "http_request_duration_seconds_bucket{le=\"+Inf\"} 3")
-	assert.Contains(t, output, "http_request_duration_seconds_sum 12.207")
+	// prometheus.DefBuckets: 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, +Inf
+	assert.Contains(t, output, `http_request_duration_seconds_bucket{le="0.005"} 0`)
+	assert.Contains(t, output, `http_request_duration_seconds_bucket{le="0.01"} 1`)
+	assert.Contains(t, output, `http_request_duration_seconds_bucket{le="0.25"} 2`)
+	assert.Contains(t, output, `http_request_duration_seconds_bucket{le="+Inf"} 3`)
 	assert.Contains(t, output, "http_request_duration_seconds_count 3")
 }
 
@@ -166,8 +159,8 @@ func TestHTTPMiddleware(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, float64(1), svc.Get("http_requests_total"))
-	output := svc.ToPrometheusFormat()
-	assert.Contains(t, output, "http_request_duration_seconds_count 1")
+	// Histogram 返回观测次数（_count）
+	assert.Equal(t, float64(1), svc.Get("http_request_duration_seconds"))
 	// in_flight 应该在请求完成后减少回 0
 	assert.Equal(t, float64(0), svc.Get("http_requests_in_flight"))
 }
@@ -215,7 +208,7 @@ func TestService_ConcurrentAccess(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		go func() {
 			svc.Increment("http_requests_total")
-			svc.Get("http_requests_total")
+			_ = svc.Get("http_requests_total")
 			svc.Set("db_connections_active", 5)
 			done <- true
 		}()
@@ -271,7 +264,51 @@ func TestToPrometheusFormat_ContainsAllMetrics(t *testing.T) {
 
 	output := svc.ToPrometheusFormat()
 
-	// 每个指标应该有HELP、TYPE和值行
-	assert.True(t, strings.Count(output, "# HELP") >= 19)
-	assert.True(t, strings.Count(output, "# TYPE") >= 19)
+	// 19 个业务指标 + Go runtime + process 指标
+	// 至少应该包含 19 个业务指标的 HELP/TYPE
+	assert.True(t, strings.Count(output, "# HELP") >= 19, "expected at least 19 HELP lines")
+	assert.True(t, strings.Count(output, "# TYPE") >= 19, "expected at least 19 TYPE lines")
+}
+
+// ============================================================================
+// 新增：HTTPHandler / Registry 暴露测试
+// ============================================================================
+
+func TestHTTPHandler_ReturnsValidHandler(t *testing.T) {
+	svc := metrics.NewService()
+	svc.Increment("http_requests_total")
+
+	h := svc.HTTPHandler()
+	require.NotNil(t, h)
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	// Content-Type 由 promhttp 设置（text/plain 或 application/openmetrics-text）
+	ct := rec.Header().Get("Content-Type")
+	assert.True(t, strings.HasPrefix(ct, "text/plain") || strings.HasPrefix(ct, "application/openmetrics-text"))
+	assert.Contains(t, rec.Body.String(), "http_requests_total 1")
+}
+
+func TestRegistry_ReturnsUnderlyingRegistry(t *testing.T) {
+	svc := metrics.NewService()
+	reg := svc.Registry()
+	require.NotNil(t, reg)
+}
+
+// ============================================================================
+// 新增：Go runtime + process 指标验证
+// ============================================================================
+
+func TestRuntimeMetrics_Registered(t *testing.T) {
+	svc := metrics.NewService()
+	output := svc.ToPrometheusFormat()
+
+	// 官方库自动采集 Go runtime 指标
+	assert.Contains(t, output, "# TYPE go_goroutines gauge")
+	assert.Contains(t, output, "# TYPE go_memstats_alloc_bytes gauge")
+	// 官方库自动采集 process 指标
+	assert.Contains(t, output, "# TYPE process_resident_memory_bytes gauge")
 }

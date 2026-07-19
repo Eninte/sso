@@ -51,7 +51,9 @@ func TestMetricsHandler_HandleMetrics(t *testing.T) {
 		h.HandleMetrics(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Equal(t, "text/plain; version=0.0.4", w.Header().Get("Content-Type"))
+		// promhttp 输出的 Content-Type 形如 "text/plain; version=0.0.4; charset=utf-8; escaping=underscores"
+		assert.Contains(t, w.Header().Get("Content-Type"), "text/plain")
+		assert.Contains(t, w.Header().Get("Content-Type"), "version=0.0.4")
 		assert.Contains(t, w.Body.String(), "http_requests_total")
 	})
 
@@ -64,7 +66,7 @@ func TestMetricsHandler_HandleMetrics(t *testing.T) {
 		h.HandleMetrics(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Equal(t, "text/plain; version=0.0.4", w.Header().Get("Content-Type"))
+		assert.Contains(t, w.Header().Get("Content-Type"), "text/plain")
 	})
 }
 
