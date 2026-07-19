@@ -19,9 +19,9 @@ type KeyVersion struct {
 	ID         string     `json:"id" db:"id"`                           // 密钥唯一标识
 	PublicKey  []byte     `json:"public_key" db:"public_key"`           // RSA公钥
 	PrivateKey []byte     `json:"-" db:"private_key"`                   // RSA私钥（JSON不序列化）
-	Status     KeyStatus  `json:"status" db:"status"`                   // 密钥状态
-	CreatedAt  time.Time  `json:"created_at" db:"created_at"`           // 创建时间
 	ExpiresAt  *time.Time `json:"expires_at,omitempty" db:"expires_at"` // 过期时间（可选）
+	CreatedAt  time.Time  `json:"created_at" db:"created_at"`           // 创建时间
+	Status     KeyStatus  `json:"status" db:"status"`                   // 密钥状态
 }
 
 // IsActive 检查密钥是否为活跃状态

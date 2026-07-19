@@ -19,8 +19,8 @@ type AuditLog struct {
 	IPAddress string    `json:"ip_address" db:"ip_address"` // IP地址
 	UserAgent string    `json:"user_agent" db:"user_agent"` // 用户代理
 	Details   string    `json:"details" db:"details"`       // 事件详情 (JSON)
-	Success   bool      `json:"success" db:"success"`       // 是否成功
 	Timestamp time.Time `json:"timestamp" db:"timestamp"`   // 时间戳
+	Success   bool      `json:"success" db:"success"`       // 是否成功
 }
 
 // AuditEventType 审计事件类型

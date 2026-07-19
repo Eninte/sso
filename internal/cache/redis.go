@@ -89,11 +89,11 @@ func ClientKey(clientID string) string {
 // MemoryCache 内存缓存实现
 // 使用map存储缓存数据，支持并发安全和自动过期清理
 type MemoryCache struct {
-	mu          sync.RWMutex
 	data        map[string]cacheItem
 	stopCh      chan struct{} // 用于停止清理goroutine
 	onCacheHit  func()        // 缓存命中时的回调
 	onCacheMiss func()        // 缓存未命中时的回调
+	mu          sync.RWMutex
 }
 
 // cacheItem 缓存项
@@ -588,14 +588,14 @@ func (c *RedisCache) GetTTL(ctx context.Context, key string) (time.Duration, err
 
 // Option 配置选项
 type Option struct {
-	RedisEnable       bool
 	RedisHost         string
 	RedisPort         string
 	RedisPassword     string
+	RedisConnTimeout  time.Duration
 	RedisDB           int
 	RedisPoolSize     int
 	RedisMinIdleConns int
-	RedisConnTimeout  time.Duration
+	RedisEnable       bool
 }
 
 // NewCache 创建缓存实例

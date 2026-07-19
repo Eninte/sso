@@ -15,15 +15,15 @@ type User struct {
 	ID            string     `json:"id" db:"id"`
 	Email         string     `json:"email" db:"email"`
 	PasswordHash  string     `json:"-" db:"password_hash"`
-	EmailVerified bool       `json:"email_verified" db:"email_verified"`
-	MFAEnabled    bool       `json:"mfa_enabled" db:"mfa_enabled"`
 	MFASecret     string     `json:"-" db:"mfa_secret"`
 	Role          string     `json:"role" db:"role"`
 	Status        string     `json:"status" db:"status"`
-	LoginAttempts int        `json:"-" db:"login_attempts"`
 	LockedUntil   *time.Time `json:"locked_until,omitempty" db:"locked_until"`
 	CreatedAt     time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at" db:"updated_at"`
+	EmailVerified bool       `json:"email_verified" db:"email_verified"`
+	MFAEnabled    bool       `json:"mfa_enabled" db:"mfa_enabled"`
+	LoginAttempts int        `json:"-" db:"login_attempts"`
 }
 
 const (
@@ -53,8 +53,8 @@ type LoginResponse struct {
 	AccessToken  string   `json:"access_token"`
 	RefreshToken string   `json:"refresh_token"`
 	TokenType    string   `json:"token_type"`
-	ExpiresIn    int      `json:"expires_in"`
 	Scopes       []string `json:"scopes,omitempty"`
+	ExpiresIn    int      `json:"expires_in"`
 }
 
 // ============================================================================
@@ -69,8 +69,8 @@ type Client struct {
 	RedirectURIs []string  `json:"redirect_uris" db:"redirect_uris"`
 	GrantTypes   []string  `json:"grant_types" db:"grant_types"`
 	Scopes       []string  `json:"scopes" db:"scopes"`
-	PublicClient bool      `json:"public_client" db:"public_client"`
 	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+	PublicClient bool      `json:"public_client" db:"public_client"`
 }
 
 const (
@@ -108,11 +108,11 @@ type Token struct {
 	AccessToken  string     `json:"access_token" db:"access_token"`
 	RefreshToken string     `json:"refresh_token" db:"refresh_token"`
 	UserID       string     `json:"user_id" db:"user_id"`
-	ClientID     *string    `json:"client_id,omitempty" db:"client_id"`
 	Scopes       []string   `json:"scopes" db:"scopes"`
+	ClientID     *string    `json:"client_id,omitempty" db:"client_id"`
+	RevokedAt    *time.Time `json:"revoked_at" db:"revoked_at"`
 	ExpiresAt    time.Time  `json:"expires_at" db:"expires_at"`
 	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
-	RevokedAt    *time.Time `json:"revoked_at" db:"revoked_at"`
 }
 
 func (t *Token) GetClientID() string {
@@ -130,9 +130,9 @@ type AuthorizationCode struct {
 	Scopes              []string   `json:"scopes" db:"scopes"`
 	CodeChallenge       string     `json:"code_challenge" db:"code_challenge"`
 	CodeChallengeMethod string     `json:"code_challenge_method" db:"code_challenge_method"`
+	UsedAt              *time.Time `json:"used_at" db:"used_at"`
 	ExpiresAt           time.Time  `json:"expires_at" db:"expires_at"`
 	CreatedAt           time.Time  `json:"created_at" db:"created_at"`
-	UsedAt              *time.Time `json:"used_at" db:"used_at"`
 }
 
 // ============================================================================
