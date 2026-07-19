@@ -15,7 +15,7 @@ import (
 // Recover 捕获后续HTTP处理链中的panic并返回500响应
 func Recover(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
+		defer func() { //nolint:contextcheck // 这是 panic 恢复逻辑，r.Context() 仍可访问（panic 来自下游 handler，非 ctx 取消）
 			if recovered := recover(); recovered != nil {
 				stack := make([]byte, 64*1024)
 				stack = stack[:runtime.Stack(stack, false)]

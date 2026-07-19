@@ -184,7 +184,7 @@ func (s *AuditService) fallbackLog(ctx context.Context, log *model.AuditLog) {
 	)
 
 	// 尝试同步存储（带超时）
-	safego.Go(slog.Default(), "降级存储审计日志", func() { // #nosec G118 -- goroutine需要独立context，不能使用请求context
+	safego.Go(slog.Default(), "降级存储审计日志", func() { //nolint:contextcheck // 异步 goroutine 必须用独立 context，请求 ctx 会随请求结束而取消 // #nosec G118 -- goroutine需要独立context，不能使用请求context
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := s.store.StoreAuditLog(ctx, log); err != nil {

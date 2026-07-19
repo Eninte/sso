@@ -77,35 +77,6 @@ func (env *captchaTestEnv) simulateFailures(t *testing.T, ip string, count int) 
 	}
 }
 
-// generateCaptchaHTTP 通过HTTP请求生成验证码
-func generateCaptchaHTTP(t *testing.T, env *captchaTestEnv) *captcha.Captcha {
-	t.Helper()
-	h := handler.NewCaptchaHandler(env.captchaSvc)
-
-	req := httptest.NewRequest("GET", "/api/v1/captcha", nil)
-	w := httptest.NewRecorder()
-	h.Handle(w, req)
-
-	require.Equal(t, http.StatusOK, w.Code)
-
-	var resp map[string]interface{}
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
-
-	// 响应格式为 {message: "", data: {id, type, question, ttl}}
-	dataRaw, ok := resp["data"]
-	require.True(t, ok, "response should contain 'data' field")
-
-	dataBytes, err := json.Marshal(dataRaw)
-	require.NoError(t, err)
-
-	var c captcha.Captcha
-	err = json.Unmarshal(dataBytes, &c)
-	require.NoError(t, err)
-
-	return &c
-}
-
 // createTestAuthSvc 创建测试用AuthService
 func createTestAuthSvc() (service.AuthServiceInterface, *mock.Store) {
 	store := mock.New()

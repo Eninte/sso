@@ -118,6 +118,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (*m
 // LogoutWithAudit 用户登出（带审计日志）
 func (s *AuthService) LogoutWithAudit(ctx context.Context, accessToken string, auditCtx *AuditContext) error {
 	logger := logging.WithContext(ctx)
+	//nolint:contextcheck // ValidateAccessToken 是纯内存操作（RLock + JWT parse），不涉及 I/O，不需要 ctx
 	claims, err := s.jwtSvc.ValidateAccessToken(accessToken)
 
 	if err := s.revokeTokenWithRetry(ctx, accessToken); err != nil {

@@ -37,57 +37,6 @@ func createTestJWTService() *crypto.JWTService {
 	)
 }
 
-// redirectHTTPClient 将所有请求重定向到mock服务器的HTTP客户端
-type redirectHTTPClient struct {
-	server *httptest.Server
-}
-
-func (r *redirectHTTPClient) Do(req *http.Request) (*http.Response, error) {
-	// 重写URL到mock服务器
-	newURL := r.server.URL + req.URL.Path
-	if req.URL.RawQuery != "" {
-		newURL += "?" + req.URL.RawQuery
-	}
-	newReq, _ := http.NewRequestWithContext(req.Context(), req.Method, newURL, req.Body)
-	newReq.Header = req.Header.Clone()
-	return http.DefaultClient.Do(newReq)
-}
-
-// newMockSocialService 创建带有mock HTTP服务器的社交登录服务
-func newMockSocialService(t *testing.T, tokenResp, userInfoResp interface{}) (*service.SocialLoginService, *mock.Store) {
-	t.Helper()
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(tokenResp)
-	})
-	mux.HandleFunc("/userinfo", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(userInfoResp)
-	})
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-
-	storeInst := mock.New()
-	jwtSvc := createTestJWTService()
-
-	// 使用NewSocialLoginService创建service
-	// 然后通过设置providers的URL来使用mock服务器
-	// 由于providers未导出，我们使用redirectHTTPClient
-	// 注意：providers的TokenURL是固定的，但HTTPClient会被调用
-	// 所以我们用redirectHTTPClient重定向所有请求到mock server
-	svc := service.NewSocialLoginService(storeInst, jwtSvc, "http://localhost:9000", "g-id", "g-secret", "gh-id", "gh-secret")
-
-	// 通过替换HTTPClient来mock请求
-	// 但providers里的URL还是真实的，所以redirectHTTPClient会把
-	// 真实URL的请求重定向到mock server
-	// 这需要访问未导出的httpClient字段...
-	// 由于无法直接设置，我们只能测试公开方法
-
-	return svc, storeInst
-}
-
 // ============================================================================
 // NewSocialLoginService 测试
 // ============================================================================

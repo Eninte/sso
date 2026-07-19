@@ -234,7 +234,7 @@ func (s *AuthService) Register(ctx context.Context, req *model.RegisterRequest) 
 	}
 
 	// 5. 异步发送验证邮件（不阻塞注册响应）
-	safego.Go(slog.Default(), "发送验证邮件", func() {
+	safego.Go(slog.Default(), "发送验证邮件", func() { //nolint:contextcheck // 异步 goroutine 必须用 context.Background()，请求 ctx 会随响应结束而取消
 		// nosec G118 -- 异步邮件发送使用 context.Background() 是有意为之，
 		// 避免请求结束后 context 取消导致邮件发送中断
 		if err := s.sendVerificationEmail(context.Background(), user); err != nil {

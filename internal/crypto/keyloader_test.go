@@ -298,19 +298,6 @@ func TestLoadPublicKeyFromFile_PermissionTooOpen(t *testing.T) {
 }
 
 // ============================================================================
-// 辅助函数
-// ============================================================================
-
-// generateECDSAKey 生成ECDSA密钥用于测试密钥类型验证
-func generateECDSAKey() ([]byte, error) {
-	// 这里简化处理，返回一个无效的密钥类型
-	return pem.EncodeToMemory(&pem.Block{
-		Type:  "EC PRIVATE KEY",
-		Bytes: []byte("not an ecdsa key"),
-	}), nil
-}
-
-// ============================================================================
 // ParsePublicKey 测试
 // ============================================================================
 
