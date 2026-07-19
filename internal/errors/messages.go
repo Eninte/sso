@@ -23,8 +23,8 @@ var localeFiles embed.FS
 
 // messageManager 消息管理器
 type messageManager struct {
-	mu       sync.RWMutex
 	messages map[string]map[ErrorCode]string // lang -> ErrorCode -> message
+	mu       sync.RWMutex
 }
 
 // globalMessageManager 全局消息管理器

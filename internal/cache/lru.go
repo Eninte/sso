@@ -15,17 +15,17 @@ import (
 
 // LRUCache 基于内存的LRU缓存实现
 type LRUCache struct {
-	mu        sync.RWMutex
-	capacity  int
 	cache     map[string]*list.Element
 	evictList *list.List
+	mu        sync.RWMutex
+	capacity  int
 }
 
 // cacheEntry 缓存条目
 type cacheEntry struct {
-	key       string
 	value     interface{}
 	expiresAt time.Time
+	key       string
 }
 
 // NewLRUCache 创建LRU缓存

@@ -170,7 +170,7 @@ func (ih *IsolationHelper) WithRedisNamespace(ctx context.Context, namespace str
 	cleanupErr := nsClient.CleanupNamespace(ctx)
 	if cleanupErr != nil {
 		if err != nil {
-			return fmt.Errorf("function error: %w; cleanup error: %v", err, cleanupErr)
+			return fmt.Errorf("function error: %w; cleanup error: %w", err, cleanupErr)
 		}
 		return fmt.Errorf("cleanup error: %w", cleanupErr)
 	}

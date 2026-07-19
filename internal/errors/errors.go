@@ -121,11 +121,11 @@ const (
 
 // AppError 应用错误
 type AppError struct {
-	Code       ErrorCode `json:"code"`              // 错误码
+	Err        error     `json:"-"`                 // 原始错误
 	Message    string    `json:"message"`           // 错误消息
 	Details    string    `json:"details,omitempty"` // 详细信息
+	Code       ErrorCode `json:"code"`              // 错误码
 	HTTPStatus int       `json:"-"`                 // HTTP状态码
-	Err        error     `json:"-"`                 // 原始错误
 }
 
 // Error 实现error接口

@@ -129,7 +129,7 @@ func parseRSAKey(data []byte, parsers map[string]func([]byte) (interface{}, erro
 
 	key, err := parser(block.Bytes)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrKeyParseFailed, err)
+		return nil, fmt.Errorf("%w: %w", ErrKeyParseFailed, err)
 	}
 
 	// 验证密钥大小（最小256字节 = 2048位）

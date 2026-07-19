@@ -5,6 +5,7 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -459,7 +460,7 @@ func (c *RedisCache) Ping(ctx context.Context) error {
 func (c *RedisCache) Get(ctx context.Context, key string, dest interface{}) error {
 	val, err := c.client.Get(ctx, key).Bytes()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			if c.onCacheMiss != nil {
 				c.onCacheMiss()
 			}

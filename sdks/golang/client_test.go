@@ -4,6 +4,7 @@ package sdk_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -91,8 +92,8 @@ func TestClient_Register_EmailExists(t *testing.T) {
 	_, err := client.Register(context.Background(), "exist@example.com", "P@ssw0rd1")
 
 	require.Error(t, err)
-	ssoErr, ok := err.(*sdk.Error)
-	require.True(t, ok)
+	var ssoErr *sdk.Error
+	require.True(t, errors.As(err, &ssoErr))
 	assert.True(t, ssoErr.IsConflict())
 	// error 字段为消息文本，code 应为空
 	assert.Equal(t, "邮箱已存在", ssoErr.Message)
@@ -141,8 +142,8 @@ func TestClient_Login_InvalidCredentials(t *testing.T) {
 	_, err := client.Login(context.Background(), "test@example.com", "wrong")
 
 	require.Error(t, err)
-	ssoErr, ok := err.(*sdk.Error)
-	require.True(t, ok)
+	var ssoErr *sdk.Error
+	require.True(t, errors.As(err, &ssoErr))
 	assert.True(t, ssoErr.IsUnauthorized())
 }
 

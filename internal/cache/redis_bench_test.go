@@ -3,6 +3,7 @@ package cache_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -44,7 +45,7 @@ func BenchmarkMemoryCache_Get(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		key := fmt.Sprintf("key-%d", i%1000)
 		var result string
-		if err := c.Get(ctx, key, &result); err != nil && err != cache.ErrCacheMiss {
+		if err := c.Get(ctx, key, &result); err != nil && !errors.Is(err, cache.ErrCacheMiss) {
 			b.Fatal(err)
 		}
 	}
