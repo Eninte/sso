@@ -510,8 +510,10 @@ func TestUser_DBTags(t *testing.T) {
 
 		assert.Equal(t, "1", user.ID)
 		assert.Equal(t, "test@example.com", user.Email)
+		assert.Equal(t, "hash", user.PasswordHash)
 		assert.True(t, user.EmailVerified)
 		assert.False(t, user.MFAEnabled)
+		assert.Equal(t, "", user.MFASecret)
 		assert.Equal(t, "user", user.Role)
 		assert.Equal(t, "active", user.Status)
 		assert.Equal(t, 0, user.LoginAttempts)
