@@ -55,14 +55,14 @@ func (r *EmailRateLimiter) CheckLimit(ctx context.Context, email string) (bool, 
 	count, err := r.cache.Increment(ctx, key)
 	if err != nil {
 		// 缓存错误不应阻止邮件发送
-		return true, EmailRateLimitMax, nil
+		return true, EmailRateLimitMax, nil //nolint:nilerr // 限流降级：缓存故障时放行，避免影响核心邮件流程
 	}
 
 	// 如果是第一次计数，设置过期时间
 	if count == 1 {
 		if err := r.cache.SetTTL(ctx, key, EmailRateLimitWindow); err != nil {
 			// TTL设置失败，记录但不阻止
-			return true, EmailRateLimitMax - 1, nil
+			return true, EmailRateLimitMax - 1, nil //nolint:nilerr // TTL失败不阻断，计数已递增故剩余次数 -1
 		}
 	}
 
@@ -91,7 +91,7 @@ func (r *EmailRateLimiter) GetRemaining(ctx context.Context, email string) (int,
 	err := r.cache.Get(ctx, key, &count)
 	if err != nil {
 		// 键不存在或其他错误，返回最大值
-		return EmailRateLimitMax, nil
+		return EmailRateLimitMax, nil //nolint:nilerr // 键不存在视为未限流，返回最大剩余次数
 	}
 
 	remaining := EmailRateLimitMax - count

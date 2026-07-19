@@ -61,13 +61,13 @@ func (r *LoginRateLimiter) CheckAndRecord(ctx context.Context, clientIP string) 
 	count, err := r.cache.Increment(ctx, key)
 	if err != nil {
 		// 缓存错误不应阻止登录
-		return true, r.limit, nil
+		return true, r.limit, nil //nolint:nilerr // 限流降级：缓存故障时放行，避免影响核心登录流程
 	}
 
 	// 首次计数，设置过期时间
 	if count == 1 {
 		if err := r.cache.SetTTL(ctx, key, r.window); err != nil {
-			return true, r.limit - 1, nil
+			return true, r.limit - 1, nil //nolint:nilerr // TTL失败不阻断，计数已递增故剩余次数 -1
 		}
 	}
 

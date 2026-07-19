@@ -70,6 +70,13 @@ linters-settings:
     locale: US
   govet:
     enable-all: true
+    disable:
+      # fieldalignment 仅优化结构体内存布局（pointer bytes），非正确性问题
+      # 强制启用会破坏字段逻辑分组（按类型而非语义排序），且每次新增字段都需重排，维护成本高
+      - fieldalignment
+      # shadow 对 if err := ...; err != nil 模式大量误报
+      # 项目用 := 局部作用域是有意为之，shadow 检查收益低于噪音成本
+      - shadow
   revive:
     rules:
       - name: blank-imports

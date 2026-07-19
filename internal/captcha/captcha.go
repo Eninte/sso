@@ -170,7 +170,7 @@ func (s *Service) Verify(ctx context.Context, id, answer string) (bool, error) {
 	var data captchaData
 	if err := s.cache.Get(ctx, cacheKey, &data); err != nil {
 		// 缓存未命中 = 验证码不存在或已过期
-		return false, nil
+		return false, nil //nolint:nilerr // 缓存未命中是业务常态（验证码过期），不应作为错误上抛
 	}
 
 	// 检查尝试次数

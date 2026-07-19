@@ -101,7 +101,8 @@ func AuthMiddlewareWithMetrics(jwtSvc *crypto.JWTService, store store.Store, cac
 			return revoked
 		}
 
-		if err != nil && !errors.Is(err, cache.ErrCacheMiss) {
+		// 此处 err 必然非 nil（上面 err == nil 时已 return）
+		if !errors.Is(err, cache.ErrCacheMiss) {
 			tokenPreview := token
 			if len(token) > 8 {
 				tokenPreview = token[:8] + "..."
