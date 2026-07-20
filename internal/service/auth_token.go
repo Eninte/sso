@@ -3,11 +3,15 @@ package service
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	"github.com/example/sso/internal/cache"
 	"github.com/example/sso/internal/crypto"
+	apperrors "github.com/example/sso/internal/errors"
 	"github.com/example/sso/internal/logging"
 	"github.com/example/sso/internal/model"
+	"github.com/example/sso/internal/store"
 	"github.com/example/sso/internal/util/auditutil"
 	"github.com/example/sso/internal/util/retryutil"
 	"github.com/example/sso/internal/util/serviceutil"
@@ -39,10 +43,78 @@ func (s *AuthService) revokeTokenWithRetry(ctx context.Context, accessToken stri
 	}, config)
 }
 
-// RefreshToken 刷新Token
-func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken string, auditCtx *AuditContext) (*model.LoginResponse, error) {
+// handleRefreshTokenReplay 处理 Refresh Token 重放攻击
+//
+// 触发场景：
+//   - RotateRefreshToken 返回 ErrTokenRotated（旧 token 已被轮换/撤销）
+//   - 即同一个 refresh token 被第二次提交
+//
+// 防御措施（fail-secure）：
+//  1. 记录 CriticalAuditLog 标记可疑活动
+//  2. 撤销该用户的全部 token（防止攻击者已获取的新 token 继续使用）
+//  3. 返回 ErrTokenRotated 提示用户重新登录
+//
+// 注意：即使撤销全部失败也返回错误，安全优先于可用性
+func (s *AuthService) handleRefreshTokenReplay(ctx context.Context, userID, refreshToken string, auditCtx *AuditContext) error {
+	logger := logging.WithContext(ctx)
+	logger.Error("检测到 Refresh Token 重放攻击，撤销用户全部 Token",
+		"user_id", userID,
+		"refresh_token_length", len(refreshToken),
+	)
+
+	// 记录关键审计日志（同步返回错误）
+	ipAddress := ""
+	if auditCtx != nil {
+		ipAddress = auditCtx.IPAddress
+	}
+	auditutil.CriticalAuditLog(ctx, s.auditSvc, string(model.EventSuspiciousActivity), userID, map[string]interface{}{
+		"reason":           "refresh_token_replay",
+		"client_id":        "",
+		"ip_address":       ipAddress,
+		"refresh_token_len": len(refreshToken),
+	})
+
+	// 撤销该用户的全部 token（失败也返回错误，但优先记录日志）
+	if err := s.store.RevokeAllUserTokens(ctx, userID); err != nil {
+		logger.Error("重放攻击下撤销全部 Token 失败",
+			"error", err,
+			"user_id", userID,
+		)
+		return serviceutil.WrapServiceError("撤销全部Token", err)
+	}
+
+	return apperrors.ErrTokenRotated
+}
+
+// RefreshTokenWithAudit 原子地轮换 Refresh Token
+//
+// 流程（阶段 2.1 安全增强 + 阶段 2.2 客户端归属校验）：
+//  1. 获取旧 token 记录；不存在/DB 错误 → ErrInvalidToken（不暴露具体原因）
+//  2. 检查 refresh_expires_at：已过期 → ErrInvalidToken
+//  3. 检查旧 token revoked_at：已撤销 → 视为重放，调用 handleRefreshTokenReplay
+//  4. 阶段 2.2: 校验客户端归属 — 若 tokenRecord.ClientID 不为空且 clientID 与之不一致
+//     则返回 ErrClientMismatch（RFC 6749 §10.4 防御 token 替换攻击）
+//  5. 获取用户、检查状态（禁用/锁定）
+//  6. 生成新 token 记录（含 RefreshExpiresAt）
+//  7. 调用 store.RotateRefreshToken 原子轮换（事务内 UPDATE+INSERT）
+//     - 若返回 ErrTokenRotated（已被并发轮换）→ handleRefreshTokenReplay
+//  8. 清除旧 token 缓存
+//  9. 记录审计日志，返回新 token
+//
+// 安全设计：
+//   - 原子性：UPDATE+INSERT 在同一事务内，避免 TOCTOU 竞态
+//   - 一次性：WHERE rotated_at IS NULL 保证只能轮换一次
+//   - 重放检测：RowsAffected==0 时视为被盗用，撤销全部 token
+//   - 客户端归属：拒绝跨客户端使用 refresh token
+//
+// 参数：
+//   - clientID: 调用方传入的客户端 ID；空字符串表示不校验（向后兼容登录流程）
+//     OAuth token 流程必须传 clientID
+func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken, clientID string, auditCtx *AuditContext) (*model.LoginResponse, error) {
 	logger := logging.WithContext(ctx)
 	logger.Debug("RefreshToken: 开始刷新Token", "refresh_token_length", len(refreshToken))
+
+	// 1. 获取旧 token 记录
 	tokenRecord, err := s.store.GetTokenByRefreshToken(ctx, refreshToken)
 	if err != nil {
 		logger.Error("RefreshToken: 查询Token失败", "error", err, "refresh_token_length", len(refreshToken))
@@ -51,11 +123,57 @@ func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken st
 	}
 	logger.Debug("RefreshToken: 查询到Token", "token_id", tokenRecord.ID, "user_id", tokenRecord.UserID)
 
-	if tokenRecord.RevokedAt != nil {
-		logger.Warn("RefreshToken: Token已撤销", "token_id", tokenRecord.ID, "revoked_at", tokenRecord.RevokedAt)
+	// 2. 检查 refresh token 独立过期时间
+	// 兼容旧数据：RefreshExpiresAt 为 nil 时回退到 ExpiresAt
+	refreshExpiry := tokenRecord.RefreshExpiresAt
+	if refreshExpiry == nil {
+		refreshExpiry = &tokenRecord.ExpiresAt
+	}
+	if refreshExpiry.Before(time.Now()) {
+		logger.Warn("RefreshToken: Refresh Token 已过期",
+			"token_id", tokenRecord.ID,
+			"refresh_expires_at", refreshExpiry,
+		)
 		return nil, ErrInvalidToken
 	}
 
+	// 3. 检查旧 token 是否已撤销
+	// 已撤销的 token 再次出现 = 重放攻击特征
+	if tokenRecord.RevokedAt != nil {
+		logger.Warn("RefreshToken: Token 已撤销，触发重放防御",
+			"token_id", tokenRecord.ID,
+			"revoked_at", tokenRecord.RevokedAt,
+		)
+		return nil, s.handleRefreshTokenReplay(ctx, tokenRecord.UserID, refreshToken, auditCtx)
+	}
+
+	// 4. 阶段 2.2: 校验客户端归属
+	// 若 token 由 OAuth 流程签发（ClientID 不为 nil），则调用方必须传相同的 clientID
+	// 防御 token 替换攻击：攻击者无法用自己客户端的凭据刷新其他客户端签发的 token
+	if tokenRecord.ClientID != nil && *tokenRecord.ClientID != "" {
+		if clientID == "" {
+			logger.Warn("RefreshToken: OAuth签发的Token未传client_id",
+				"token_id", tokenRecord.ID,
+				"token_client_id", *tokenRecord.ClientID,
+			)
+			return nil, ErrClientMismatch
+		}
+		if *tokenRecord.ClientID != clientID {
+			logger.Warn("RefreshToken: client_id与Token归属不一致",
+				"token_id", tokenRecord.ID,
+				"token_client_id", *tokenRecord.ClientID,
+				"request_client_id", clientID,
+			)
+			auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventSuspiciousActivity), tokenRecord.UserID, map[string]interface{}{
+				"reason":            "refresh_token_client_mismatch",
+				"token_client_id":   *tokenRecord.ClientID,
+				"request_client_id": clientID,
+			})
+			return nil, ErrClientMismatch
+		}
+	}
+
+	// 5. 获取用户、检查状态
 	user, err := s.store.GetByID(ctx, tokenRecord.UserID)
 	if err != nil {
 		logger.Error("RefreshToken: 查询用户失败", "error", err, "user_id", tokenRecord.UserID)
@@ -63,7 +181,6 @@ func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken st
 	}
 	logger.Debug("RefreshToken: 查询到用户", "user_id", user.ID, "email", user.Email)
 
-	// 检查用户状态（被禁用/锁定的用户不能刷新Token）
 	if user.Status == model.UserStatusDisabled {
 		logger.Warn("RefreshToken: 用户已被禁用", "user_id", user.ID)
 		return nil, ErrAccountDisabled
@@ -73,30 +190,50 @@ func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken st
 		return nil, ErrAccountLocked
 	}
 
-	// 先撤销旧 Token，成功后再生成新 Token
-	// 这确保旧 Refresh Token 不会被重复使用换取新 Token
-	// 注意：如果撤销成功但新 Token 生成失败，用户需重新登录（安全优先于可用性）
-	if revokeErr := s.revokeTokenWithRetry(ctx, tokenRecord.AccessToken); revokeErr != nil {
-		logger.Error("撤销旧Token失败，拒绝刷新以防止Token重用",
-			"error", revokeErr,
-			"user_id", tokenRecord.UserID,
-			"token_id", tokenRecord.ID,
-		)
-		return nil, serviceutil.WrapServiceError("撤销旧Token", revokeErr)
-	}
-
-	resp, err := s.generateTokenPair(ctx, user.ID, user.Email, user.Role, tokenRecord.Scopes, tokenRecord.ClientID)
+	// 6. 生成新 token 记录（不写入存储）
+	newToken, resp, err := s.tokenSvc.GenerateTokenRecord(
+		ctx, user.ID, user.Email, user.Role, tokenRecord.Scopes, tokenRecord.ClientID,
+	)
 	if err != nil {
-		// 旧 Token 已撤销，新 Token 生成失败，用户需重新登录
-		logger.Error("旧Token已撤销但新Token生成失败，用户需重新登录",
+		logger.Error("RefreshToken: 生成新Token失败",
 			"error", err,
 			"user_id", user.ID,
 		)
 		return nil, err
 	}
 
+	// 7. 原子轮换：事务内标记旧 token 已轮换 + 插入新 token
+	if err := s.store.RotateRefreshToken(ctx, refreshToken, newToken); err != nil {
+		if errors.Is(err, store.ErrTokenRotated) {
+			// 并发重放或重放攻击：旧 token 已被轮换/撤销
+			logger.Warn("RefreshToken: 检测到 Token 已被轮换（重放攻击或并发请求）",
+				"token_id", tokenRecord.ID,
+				"user_id", user.ID,
+			)
+			return nil, s.handleRefreshTokenReplay(ctx, user.ID, refreshToken, auditCtx)
+		}
+		logger.Error("RefreshToken: 原子轮换失败",
+			"error", err,
+			"token_id", tokenRecord.ID,
+			"user_id", user.ID,
+		)
+		return nil, serviceutil.WrapServiceError("轮换RefreshToken", err)
+	}
+
+	// 8. 清除旧 token 缓存（失败不影响主流程）
+	if s.cache != nil {
+		cacheKey := cache.TokenKey(tokenRecord.AccessToken)
+		if err := s.cache.Delete(ctx, cacheKey); err != nil {
+			logger.Warn("清除旧Token缓存失败",
+				"error", err,
+				"token_prefix", maskToken(tokenRecord.AccessToken),
+			)
+		}
+	}
+
 	s.incrementMetric("auth_token_refresh_total")
 
+	// 9. 记录审计日志
 	if auditCtx != nil {
 		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventTokenRefresh), user.ID, map[string]interface{}{
 			"client_id":  tokenRecord.GetClientID(),
@@ -107,8 +244,16 @@ func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken st
 	return resp, nil
 }
 
+// RefreshToken 兼容旧接口：刷新 Token（不校验 clientID）
+// 保留用于登录流程签发的 token（ClientID 为 nil）刷新
 func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (*model.LoginResponse, error) {
-	return s.RefreshTokenWithAudit(ctx, refreshToken, nil)
+	return s.RefreshTokenWithAudit(ctx, refreshToken, "", nil)
+}
+
+// RefreshTokenWithClientID 携带 clientID 刷新 Token（阶段 2.2）
+// 用于 OAuth 流程签发的 token 刷新，校验 clientID 与 token 归属一致
+func (s *AuthService) RefreshTokenWithClientID(ctx context.Context, refreshToken, clientID string) (*model.LoginResponse, error) {
+	return s.RefreshTokenWithAudit(ctx, refreshToken, clientID, nil)
 }
 
 // ============================================================================

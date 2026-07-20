@@ -109,6 +109,7 @@ func (s *AuthService) handleLoginFailure(ctx context.Context, user *model.User, 
 }
 
 // handleLoginSuccess 处理登录成功：并行重置失败次数与审计日志，同步生成 token 对
+// 安全设计：若用户启用 MFA，则不直接签发 Token，而是生成一次性 MFA Challenge 返回
 func (s *AuthService) handleLoginSuccess(ctx context.Context, user *model.User, auditCtx *AuditContext) (*model.LoginResponse, error) {
 	// 并行执行：重置登录尝试 + 审计日志
 	var wg sync.WaitGroup
@@ -124,15 +125,16 @@ func (s *AuthService) handleLoginSuccess(ctx context.Context, user *model.User, 
 		}
 	})
 
-	// 异步记录审计日志
+	// 异步记录审计日志（第一阶段密码验证成功事件）
 	wg.Add(1)
 	safego.Go(logging.WithContext(bgCtx).With("component", "auth"), "登录审计日志", func() {
 		defer wg.Done()
 		if auditCtx != nil {
 			auditutil.SafeAuditLog(bgCtx, s.auditSvc, string(model.EventUserLogin), user.ID, map[string]interface{}{
-				"email":      user.Email,
-				"ip_address": auditCtx.IPAddress,
-				"user_agent": auditCtx.UserAgent,
+				"email":       user.Email,
+				"ip_address":  auditCtx.IPAddress,
+				"user_agent":  auditCtx.UserAgent,
+				"mfa_required": user.MFAEnabled,
 			})
 		}
 	})
@@ -140,7 +142,14 @@ func (s *AuthService) handleLoginSuccess(ctx context.Context, user *model.User, 
 	// 记录登录成功指标（轻量操作，无需异步）
 	s.incrementMetric("auth_login_total")
 
-	// 生成token对（必须等待，依赖用户信息）
+	// 两阶段登录检查：若用户启用 MFA，则生成 Challenge 而非直接签发 Token
+	if user.MFAEnabled {
+		resp, err := s.handleMFARequiredLogin(ctx, user, auditCtx)
+		wg.Wait()
+		return resp, err
+	}
+
+	// 未启用 MFA，直接签发 Token（保持向后兼容）
 	resp, err := s.generateTokenPair(ctx, user.ID, user.Email, user.Role, []string{"openid", "profile", "email"}, nil)
 
 	// 等待异步操作完成

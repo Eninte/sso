@@ -4,9 +4,6 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"time"
@@ -130,6 +127,11 @@ func (s *OAuthService) getClient(ctx context.Context, clientID string) (*model.C
 // ============================================================================
 
 // CreateAuthorizationCode 创建授权码
+//
+// 阶段 2.2 安全增强：
+//   - 强制 scope 校验（防升级）：请求 scope 必须是 client.Scopes 子集且在白名单内
+//   - 强制 PKCE 校验：公共客户端必须使用 PKCE 且 method=S256，禁用 plain
+//   - 校验 grant_type：客户端必须注册了 authorization_code
 func (s *OAuthService) CreateAuthorizationCode(
 	ctx context.Context,
 	clientID string,
@@ -159,10 +161,23 @@ func (s *OAuthService) CreateAuthorizationCode(
 		return "", ErrInvalidGrantType
 	}
 
-	if codeChallenge != "" {
-		if codeChallengeMethod != "S256" && codeChallengeMethod != "plain" {
-			return "", ErrInvalidCodeChallenge
-		}
+	// 阶段 2.2: 强制 scope 校验（防升级）
+	validScopes, err := s.ValidateScope(ctx, client, scopes)
+	if err != nil {
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventAuthCodeInvalid), userID, map[string]interface{}{
+			"client_id": clientID,
+			"reason":     "invalid_scope",
+		})
+		return "", err
+	}
+
+	// 阶段 2.2: 强制 PKCE 校验
+	if err := s.ValidatePKCEChallenge(ctx, client, codeChallenge, codeChallengeMethod); err != nil {
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventAuthCodeInvalid), userID, map[string]interface{}{
+			"client_id": clientID,
+			"reason":     "pkce_required",
+		})
+		return "", err
 	}
 
 	code, err := common.GenerateRandomString(32)
@@ -175,7 +190,7 @@ func (s *OAuthService) CreateAuthorizationCode(
 		ClientID:            clientID,
 		UserID:              userID,
 		RedirectURI:         redirectURI,
-		Scopes:              scopes,
+		Scopes:              validScopes,
 		CodeChallenge:       codeChallenge,
 		CodeChallengeMethod: codeChallengeMethod,
 		ExpiresAt:           time.Now().Add(10 * time.Minute),
@@ -189,6 +204,114 @@ func (s *OAuthService) CreateAuthorizationCode(
 	// 使用统一的审计日志工具记录授权码创建事件
 	auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventAuthCodeCreated), userID, map[string]interface{}{
 		"client_id": clientID,
+	})
+
+	return code, nil
+}
+
+// CreateAuthorizationCodeWithConsent 基于 consent_token 创建授权码（阶段 2.2）
+//
+// 流程：
+//  1. 校验 consent_token 的签名、过期、issuer
+//  2. 校验 consent_token 中的 user_id 必须等于当前登录用户
+//  3. 获取客户端，校验 redirect_uri 与 grant_type
+//  4. 深度防御：再次校验 scope（防篡改）与 PKCE（防绕过）
+//  5. 生成授权码并存储
+//
+// 安全设计：
+//   - consent_token 由 GET /authorize 签发，POST /authorize/approve 回传
+//   - 中间用户/客户端无法篡改 token 内容（RS256 签名）
+//   - state 在 consent_token 中传递，防止 GET 与 POST 之间被替换
+func (s *OAuthService) CreateAuthorizationCodeWithConsent(
+	ctx context.Context,
+	userID string,
+	consentToken string,
+) (string, error) {
+	// 1. 校验 consent_token
+	claims, err := s.VerifyConsentToken(ctx, consentToken)
+	if err != nil {
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventAuthCodeInvalid), userID, map[string]interface{}{
+			"reason": "consent_token_invalid",
+		})
+		return "", err
+	}
+
+	// 2. 校验 consent_token 中的 user_id 必须等于当前登录用户
+	if claims.UserID != userID {
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventAuthCodeInvalid), userID, map[string]interface{}{
+			"client_id": claims.ClientID,
+			"reason":    "consent_user_mismatch",
+		})
+		return "", ErrConsentInvalid
+	}
+
+	// 3. 获取客户端
+	client, err := s.getClient(ctx, claims.ClientID)
+	if err != nil {
+		return "", ErrInvalidClient
+	}
+
+	// 4. 校验 redirect_uri
+	if !s.store.ValidateRedirectURI(ctx, claims.ClientID, claims.RedirectURI) {
+		return "", ErrInvalidRedirectURI
+	}
+
+	// 5. 校验 grant_type
+	hasAuthCodeGrant := false
+	for _, grant := range client.GrantTypes {
+		if grant == model.GrantTypeAuthorizationCode {
+			hasAuthCodeGrant = true
+			break
+		}
+	}
+	if !hasAuthCodeGrant {
+		return "", ErrInvalidGrantType
+	}
+
+	// 6. 深度防御：再次校验 scope（防篡改）
+	validScopes, err := s.ValidateScope(ctx, client, claims.Scopes)
+	if err != nil {
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventAuthCodeInvalid), userID, map[string]interface{}{
+			"client_id": claims.ClientID,
+			"reason":    "invalid_scope_in_consent",
+		})
+		return "", err
+	}
+
+	// 7. 深度防御：再次校验 PKCE
+	if err := s.ValidatePKCEChallenge(ctx, client, claims.CodeChallenge, claims.CodeChallengeMethod); err != nil {
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventAuthCodeInvalid), userID, map[string]interface{}{
+			"client_id": claims.ClientID,
+			"reason":    "pkce_invalid_in_consent",
+		})
+		return "", err
+	}
+
+	// 8. 生成授权码
+	code, err := common.GenerateRandomString(32)
+	if err != nil {
+		return "", serviceutil.WrapServiceError("生成授权码", err)
+	}
+
+	authCode := &model.AuthorizationCode{
+		Code:                code,
+		ClientID:            claims.ClientID,
+		UserID:              userID,
+		RedirectURI:         claims.RedirectURI,
+		Scopes:              validScopes,
+		CodeChallenge:       claims.CodeChallenge,
+		CodeChallengeMethod: claims.CodeChallengeMethod,
+		ExpiresAt:           time.Now().Add(10 * time.Minute),
+		CreatedAt:           time.Now(),
+	}
+
+	if err := s.store.StoreAuthorizationCode(ctx, authCode); err != nil {
+		return "", serviceutil.WrapServiceError("存储授权码", err)
+	}
+
+	auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventAuthCodeCreated), userID, map[string]interface{}{
+		"client_id": claims.ClientID,
+		"consent":   true,
 	})
 
 	return code, nil
@@ -290,7 +413,7 @@ func (s *OAuthService) validateClientSecret(
 	return nil
 }
 
-// validatePKCE 验证PKCE码验证器
+// validatePKCE 验证PKCE码验证器（阶段 2.2 安全增强：强制 S256，禁用 plain）
 func (s *OAuthService) validatePKCE(
 	ctx context.Context,
 	authCode *model.AuthorizationCode,
@@ -298,9 +421,11 @@ func (s *OAuthService) validatePKCE(
 	codeVerifier string,
 ) error {
 	if authCode.CodeChallenge != "" {
-		if err := verifyPKCE(authCode.CodeChallenge, authCode.CodeChallengeMethod, codeVerifier); err != nil {
+		// 使用 VerifyPKCEWithMethod 强制 S256，禁用 plain 方法
+		if err := VerifyPKCEWithMethod(authCode.CodeChallenge, authCode.CodeChallengeMethod, codeVerifier); err != nil {
 			s.logAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "pkce_verification_failed")
-			return ErrInvalidCodeVerifier
+			// 直接返回错误以区分 ErrInvalidCodeChallenge（method 非法）与 ErrInvalidCodeVerifier（verifier 不匹配）
+			return err
 		}
 	}
 	return nil
@@ -377,28 +502,8 @@ func (s *OAuthService) RevokeToken(ctx context.Context, token string) error {
 // 辅助函数
 // ============================================================================
 
-func verifyPKCE(challenge, method, verifier string) error {
-	if method == "plain" {
-		if challenge != verifier {
-			return ErrInvalidCodeVerifier
-		}
-		return nil
-	}
-
-	if method == "S256" {
-		h := sha256.New()
-		h.Write([]byte(verifier))
-		hash := h.Sum(nil)
-		expected := base64.RawURLEncoding.EncodeToString(hash)
-
-		if subtle.ConstantTimeCompare([]byte(challenge), []byte(expected)) != 1 {
-			return ErrInvalidCodeVerifier
-		}
-		return nil
-	}
-
-	return ErrInvalidCodeChallenge
-}
+// 注：旧的 verifyPKCE 函数已被 VerifyPKCEWithMethod 替代
+// VerifyPKCEWithMethod 在 oauth_security.go 中实现，强制 S256，禁用 plain 方法
 
 // GetAccessTokenTTL 获取访问令牌的有效期
 func (s *OAuthService) GetAccessTokenTTL() time.Duration {

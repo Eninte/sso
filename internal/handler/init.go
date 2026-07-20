@@ -25,30 +25,40 @@ var initTmpl = template.Must(template.New("init").Parse(initHTMLTemplate))
 // InitHandler 初始化面板handler
 // 服务正常运行后使用，提供系统状态查看、管理员创建、OAuth客户端创建
 type InitHandler struct {
-	initSvc   service.InitServiceInterface
-	cache     cache.Cache
-	auditSvc  auditutil.AuditService
-	store     store.Store
-	version   string
-	buildTime string
+	initSvc     service.InitServiceInterface
+	cache       cache.Cache
+	auditSvc    auditutil.AuditService
+	store       store.Store
+	version     string
+	buildTime   string
+	initEnabled bool // 是否启用初始化面板（INIT_ENABLED），false 时所有接口返回 404
 }
 
 // NewInitHandler 创建初始化面板handler
-func NewInitHandler(store store.Store, passwordSvc *crypto.PasswordService, cache cache.Cache, auditSvc auditutil.AuditService, version, buildTime string) *InitHandler {
+// initEnabled 为 false 时所有接口返回 404，提供第三层防御
+// （前两层：loopback 监听 + isLocalRequest 检查）
+func NewInitHandler(store store.Store, passwordSvc *crypto.PasswordService, cache cache.Cache, auditSvc auditutil.AuditService, version, buildTime string, initEnabled bool) *InitHandler {
 	return &InitHandler{
-		initSvc:   service.NewInitService(store, passwordSvc, auditSvc),
-		cache:     cache,
-		auditSvc:  auditSvc,
-		store:     store,
-		version:   version,
-		buildTime: buildTime,
+		initSvc:     service.NewInitService(store, passwordSvc, auditSvc),
+		cache:       cache,
+		auditSvc:    auditSvc,
+		store:       store,
+		version:     version,
+		buildTime:   buildTime,
+		initEnabled: initEnabled,
 	}
 }
 
 // HandleInitPage 渲染初始化面板页面
 // 安全限制：仅允许本地访问（127.0.0.1, ::1, localhost）
 func (h *InitHandler) HandleInitPage(w http.ResponseWriter, r *http.Request) {
-	// 检查是否为本地访问
+	// 第三层防御：INIT_ENABLED=false 时所有接口返回 404
+	if !h.initEnabled {
+		handlerutil.WriteJSONError(w, apperrors.ErrNotFound)
+		return
+	}
+
+	// 第二层防御：检查请求来源是否为本机（防御 loopback 上的转发）
 	if !isLocalRequest(r) {
 		handlerutil.WriteJSONError(w, apperrors.ErrForbidden.WithDetails("初始化面板仅允许本地访问"))
 		return
@@ -76,7 +86,13 @@ func (h *InitHandler) HandleInitPage(w http.ResponseWriter, r *http.Request) {
 // HandleSystemStatus 返回系统状态JSON
 // 安全限制：仅允许本地访问（127.0.0.1, ::1, localhost）
 func (h *InitHandler) HandleSystemStatus(w http.ResponseWriter, r *http.Request) {
-	// 检查是否为本地访问
+	// 第三层防御：INIT_ENABLED=false 时所有接口返回 404
+	if !h.initEnabled {
+		handlerutil.WriteJSONError(w, apperrors.ErrNotFound)
+		return
+	}
+
+	// 第二层防御：检查请求来源是否为本机
 	if !isLocalRequest(r) {
 		handlerutil.WriteJSONError(w, apperrors.ErrForbidden.WithDetails("初始化面板仅允许本地访问"))
 		return
@@ -119,7 +135,13 @@ func (h *InitHandler) HandleSystemStatus(w http.ResponseWriter, r *http.Request)
 // HandleCreateAdmin 创建管理员账户
 // 安全限制：仅允许本地访问（127.0.0.1, ::1, localhost）
 func (h *InitHandler) HandleCreateAdmin(w http.ResponseWriter, r *http.Request) {
-	// 检查是否为本地访问
+	// 第三层防御：INIT_ENABLED=false 时所有接口返回 404
+	if !h.initEnabled {
+		handlerutil.WriteJSONError(w, apperrors.ErrNotFound)
+		return
+	}
+
+	// 第二层防御：检查请求来源是否为本机
 	if !isLocalRequest(r) {
 		handlerutil.WriteJSONError(w, apperrors.ErrForbidden.WithDetails("初始化面板仅允许本地访问"))
 		return
@@ -157,7 +179,13 @@ func (h *InitHandler) HandleCreateAdmin(w http.ResponseWriter, r *http.Request) 
 // HandleCreateClient 创建默认OAuth客户端
 // 安全限制：仅允许本地访问（127.0.0.1, ::1, localhost）
 func (h *InitHandler) HandleCreateClient(w http.ResponseWriter, r *http.Request) {
-	// 检查是否为本地访问
+	// 第三层防御：INIT_ENABLED=false 时所有接口返回 404
+	if !h.initEnabled {
+		handlerutil.WriteJSONError(w, apperrors.ErrNotFound)
+		return
+	}
+
+	// 第二层防御：检查请求来源是否为本机
 	if !isLocalRequest(r) {
 		handlerutil.WriteJSONError(w, apperrors.ErrForbidden.WithDetails("初始化面板仅允许本地访问"))
 		return

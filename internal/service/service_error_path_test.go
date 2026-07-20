@@ -235,20 +235,28 @@ func TestMFAService_GetMFAStatus_ErrorPaths(t *testing.T) {
 func TestAuthService_RefreshToken_ComprehensiveErrorPaths(t *testing.T) {
 	ctx := context.Background()
 
-	// ==== 测试1: Token已被撤销 ====
-	// 验证: 需求 8.6
-	t.Run("Token已被撤销", func(t *testing.T) {
+	// ==== 测试1: Token已被撤销 → 触发重放防御 ====
+	// 验证: 阶段 2.1 - 已撤销的 refresh token 再次出现视为重放攻击
+	t.Run("Token已被撤销-触发重放防御", func(t *testing.T) {
 		storeInst := mock.New()
 
 		// 创建已撤销的token
 		revokedAt := time.Now()
+		refreshExpiresAt := time.Now().Add(24 * time.Hour)
 		storeInst.AddToken(&model.Token{
-			ID:           "token-1",
-			UserID:       "user-1",
-			RefreshToken: "revoked-refresh-token",
-			AccessToken:  "revoked-access-token",
-			RevokedAt:    &revokedAt,
-			CreatedAt:    time.Now(),
+			ID:               "token-1",
+			UserID:           "user-1",
+			RefreshToken:     "revoked-refresh-token",
+			AccessToken:      "revoked-access-token",
+			RevokedAt:        &revokedAt,
+			RefreshExpiresAt: &refreshExpiresAt,
+			CreatedAt:        time.Now(),
+		})
+		storeInst.AddUser(&model.User{
+			ID:     "user-1",
+			Email:  "test@example.com",
+			Role:   "user",
+			Status: model.UserStatusActive,
 		})
 
 		passwordSvc := crypto.NewPasswordService(4)
@@ -265,33 +273,37 @@ func TestAuthService_RefreshToken_ComprehensiveErrorPaths(t *testing.T) {
 
 		_, err = authSvc.RefreshToken(ctx, "revoked-refresh-token")
 
+		// 阶段 2.1：已撤销 token 再次出现触发重放防御，返回 ErrTokenRotated
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, service.ErrInvalidToken)
+		assert.ErrorIs(t, err, service.ErrTokenRotated)
 	})
 
-	// ==== 测试2: RevokeToken失败导致刷新失败（fail-closed） ====
-	// 验证: P1 修复 - 撤销旧Token失败时拒绝刷新，防止旧Token被重复使用
-	t.Run("RevokeToken失败导致刷新失败", func(t *testing.T) {
+	// ==== 测试2: RotateRefreshToken失败（非 ErrTokenRotated）→ 包装错误 ====
+	// 验证: 阶段 2.1 - 原子轮换失败时不应暴露内部错误
+	t.Run("RotateRefreshToken失败-包装错误", func(t *testing.T) {
 		storeInst := mock.New()
 
 		// 创建有效token
+		refreshExpiresAt := time.Now().Add(24 * time.Hour)
 		storeInst.AddToken(&model.Token{
-			ID:           "token-1",
-			UserID:       "user-1",
-			RefreshToken: "valid-refresh-token",
-			AccessToken:  "valid-access-token",
-			CreatedAt:    time.Now(),
+			ID:               "token-1",
+			UserID:           "user-1",
+			RefreshToken:     "valid-refresh-token",
+			AccessToken:      "valid-access-token",
+			RefreshExpiresAt: &refreshExpiresAt,
+			CreatedAt:        time.Now(),
 		})
 
 		// 创建用户
 		storeInst.AddUser(&model.User{
-			ID:    "user-1",
-			Email: "test@example.com",
-			Role:  "user",
+			ID:     "user-1",
+			Email:  "test@example.com",
+			Role:   "user",
+			Status: model.UserStatusActive,
 		})
 
-		// 注入RevokeToken错误（会重试3次）
-		storeInst.RevokeTokenErr = fmt.Errorf("database lock timeout")
+		// 注入 RotateRefreshToken 错误（非 ErrTokenRotated）
+		storeInst.RotateRefreshTokenErr = fmt.Errorf("database connection lost")
 
 		passwordSvc := crypto.NewPasswordService(4)
 		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -307,54 +319,12 @@ func TestAuthService_RefreshToken_ComprehensiveErrorPaths(t *testing.T) {
 
 		_, err = authSvc.RefreshToken(ctx, "valid-refresh-token")
 
-		// 撤销失败应返回错误，防止旧Token被重复使用
+		// 验证返回错误且不暴露内部错误详情
 		assert.Error(t, err)
+		assert.NotContains(t, err.Error(), "database connection lost")
 	})
 
-	// ==== 测试3: StoreToken失败 ====
-	// 验证: 需求 8.6
-	t.Run("StoreToken失败", func(t *testing.T) {
-		storeInst := mock.New()
-
-		// 创建有效token
-		storeInst.AddToken(&model.Token{
-			ID:           "token-1",
-			UserID:       "user-1",
-			RefreshToken: "valid-refresh-token",
-			AccessToken:  "valid-access-token",
-			CreatedAt:    time.Now(),
-		})
-
-		// 创建用户
-		storeInst.AddUser(&model.User{
-			ID:    "user-1",
-			Email: "test@example.com",
-			Role:  "user",
-		})
-
-		// 注入StoreToken错误
-		storeInst.StoreTokenErr = fmt.Errorf("database write failed")
-
-		passwordSvc := crypto.NewPasswordService(4)
-		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-		require.NoError(t, err)
-		jwtSvc := crypto.NewJWTService(
-			privateKey,
-			&privateKey.PublicKey,
-			"test-issuer",
-			15*time.Minute,
-			7*24*time.Hour,
-		)
-		authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
-
-		_, err = authSvc.RefreshToken(ctx, "valid-refresh-token")
-
-		// 验证返回错误
-		assert.Error(t, err)
-		assert.NotContains(t, err.Error(), "database write failed")
-	})
-
-	// ==== 测试4: 验证不暴露内部错误详情 ====
+	// ==== 测试3: 验证不暴露内部错误详情 ====
 	// 验证: 需求 8.7
 	t.Run("不暴露内部错误详情", func(t *testing.T) {
 		storeInst := mock.New()

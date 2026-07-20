@@ -330,6 +330,35 @@ func (s *JWTService) GetAccessTokenTTL() time.Duration {
 	return s.accessTokenTTL
 }
 
+// GetRefreshTokenTTL 返回 refresh token 的有效期
+// 用于 token 轮换时计算新 refresh token 的独立过期时间
+func (s *JWTService) GetRefreshTokenTTL() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.refreshTokenTTL
+}
+
+// SignConsentToken 使用当前活跃密钥签名任意 *jwt.Token
+//
+// 用于阶段 2.2 consent_token 签发，避免暴露私钥。
+// 调用方负责在 token.Header 中设置 kid（可选）。
+// 复用 access_token 的 RS256 签名路径，保证不可伪造。
+func (s *JWTService) SignConsentToken(token *jwt.Token) (string, error) {
+	if token == nil {
+		return "", fmt.Errorf("token is nil")
+	}
+	if token.Method.Alg() != jwt.SigningMethodRS256.Alg() {
+		return "", fmt.Errorf("unsupported signing method: %v", token.Header["alg"])
+	}
+	s.mu.RLock()
+	privateKey := s.privateKey
+	s.mu.RUnlock()
+	if privateKey == nil {
+		return "", ErrNoActiveKey
+	}
+	return token.SignedString(privateKey)
+}
+
 func (s *JWTService) GetJWKS() map[string]interface{} {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

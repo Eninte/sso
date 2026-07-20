@@ -137,6 +137,14 @@ func initServices(cfg *config.Config, version, buildTime string) (*Services, *sq
 	// ==== 初始化Token生成服务 ====
 	tokenSvc := service.NewTokenService(jwtSvc, store)
 
+	// ==== 初始化审计与 MFA 服务（先于 authSvc 装配，便于 WithMFA 选项注入） ====
+	auditSvc := service.NewAuditService(store)
+	mfaSvc := service.NewMFAServiceWithAudit(store, auditSvc)
+	// 设置MFA恢复码HMAC密钥（与数据库层使用相同密钥）
+	if cfg.MFARecoveryHMACKey != "" {
+		mfaSvc.SetHMACKey([]byte(cfg.MFARecoveryHMACKey))
+	}
+
 	// ==== 初始化业务服务（带缓存） ====
 	userSvc := service.NewUserService(store, passwordSvc, emailSvc, cfg.BaseURL())
 	// 仅在限流启用时配置邮件限流器（RATE_LIMIT_REQUESTS <= 0 表示禁用所有限流）
@@ -152,6 +160,9 @@ func initServices(cfg *config.Config, version, buildTime string) (*Services, *sq
 		service.WithCache(cacheSvc),
 		service.WithMetrics(metricsSvc),
 		service.WithUserService(userSvc),
+		// 装配 MFA 服务，启用两阶段登录
+		// 未调用 WithMFA 时，启用 MFA 的用户登录会返回 ErrMFAServiceUnavailable
+		service.WithMFA(mfaSvc, cfg.MFAChallengeTTL),
 	}
 	if loginRateLimitOpt != nil {
 		authSvcOpts = append(authSvcOpts, loginRateLimitOpt)
@@ -165,12 +176,6 @@ func initServices(cfg *config.Config, version, buildTime string) (*Services, *sq
 		authSvcOpts...,
 	)
 	oauthSvc := service.NewOAuthServiceWithOptions(store, tokenSvc, service.WithOAuthCache(cacheSvc), service.WithOAuthPassword(passwordSvc))
-	auditSvc := service.NewAuditService(store)
-	mfaSvc := service.NewMFAServiceWithAudit(store, auditSvc)
-	// 设置MFA恢复码HMAC密钥（与数据库层使用相同密钥）
-	if cfg.MFARecoveryHMACKey != "" {
-		mfaSvc.SetHMACKey([]byte(cfg.MFARecoveryHMACKey))
-	}
 	adminSvc := service.NewAdminServiceWithOptions(store, service.WithAdminCache(cacheSvc), service.WithAdminVersion(version, buildTime), service.WithAdminAudit(auditSvc))
 
 	// ==== 初始化第三方登录服务 ====

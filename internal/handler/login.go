@@ -5,6 +5,7 @@ package handler
 import (
 	"net/http"
 
+	apperrors "github.com/example/sso/internal/errors"
 	"github.com/example/sso/internal/middleware"
 	"github.com/example/sso/internal/model"
 	"github.com/example/sso/internal/service"
@@ -27,6 +28,12 @@ func NewLoginHandler(authSvc service.AuthServiceInterface, captchaSvc captchaVer
 
 // Handle 处理登录请求
 // POST /api/v1/login
+//
+// 响应：
+//   - 用户未启用 MFA：返回完整 Token 对（access_token + refresh_token）
+//   - 用户启用 MFA：返回 mfa_required=true + mfa_challenge 令牌，
+//     客户端需调用 POST /api/v1/login/mfa/verify 完成第二阶段验证
+//
 // Panic恢复由中间件 middleware.Recover 统一处理，此处不再重复捕获
 func (h *LoginHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// 1. 解析请求体 (带大小限制)
@@ -61,9 +68,54 @@ func (h *LoginHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 5. 登录成功，清除失败计数
+	// 注意：MFA 第一阶段密码验证成功也视为登录成功（账户已通过凭据认证）
+	// 第二阶段失败由 mfa/verify 接口单独计数
 	h.captchaSvc.ClearFailures(r.Context(), auditCtx.IPAddress)
 
-	// 6. 返回Token
+	// 6. 返回响应（Token 或 MFA Challenge）
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// HandleVerifyMFALogin 处理 MFA 两阶段登录第二阶段验证
+// POST /api/v1/login/mfa/verify
+//
+// 请求体：{"mfa_challenge":"<token>", "method":"totp|recovery_code", "code":"..."}
+// 成功响应：{"access_token":"...", "refresh_token":"...", "token_type":"Bearer", "expires_in":900}
+// 失败响应：标准 OAuth 错误格式
+//
+// 安全设计：
+//   - 此端点必须使用敏感限流（注册到 sensitive 子路由）
+//   - Challenge 必须绑定客户端 IP/UA，跨网络使用会被拒绝
+//   - 验证失败递增尝试次数，5 次后 Challenge 失效
+func (h *LoginHandler) HandleVerifyMFALogin(w http.ResponseWriter, r *http.Request) {
+	var req model.MFAVerifyRequest
+	if err := decodeJSON(r, &req); err != nil {
+		handleDecodeJSONError(w, r, err)
+		return
+	}
+
+	if req.MFAChallenge == "" {
+		writeOAuthError(w, r, apperrors.ErrBadRequest.WithDetails("mfa_challenge is required"))
+		return
+	}
+	if req.Code == "" {
+		writeOAuthError(w, r, apperrors.ErrBadRequest.WithDetails("code is required"))
+		return
+	}
+	if req.Method != model.MFAMethodTOTP && req.Method != model.MFAMethodRecoveryCode {
+		writeOAuthError(w, r, apperrors.ErrBadRequest.WithDetails("invalid method"))
+		return
+	}
+
+	ipAddress := extractClientIP(r)
+	userAgent := r.UserAgent()
+
+	resp, err := h.authSvc.VerifyMFALogin(r.Context(), &req, ipAddress, userAgent)
+	if err != nil {
+		writeOAuthError(w, r, err)
+		return
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 

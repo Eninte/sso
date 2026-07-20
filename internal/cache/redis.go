@@ -52,6 +52,9 @@ const (
 	UserCachePrefix   = "user:"   // 用户缓存前缀
 	ClientCachePrefix = "client:" // 客户端缓存前缀
 	NilCachePrefix    = "nil:"    // 空值缓存前缀
+	// MFAChallengePrefix MFA 两阶段登录 Challenge 缓存前缀
+	// 存储一次性 challenge 令牌（32 字节 hex），TTL 由 config.MFAChallengeTTL 决定
+	MFAChallengePrefix = "mfa:challenge:"
 
 	DefaultTTL = 5 * time.Minute  // 默认缓存TTL
 	TokenTTL   = 15 * time.Minute // Token缓存TTL
@@ -80,6 +83,12 @@ func UserEmailKey(email string) string {
 // ClientKey 生成客户端缓存键
 func ClientKey(clientID string) string {
 	return ClientCachePrefix + clientID
+}
+
+// MFAChallengeKey 生成 MFA 两阶段登录 Challenge 缓存键
+// token 为客户端提交的 mfa_challenge 令牌（32 字节 hex）
+func MFAChallengeKey(token string) string {
+	return MFAChallengePrefix + token
 }
 
 // ============================================================================

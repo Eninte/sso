@@ -101,8 +101,8 @@ func (s *Store) UpdateAuthorizationCode(ctx context.Context, code *model.Authori
 // StoreToken 存储Token记录
 func (s *Store) StoreToken(ctx context.Context, token *model.Token) error {
 	query := `
-		INSERT INTO tokens (id, access_token, refresh_token, user_id, client_id, scopes, expires_at, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO tokens (id, access_token, refresh_token, user_id, client_id, scopes, expires_at, created_at, refresh_expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`
 	_, err := s.db.ExecContext(ctx, query,
 		token.ID,
@@ -113,6 +113,7 @@ func (s *Store) StoreToken(ctx context.Context, token *model.Token) error {
 		token.Scopes,
 		token.ExpiresAt,
 		token.CreatedAt,
+		token.RefreshExpiresAt,
 	)
 	return err
 }
@@ -134,7 +135,7 @@ func (s *Store) getTokenByField(ctx context.Context, field, value string) (*mode
 	}
 
 	query := `
-		SELECT id, access_token, refresh_token, user_id, client_id, scopes, expires_at, created_at, revoked_at
+		SELECT id, access_token, refresh_token, user_id, client_id, scopes, expires_at, created_at, revoked_at, rotated_at, replaced_by_token_id, refresh_expires_at
 		FROM tokens
 		WHERE ` + field + ` = $1`
 
@@ -149,6 +150,9 @@ func (s *Store) getTokenByField(ctx context.Context, field, value string) (*mode
 		&token.ExpiresAt,
 		&token.CreatedAt,
 		&token.RevokedAt,
+		&token.RotatedAt,
+		&token.ReplacedByTokenID,
+		&token.RefreshExpiresAt,
 	)
 
 	if err != nil {
@@ -159,6 +163,78 @@ func (s *Store) getTokenByField(ctx context.Context, field, value string) (*mode
 	}
 
 	return token, nil
+}
+
+// RotateRefreshToken 原子地轮换 refresh token
+//
+// 在单个事务内：
+//  1. UPDATE tokens SET revoked_at=NOW(), rotated_at=NOW(), replaced_by_token_id=$newID
+//     WHERE refresh_token=$old AND revoked_at IS NULL AND rotated_at IS NULL
+//  2. 若 RowsAffected == 0 → 返回 store.ErrTokenRotated（重放或不存在）
+//  3. INSERT new token
+//
+// 安全设计：UPDATE + INSERT 在同一事务内，避免 TOCTOU 竞态
+func (s *Store) RotateRefreshToken(ctx context.Context, oldRefreshToken string, newToken *model.Token) error {
+	ctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction failed: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// 1. 原子地标记旧 token 为已轮换 + 已撤销
+	// 通过 WHERE rotated_at IS NULL AND revoked_at IS NULL 保证只能轮换一次
+	// 多个并发请求中只有一个会成功
+	updateQuery := `
+		UPDATE tokens
+		SET revoked_at = NOW(),
+		    rotated_at = NOW(),
+		    replaced_by_token_id = $2
+		WHERE refresh_token = $1
+		  AND revoked_at IS NULL
+		  AND rotated_at IS NULL`
+	result, err := tx.ExecContext(ctx, updateQuery, oldRefreshToken, newToken.ID)
+	if err != nil {
+		return fmt.Errorf("rotate refresh token failed: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get affected rows failed: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		// token 不存在，或已被撤销/已轮换
+		// 这是重放攻击的典型特征：已被轮换的 refresh token 再次出现
+		return store.ErrTokenRotated
+	}
+
+	// 2. 插入新的 token 记录
+	insertQuery := `
+		INSERT INTO tokens (id, access_token, refresh_token, user_id, client_id, scopes, expires_at, created_at, refresh_expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+	_, err = tx.ExecContext(ctx, insertQuery,
+		newToken.ID,
+		newToken.AccessToken,
+		newToken.RefreshToken,
+		newToken.UserID,
+		newToken.ClientID,
+		newToken.Scopes,
+		newToken.ExpiresAt,
+		newToken.CreatedAt,
+		newToken.RefreshExpiresAt,
+	)
+	if err != nil {
+		return fmt.Errorf("insert new token failed: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit rotation transaction failed: %w", err)
+	}
+
+	return nil
 }
 
 // RevokeToken 撤销Token

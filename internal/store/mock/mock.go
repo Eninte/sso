@@ -48,15 +48,17 @@ type Store struct {
 	DeleteUserErr              error
 	ListUsersErr               error
 	ExistsUserByRoleErr        error
+	CreateAdminAtomicErr       error
 	GetClientByClientIDErr     error
 	CreateClientErr            error
-	StoreAuthorizationCodeErr  error
-	GetAuthorizationCodeErr    error
+	StoreAuthorizationCodeErr   error
+	GetAuthorizationCodeErr     error
 	StoreTokenErr              error
 	GetTokenByRefreshTokenErr  error
 	GetTokenByAccessTokenErr   error
 	RevokeTokenErr             error
 	RevokeAllUserTokensErr     error
+	RotateRefreshTokenErr      error
 	CleanupExpiredErr          error
 	StoreVerificationTokenErr  error
 	GetVerificationTokenErr    error
@@ -313,6 +315,44 @@ func (m *Store) ExistsUserByRole(ctx context.Context, role string) (bool, error)
 	return false, nil
 }
 
+// CreateAdminAtomic 模拟原子创建初始管理员
+// 在 mock 层通过单个互斥锁同时完成"检查管理员是否存在"和"插入用户"，
+// 等效模拟 PostgreSQL 的 advisory_xact_lock + EXISTS 检查 + INSERT 事务
+//
+// 行为：
+//   - 若已存在 role=admin 的用户：返回 store.ErrForbidden
+//   - 若邮箱已存在：返回 store.ErrDuplicateEmail
+//   - 若 CreateAdminAtomicErr 注入了错误：返回注入的错误
+//   - 否则插入用户并返回 nil
+//
+// 并发安全：使用 m.mu.Lock() 确保并发调用串行执行，
+// 第二个并发调用会看到第一个调用插入的管理员
+func (m *Store) CreateAdminAtomic(ctx context.Context, user *model.User) error {
+	if m.CreateAdminAtomicErr != nil {
+		return m.CreateAdminAtomicErr
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// 检查是否已存在管理员
+	for _, u := range m.users {
+		if u.Role == model.UserRoleAdmin {
+			return store.ErrForbidden
+		}
+	}
+
+	// 检查邮箱是否已存在
+	for _, u := range m.users {
+		if u.Email == user.Email {
+			return store.ErrDuplicateEmail
+		}
+	}
+
+	m.users[user.ID] = user
+	return nil
+}
+
 // ============================================================================
 // 客户端存储实现
 // ============================================================================
@@ -513,6 +553,70 @@ func (m *Store) RevokeAllUserTokens(ctx context.Context, userID string) error {
 			token.RevokedAt = &now
 		}
 	}
+	return nil
+}
+
+// RotateRefreshToken 原子地轮换 refresh token
+//
+// 在单个事务（mock 用互斥锁模拟）内：
+//  1. 查找旧 token；不存在 → 返回 store.ErrTokenRotated（与 postgresql RowsAffected==0 语义一致）
+//  2. 检查旧 token 是否已被轮换或撤销（rotated_at != nil 或 revoked_at != nil）
+//     若是，说明发生重放攻击 → 返回 store.ErrTokenRotated
+//  3. 标记旧 token：revoked_at = NOW()、rotated_at = NOW()、replaced_by_token_id = newToken.ID
+//  4. 插入新 token（深拷贝，避免外部修改）
+//
+// 安全设计：与 postgres 实现保持一致，通过 rotated_at==nil 保证一次性
+func (m *Store) RotateRefreshToken(ctx context.Context, oldRefreshToken string, newToken *model.Token) error {
+	if m.RotateRefreshTokenErr != nil {
+		return m.RotateRefreshTokenErr
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// 1. 查找旧 token
+	var oldToken *model.Token
+	for _, token := range m.tokens {
+		if token.RefreshToken == oldRefreshToken {
+			oldToken = token
+			break
+		}
+	}
+	if oldToken == nil {
+		return store.ErrTokenRotated
+	}
+
+	// 2. 重放检测：已轮换或已撤销的 token 不能再次轮换
+	if oldToken.RotatedAt != nil || oldToken.RevokedAt != nil {
+		return store.ErrTokenRotated
+	}
+
+	// 3. 标记旧 token
+	now := time.Now()
+	oldToken.RevokedAt = &now
+	oldToken.RotatedAt = &now
+	newTokenID := newToken.ID
+	oldToken.ReplacedByTokenID = &newTokenID
+
+	// 4. 插入新 token（深拷贝 scopes，避免外部修改）
+	newScopes := make([]string, len(newToken.Scopes))
+	copy(newScopes, newToken.Scopes)
+	storedToken := &model.Token{
+		ID:                newToken.ID,
+		AccessToken:       newToken.AccessToken,
+		RefreshToken:      newToken.RefreshToken,
+		UserID:            newToken.UserID,
+		Scopes:            newScopes,
+		ClientID:          newToken.ClientID,
+		ExpiresAt:         newToken.ExpiresAt,
+		CreatedAt:         newToken.CreatedAt,
+		RevokedAt:         newToken.RevokedAt,
+		RotatedAt:         newToken.RotatedAt,
+		ReplacedByTokenID: newToken.ReplacedByTokenID,
+		RefreshExpiresAt:  newToken.RefreshExpiresAt,
+	}
+	m.tokens[storedToken.AccessToken] = storedToken
+
 	return nil
 }
 

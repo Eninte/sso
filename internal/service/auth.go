@@ -32,6 +32,9 @@ var (
 	ErrAccountDisabled    = apperrors.ErrAccountDisabled
 	ErrInvalidToken       = apperrors.ErrInvalidToken
 	ErrEmailNotVerified   = apperrors.ErrEmailNotVerified
+	// ErrTokenRotated Refresh Token 已被使用（轮换）又再次出现，视为重放攻击
+	// 调用方应提示用户重新登录
+	ErrTokenRotated = apperrors.ErrTokenRotated
 )
 
 // ============================================================================
@@ -53,6 +56,15 @@ type tokenPairGenerator interface {
 		scopes []string,
 		clientID *string,
 	) (*model.LoginResponse, error)
+
+	// GenerateTokenRecord 生成 Token 记录与响应但不写入存储
+	// 供 RefreshToken 流程在同一事务内通过 RotateRefreshToken 原子持久化
+	GenerateTokenRecord(
+		ctx context.Context,
+		userID, email, role string,
+		scopes []string,
+		clientID *string,
+	) (*model.Token, *model.LoginResponse, error)
 }
 
 // metricIncrementer 指标计数的最小接口
@@ -63,6 +75,12 @@ type metricIncrementer interface {
 // loginRateChecker 登录频率检查的最小接口
 type loginRateChecker interface {
 	CheckAndRecord(ctx context.Context, clientIP string) (bool, int, error)
+}
+
+// mfaLoginCodeVerifier MFA 登录验证码检查的最小接口
+// AuthService 仅依赖此最小接口而非完整 MFAService，遵循接口隔离原则
+type mfaLoginCodeVerifier interface {
+	VerifyMFALoginCode(ctx context.Context, userID, method, code, ipAddress string) error
 }
 
 // ============================================================================
@@ -107,20 +125,31 @@ func WithLoginRateLimit(limiter loginRateChecker) AuthServiceOption {
 	}
 }
 
+// WithMFA 设置 MFA 服务与 Challenge TTL，启用两阶段登录
+// 未调用此选项时，启用 MFA 的用户登录将返回 ErrMFAServiceUnavailable
+func WithMFA(mfaSvc mfaLoginCodeVerifier, challengeTTL time.Duration) AuthServiceOption {
+	return func(s *AuthService) {
+		s.mfaSvc = mfaSvc
+		s.mfaChallengeTTL = challengeTTL
+	}
+}
+
 // AuthService 认证服务
 // 处理用户认证相关的业务逻辑
 type AuthService struct {
-	store           store.Store             // 数据存储
-	passwordSvc     *crypto.PasswordService // 密码服务
-	jwtSvc          *crypto.JWTService      // JWT服务
-	tokenSvc        tokenPairGenerator      // Token生成服务
-	userSvc         verificationEmailSender // 用户服务（用于发送验证邮件）
-	maxAttempts     int                     // 最大登录尝试次数
-	lockoutDuration time.Duration           // 锁定时长
-	metricsSvc      metricIncrementer       // 指标服务（可选）
-	auditSvc        auditutil.AuditService  // 审计服务
-	cache           cache.Cache             // 缓存服务（可选）
-	loginRateLimit  loginRateChecker        // 登录频率限制器（可选）
+	store            store.Store              // 数据存储
+	passwordSvc      *crypto.PasswordService  // 密码服务
+	jwtSvc           *crypto.JWTService       // JWT服务
+	tokenSvc         tokenPairGenerator       // Token生成服务
+	userSvc          verificationEmailSender  // 用户服务（用于发送验证邮件）
+	maxAttempts      int                      // 最大登录尝试次数
+	lockoutDuration  time.Duration            // 锁定时长
+	metricsSvc       metricIncrementer        // 指标服务（可选）
+	auditSvc         auditutil.AuditService   // 审计服务
+	cache            cache.Cache              // 缓存服务（可选，用于 MFA Challenge 存储）
+	loginRateLimit   loginRateChecker         // 登录频率限制器（可选）
+	mfaSvc           mfaLoginCodeVerifier     // MFA 服务（可选，未设置时启用 MFA 的用户登录失败）
+	mfaChallengeTTL  time.Duration            // MFA Challenge 有效期（默认 5 分钟）
 }
 
 // NewAuthService 创建AuthService实例

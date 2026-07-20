@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -225,8 +226,9 @@ func TestInitService_CreateAdmin(t *testing.T) {
 		mockStore.Reset()
 		ctx := context.Background()
 
-		// 模拟数据库唯一约束错误
-		mockStore.CreateUserErr = store.ErrDuplicateEmail
+		// 模拟 CreateAdminAtomic 在数据库层返回重复邮箱错误
+		// 注意：CreateAdmin 现在调用 CreateAdminAtomic 而非 Create，错误需注入到对应字段
+		mockStore.CreateAdminAtomicErr = store.ErrDuplicateEmail
 
 		user, err := initSvc.CreateAdmin(ctx, "admin@example.com", "Password123!!")
 
@@ -560,4 +562,82 @@ func TestInitService_EdgeCases(t *testing.T) {
 		assert.NotNil(t, client)
 		assert.NotEmpty(t, secret)
 	})
+}
+
+// ============================================================================
+// 并发竞态测试：CreateAdminAtomic 防御 TOCTOU
+// ============================================================================
+
+// TestCreateAdmin_ConcurrentRace_AdvisoryLock 验证在并发场景下，
+// 即使所有请求都通过了应用层的 AdminExists 预检查（TOCTOU 窗口），
+// CreateAdminAtomic 仍能保证全局只创建一个初始管理员。
+//
+// 模拟审计报告中"严重问题 1"的竞态场景：
+//  1. Request A: AdminExists() → false → 准备插入
+//  2. Request B: AdminExists() → false → 准备插入（A 还没插入）
+//  3. Request A: CreateAdminAtomic() → 获取锁 → 插入成功 → 提交
+//  4. Request B: CreateAdminAtomic() → 获取锁（A 已释放）→ EXISTS 检查失败 → ErrForbidden
+//
+// Mock 层通过 mu.Lock() 串行化，等效模拟 PostgreSQL 的 advisory_xact_lock
+func TestCreateAdmin_ConcurrentRace_AdvisoryLock(t *testing.T) {
+	const goroutines = 32
+
+	initSvc, mockStore := createTestInitService(t)
+	mockStore.Reset()
+	ctx := context.Background()
+
+	type result struct {
+		user *model.User
+		err  error
+	}
+	results := make(chan result, goroutines)
+	start := make(chan struct{})
+
+	// 启动 N 个 goroutine 并发调用 CreateAdmin
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func(idx int) {
+			defer wg.Done()
+			<-start // 同时触发，最大化竞态窗口
+			email := fmt.Sprintf("admin-%d@example.com", idx)
+			user, err := initSvc.CreateAdmin(ctx, email, "Password123!!")
+			results <- result{user: user, err: err}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	// 统计结果
+	var (
+		successCount int
+		forbiddenCount int
+		otherErrCount int
+	)
+	for r := range results {
+		if r.err == nil && r.user != nil {
+			successCount++
+		} else if r.err != nil && errors.Is(r.err, apperrors.ErrForbidden) {
+			forbiddenCount++
+		} else {
+			otherErrCount++
+			t.Logf("意外错误: %v", r.err)
+		}
+	}
+
+	// 必须有且仅有 1 个成功
+	assert.Equal(t, 1, successCount, "必须有且仅有 1 个请求成功创建管理员")
+	// 其余必须都返回 ErrForbidden（不能是其他错误，不能 nil）
+	assert.Equal(t, goroutines-1, forbiddenCount, "其余请求必须返回 ErrForbidden")
+	assert.Equal(t, 0, otherErrCount, "不应有其他错误（如 ErrEmailExists）")
+
+	// 验证最终 mock 状态：只有 1 个管理员
+	exists, err := initSvc.AdminExists(ctx)
+	require.NoError(t, err)
+	assert.True(t, exists, "管理员应存在")
+
+	// 验证重复调用仍被拒绝（初始化完成后永久关闭）
+	_, err = initSvc.CreateAdmin(ctx, "another@example.com", "Password123!!")
+	assert.ErrorIs(t, err, apperrors.ErrForbidden, "初始化完成后再次创建必须返回 ErrForbidden")
 }

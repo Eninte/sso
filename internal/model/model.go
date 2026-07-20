@@ -50,11 +50,19 @@ type LoginRequest struct {
 }
 
 type LoginResponse struct {
-	AccessToken  string   `json:"access_token"`
-	RefreshToken string   `json:"refresh_token"`
-	TokenType    string   `json:"token_type"`
+	AccessToken  string   `json:"access_token,omitempty"`
+	RefreshToken string   `json:"refresh_token,omitempty"`
+	TokenType    string   `json:"token_type,omitempty"`
 	Scopes       []string `json:"scopes,omitempty"`
 	ExpiresIn    int      `json:"expires_in"`
+
+	// MFA 两阶段登录字段
+	// 第一阶段密码验证成功后，若用户启用了 MFA，则不返回 access_token/refresh_token，
+	// 而是返回 mfa_required=true 和一次性 mfa_challenge 令牌
+	// 客户端在第二阶段 POST /api/v1/login/mfa/verify 提交 challenge + code 换取 Token
+	MFARequired  bool     `json:"mfa_required,omitempty"`
+	MFAChallenge string   `json:"mfa_challenge,omitempty"`           // 一次性高熵随机令牌，仅生成时返回
+	MFAMethods   []string `json:"mfa_methods,omitempty"`              // 可用的 MFA 验证方法，如 ["totp","recovery_code"]
 }
 
 // ============================================================================
@@ -113,6 +121,16 @@ type Token struct {
 	RevokedAt    *time.Time `json:"revoked_at" db:"revoked_at"`
 	ExpiresAt    time.Time  `json:"expires_at" db:"expires_at"`
 	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
+
+	// Refresh Token 轮换字段（阶段 2.1 安全增强）
+	// RotatedAt：refresh token 被轮换使用的时间，NULL 表示未使用
+	// 用于检测重放：若已被轮换的 token 再次出现，说明被盗用
+	RotatedAt *time.Time `json:"rotated_at,omitempty" db:"rotated_at"`
+	// ReplacedByTokenID：轮换后新 token 的 ID，用于 token 家族追踪
+	ReplacedByTokenID *string `json:"replaced_by_token_id,omitempty" db:"replaced_by_token_id"`
+	// RefreshExpiresAt：refresh token 独立过期时间
+	// NULL 表示沿用 ExpiresAt（兼容旧数据）
+	RefreshExpiresAt *time.Time `json:"refresh_expires_at,omitempty" db:"refresh_expires_at"`
 }
 
 func (t *Token) GetClientID() string {

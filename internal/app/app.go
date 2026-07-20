@@ -51,8 +51,12 @@ func Run(version, buildTime string) {
 		os.Exit(1)
 	}
 
+	// 4.1 初始化面板服务器（loopback 隔离）
+	// 仅当 INIT_ENABLED=true 时创建；否则返回 nil，跳过启动
+	initServer := NewInitServer(cfg, svc.Store, svc.Password, svc.Cache, svc.Audit, version, buildTime)
+
 	// 5. 启动服务器
-	startServer(cfg, router, rateLimiters, svc, version)
+	startServer(cfg, router, rateLimiters, svc, version, initServer)
 }
 
 // initConfig 加载和验证配置

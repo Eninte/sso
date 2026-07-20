@@ -25,8 +25,17 @@ type AuthServiceInterface interface {
 	// LoginWithAudit 带审计上下文的登录（支持IP限流）
 	LoginWithAudit(ctx context.Context, req *model.LoginRequest, auditCtx *AuditContext) (*model.LoginResponse, error)
 
+	// VerifyMFALogin 验证 MFA 登录（两阶段登录的第二阶段）
+	// 客户端提交第一阶段返回的 mfa_challenge 令牌 + 验证方法 + 验证码
+	// 验证成功后签发 Token；失败递增尝试次数，超限则使 Challenge 失效
+	VerifyMFALogin(ctx context.Context, req *model.MFAVerifyRequest, ipAddress, userAgent string) (*model.LoginResponse, error)
+
 	// RefreshToken 刷新Token
 	RefreshToken(ctx context.Context, refreshToken string) (*model.LoginResponse, error)
+
+	// RefreshTokenWithClientID 携带 clientID 刷新 Token（阶段 2.2）
+	// 用于 OAuth 流程签发的 token 刷新，校验 clientID 与 token 归属一致
+	RefreshTokenWithClientID(ctx context.Context, refreshToken, clientID string) (*model.LoginResponse, error)
 
 	// Logout 用户登出
 	Logout(ctx context.Context, accessToken string) error
@@ -50,6 +59,24 @@ type OAuthServiceInterface interface {
 		clientID, userID, redirectURI string,
 		scopes []string,
 		codeChallenge, codeChallengeMethod string,
+	) (string, error)
+
+	// CreateAuthorizationCodeWithConsent 基于 consent_token 创建授权码（阶段 2.2）
+	// 用户在 GET /authorize 拿到 consent_token 后，POST /authorize/approve 回传，
+	// 由 service 校验签名/过期/用户归属/客户端/redirect_uri/scope/PKCE 后创建授权码
+	CreateAuthorizationCodeWithConsent(
+		ctx context.Context,
+		userID string,
+		consentToken string,
+	) (string, error)
+
+	// IssueConsentToken 签发短期 consent_token（阶段 2.2）
+	// 用于 GET /authorize 与 POST /authorize/approve 之间传递授权上下文，防 CSRF
+	IssueConsentToken(
+		ctx context.Context,
+		userID, clientID, redirectURI string,
+		scopes []string,
+		state, codeChallenge, codeChallengeMethod string,
 	) (string, error)
 
 	// ExchangeAuthorizationCode 交换授权码
@@ -104,6 +131,12 @@ type MFAServiceInterface interface {
 
 	// GetRecoveryCodeStatus 获取恢复码状态
 	GetRecoveryCodeStatus(ctx context.Context, userID string) (int, error)
+
+	// VerifyMFALoginCode 验证 MFA 登录验证码（两阶段登录的第二阶段）
+	// method: "totp" 验证 TOTP 6 位数字；"recovery_code" 验证恢复码
+	// 仅验证 code 正确性，不签发 Token（Token 由 AuthService 签发）
+	// 失败返回 ErrInvalidMFACode；恢复码验证还可能返回 ErrTooManyRecoveryAttempts
+	VerifyMFALoginCode(ctx context.Context, userID, method, code, ipAddress string) error
 }
 
 // ============================================================================

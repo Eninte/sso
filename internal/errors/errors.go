@@ -30,6 +30,7 @@ const (
 	ErrCodeAccountDisabled    ErrorCode = "ACCOUNT_DISABLED"    // 账户禁用
 	ErrCodeInvalidToken       ErrorCode = "INVALID_TOKEN"       // Token无效
 	ErrCodeTokenExpired       ErrorCode = "TOKEN_EXPIRED"       // Token过期
+	ErrCodeTokenRotated       ErrorCode = "TOKEN_ROTATED"        // Refresh Token 已被轮换（重放检测）
 
 	// 用户相关错误
 	ErrCodeEmailExists         ErrorCode = "EMAIL_EXISTS"          // 邮箱已存在
@@ -64,6 +65,13 @@ const (
 	ErrCodeCodeUsed             ErrorCode = "CODE_USED"              // 授权码已使用
 	ErrCodeInvalidCodeVerifier  ErrorCode = "INVALID_CODE_VERIFIER"  // PKCE验证器无效
 	ErrCodeInvalidPKCEChallenge ErrorCode = "INVALID_PKCE_CHALLENGE" // PKCE挑战码无效
+	// 阶段 2.2 新增：Scope/PKCE/Consent 相关错误
+	ErrCodeInvalidScope     ErrorCode = "INVALID_SCOPE"      // 请求的 scope 超出客户端允许或白名单
+	ErrCodePKCERequired    ErrorCode = "PKCE_REQUIRED"      // 公共客户端必须使用 PKCE
+	ErrCodeConsentRequired ErrorCode = "CONSENT_REQUIRED"   // 需要用户同意授权
+	ErrCodeConsentDenied   ErrorCode = "CONSENT_DENIED"     // 用户拒绝授权
+	ErrCodeConsentInvalid  ErrorCode = "CONSENT_INVALID"     // consent_token 无效或已过期
+	ErrCodeClientMismatch  ErrorCode = "CLIENT_MISMATCH"     // refresh_token 客户端归属不一致
 
 	// MFA相关错误
 	ErrCodeMFAAlreadyEnabled      ErrorCode = "MFA_ALREADY_ENABLED"      // MFA已启用
@@ -75,6 +83,12 @@ const (
 	ErrCodeRecoveryCodeUsed       ErrorCode = "RECOVERY_CODE_USED"       // 恢复码已使用
 	ErrCodeRecoveryCodeGeneration ErrorCode = "RECOVERY_CODE_GENERATION" // 恢复码生成失败
 	ErrCodeMFAHMACKeyNotSet       ErrorCode = "MFA_HMAC_KEY_NOT_SET"     // MFA恢复码HMAC密钥未设置
+	// 两阶段登录相关错误
+	ErrCodeMFAChallengeInvalid   ErrorCode = "MFA_CHALLENGE_INVALID"   // MFA Challenge 无效或已被使用
+	ErrCodeMFAChallengeExpired   ErrorCode = "MFA_CHALLENGE_EXPIRED"   // MFA Challenge 已过期
+	ErrCodeInvalidMFACode        ErrorCode = "INVALID_MFA_CODE"        // MFA 验证码（TOTP 或恢复码）无效
+	ErrCodeTooManyMFAAttempts    ErrorCode = "TOO_MANY_MFA_ATTEMPTS"   // MFA 验证尝试次数过多
+	ErrCodeMFAServiceUnavailable ErrorCode = "MFA_SERVICE_UNAVAILABLE" // MFA 服务不可用（未装配依赖）
 
 	// 第三方登录相关错误
 	ErrCodeProviderNotSupported    ErrorCode = "PROVIDER_NOT_SUPPORTED"     // 提供商不支持
@@ -192,6 +206,9 @@ var (
 	ErrAccountDisabled    = New(ErrCodeAccountDisabled, "账户已被禁用", 403)
 	ErrInvalidToken       = New(ErrCodeInvalidToken, "无效的Token", 401)
 	ErrTokenExpired       = New(ErrCodeTokenExpired, "Token已过期", 401)
+	// ErrTokenRotated Refresh Token 已被使用过（轮换）又再次出现
+	// 这是重放攻击的典型特征，应触发审计告警并撤销该用户的全部 token
+	ErrTokenRotated = New(ErrCodeTokenRotated, "Refresh Token 已被使用，请重新登录", 401)
 
 	// 用户错误
 	ErrEmailExists         = New(ErrCodeEmailExists, "邮箱已注册", 409)
@@ -226,6 +243,13 @@ var (
 	ErrCodeUsedErr          = New(ErrCodeCodeUsed, "授权码已被使用", 400)
 	ErrInvalidCodeVerifier  = New(ErrCodeInvalidCodeVerifier, "无效的PKCE验证器", 400)
 	ErrInvalidPKCEChallenge = New(ErrCodeInvalidPKCEChallenge, "无效的PKCE挑战码", 400)
+	// 阶段 2.2 新增
+	ErrInvalidScope     = New(ErrCodeInvalidScope, "请求的scope超出允许范围", 400)
+	ErrPKCERequired    = New(ErrCodePKCERequired, "公共客户端必须使用PKCE且采用S256方法", 400)
+	ErrConsentRequired = New(ErrCodeConsentRequired, "需要用户同意授权", 400)
+	ErrConsentDenied   = New(ErrCodeConsentDenied, "用户拒绝授权", 403)
+	ErrConsentInvalid  = New(ErrCodeConsentInvalid, "consent_token无效或已过期", 400)
+	ErrClientMismatch  = New(ErrCodeClientMismatch, "客户端与Token归属不一致", 401)
 
 	// MFA错误
 	ErrMFAAlreadyEnabled    = New(ErrCodeMFAAlreadyEnabled, "MFA已启用", 409)
@@ -237,6 +261,13 @@ var (
 	ErrRecoveryCodeUsed     = New(ErrCodeRecoveryCodeUsed, "恢复码已使用", 400)
 	ErrRecoveryCodeGenerate = New(ErrCodeRecoveryCodeGeneration, "恢复码生成失败", 500)
 	ErrMFAHMACKeyNotSet     = New(ErrCodeMFAHMACKeyNotSet, "MFA恢复码HMAC密钥未设置", 500)
+
+	// 两阶段登录错误
+	ErrMFAChallengeInvalid   = New(ErrCodeMFAChallengeInvalid, "MFA验证会话无效或已被使用", 401)
+	ErrMFAChallengeExpired   = New(ErrCodeMFAChallengeExpired, "MFA验证会话已过期，请重新登录", 401)
+	ErrInvalidMFACode        = New(ErrCodeInvalidMFACode, "MFA验证码错误", 401)
+	ErrTooManyMFAAttempts    = New(ErrCodeTooManyMFAAttempts, "MFA验证尝试次数过多，请重新登录", 429)
+	ErrMFAServiceUnavailable = New(ErrCodeMFAServiceUnavailable, "MFA服务不可用，请联系管理员", 500)
 
 	// 第三方登录错误
 	ErrProviderNotSupported    = New(ErrCodeProviderNotSupported, "不支持的登录提供商", 400)

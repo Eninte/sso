@@ -283,3 +283,94 @@ func (s *Store) ExistsUserByRole(ctx context.Context, role string) (bool, error)
 	}
 	return exists, nil
 }
+
+// CreateAdminAtomic 原子地创建初始管理员账户
+//
+// 流程：
+//  1. 开启事务
+//  2. 获取事务级 advisory lock（pg_try_advisory_xact_lock）
+//     - 锁 ID 由 hashtext('sso_init_admin') 计算，全局唯一
+//     - 锁在事务提交/回滚后自动释放，无需显式释放
+//  3. 再次检查管理员是否已存在（防御性）
+//  4. 插入管理员用户
+//  5. 提交事务
+//
+// 并发行为：
+//   - 多个并发请求同时调用：第一个获取锁的事务执行插入并提交；
+//     其余获取锁失败，立即返回 ErrForbidden（不阻塞）
+//   - 锁获取失败时不会查询数据库，避免无效的连接占用
+//
+// 安全性：
+//   - 解决传统 AdminExists + Create 的 TOCTOU 竞态
+//   - 即使攻击者绕过应用层 AdminExists 检查，数据库层仍会拒绝
+//   - 邮箱重复由 users.email 唯一约束保证，返回 ErrDuplicateEmail
+func (s *Store) CreateAdminAtomic(ctx context.Context, user *model.User) error {
+	ctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction failed: %w", err)
+	}
+	// defer Rollback 确保 panic 或提前返回时事务回滚
+	// 显式 Commit 后 Rollback 是 no-op（sql.Tx 已处理）
+	defer func() { _ = tx.Rollback() }()
+
+	// 尝试获取事务级 advisory lock（非阻塞）
+	// hashtext 返回 int4，pg_try_advisory_xact_lock 接受 int4 参数
+	var lockAcquired bool
+	err = tx.QueryRowContext(ctx,
+		"SELECT pg_try_advisory_xact_lock(hashtext('sso_init_admin'))").Scan(&lockAcquired)
+	if err != nil {
+		return fmt.Errorf("acquire advisory lock failed: %w", err)
+	}
+	if !lockAcquired {
+		// 并发创建：另一个事务正在创建管理员
+		return store.ErrForbidden
+	}
+
+	// 在锁内再次检查管理员是否已存在
+	// 即使创建者绕过 service 层的 AdminExists 检查，DB 层仍拒绝
+	var exists bool
+	err = tx.QueryRowContext(ctx,
+		"SELECT EXISTS(SELECT 1 FROM users WHERE role = $1 LIMIT 1)",
+		model.UserRoleAdmin,
+	).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("check admin exists failed: %w", err)
+	}
+	if exists {
+		return store.ErrForbidden
+	}
+
+	// 插入管理员用户
+	query := `
+		INSERT INTO users (id, email, password_hash, email_verified, mfa_enabled, role, status, login_attempts, locked_until, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	`
+	_, err = tx.ExecContext(ctx, query,
+		user.ID,
+		user.Email,
+		user.PasswordHash,
+		user.EmailVerified,
+		user.MFAEnabled,
+		user.Role,
+		user.Status,
+		user.LoginAttempts,
+		user.LockedUntil,
+		user.CreatedAt,
+		user.UpdatedAt,
+	)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return store.ErrDuplicateEmail
+		}
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit transaction failed: %w", err)
+	}
+
+	return nil
+}

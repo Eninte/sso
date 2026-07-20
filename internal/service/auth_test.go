@@ -727,7 +727,7 @@ func TestAuthService_RefreshTokenWithAudit(t *testing.T) {
 			IPAddress: "192.168.1.1",
 			UserAgent: "Mozilla/5.0",
 		}
-		newTokenResp, err := authSvc.RefreshTokenWithAudit(ctx, loginResp.RefreshToken, auditCtx)
+		newTokenResp, err := authSvc.RefreshTokenWithAudit(ctx, loginResp.RefreshToken, "", auditCtx)
 		require.NoError(t, err)
 		assert.NotEmpty(t, newTokenResp.AccessToken)
 		assert.NotEmpty(t, newTokenResp.RefreshToken)
@@ -737,7 +737,7 @@ func TestAuthService_RefreshTokenWithAudit(t *testing.T) {
 		auditCtx := &service.AuditContext{
 			IPAddress: "192.168.1.1",
 		}
-		_, err := authSvc.RefreshTokenWithAudit(ctx, "invalid-refresh-token", auditCtx)
+		_, err := authSvc.RefreshTokenWithAudit(ctx, "invalid-refresh-token", "", auditCtx)
 		assert.Error(t, err)
 	})
 }
@@ -900,12 +900,14 @@ func TestAuthService_RefreshToken_StoreErrors(t *testing.T) {
 
 	t.Run("GetByID失败-返回错误", func(t *testing.T) {
 		storeInst := mock.New()
-		// 先创建token记录
+		// 先创建token记录（设置 RefreshExpiresAt 为未来时间以通过过期检查）
+		refreshExpiresAt := time.Now().Add(24 * time.Hour)
 		storeInst.AddToken(&model.Token{
-			ID:           "token-1",
-			UserID:       "user-1",
-			RefreshToken: "valid-refresh",
-			AccessToken:  "valid-access",
+			ID:               "token-1",
+			UserID:           "user-1",
+			RefreshToken:     "valid-refresh",
+			AccessToken:      "valid-access",
+			RefreshExpiresAt: &refreshExpiresAt,
 		})
 		// 然后让GetByID失败
 		storeInst.GetUserByIDErr = fmt.Errorf("user not found in db")
@@ -1099,7 +1101,7 @@ func TestAuthService_RefreshTokenWithAudit_VerifyLog(t *testing.T) {
 		require.NoError(t, err)
 
 		auditCtx := &service.AuditContext{IPAddress: "192.168.2.1"}
-		_, err = authSvc.RefreshTokenWithAudit(ctx, loginResp.RefreshToken, auditCtx)
+		_, err = authSvc.RefreshTokenWithAudit(ctx, loginResp.RefreshToken, "", auditCtx)
 		require.NoError(t, err)
 
 		require.Eventually(t, func() bool {

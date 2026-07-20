@@ -55,11 +55,25 @@ func (s *InitService) AdminExists(ctx context.Context) (bool, error) {
 }
 
 // CreateAdmin 创建管理员账户
+//
+// 安全设计：
+//  1. 应用层先做 AdminExists 检查（提供友好错误消息）
+//  2. 应用层先做邮箱查重（提供友好错误消息）
+//  3. 数据库层 CreateAdminAtomic 用 advisory_xact_lock + EXISTS 二次校验，
+//     确保并发场景下全局只能创建一个初始管理员
+//
+// 即使应用层检查通过，数据库层仍会拒绝并发竞态：
+//   - Request A 通过应用检查 → CreateAdminAtomic 获取锁 → 插入成功 → 提交
+//   - Request B 通过应用检查 → CreateAdminAtomic 获取锁失败 → 返回 ErrForbidden
+//
+// 同时通过 users.email 唯一约束保证邮箱唯一性
 func (s *InitService) CreateAdmin(ctx context.Context, email, password string) (*model.User, error) {
 	if err := validator.ValidateRegisterRequest(email, password); err != nil {
 		return nil, err
 	}
 
+	// 应用层检查 1：管理员是否已存在（提供友好错误消息）
+	// 注意：这只是预检查，真正的原子性由 CreateAdminAtomic 保证
 	exists, err := s.AdminExists(ctx)
 	if err != nil {
 		return nil, serviceutil.WrapServiceError("检查管理员状态", err)
@@ -68,8 +82,8 @@ func (s *InitService) CreateAdmin(ctx context.Context, email, password string) (
 		return nil, apperrors.ErrForbidden
 	}
 
-	// 注意：这里提前检查邮箱是为了提供更好的用户体验（快速失败）
-	// 但仍然依赖数据库唯一约束来处理并发场景下的竞态条件
+	// 应用层检查 2：邮箱是否已存在（提供友好错误消息）
+	// 注意：这只是预检查，真正的唯一性由数据库唯一约束保证
 	existingUser, err := s.store.GetByEmail(ctx, email)
 	if err != nil && !apperrors.Is(err, store.ErrNotFound) {
 		return nil, serviceutil.WrapServiceError("检查邮箱", err)
@@ -95,9 +109,15 @@ func (s *InitService) CreateAdmin(ctx context.Context, email, password string) (
 		UpdatedAt:     now,
 	}
 
-	if err := s.store.Create(ctx, user); err != nil {
-		// 处理并发场景下的重复邮箱错误（数据库唯一约束）
+	// 数据库层原子创建：advisory_xact_lock + EXISTS + INSERT
+	// 防止并发竞态创建多个管理员
+	if err := s.store.CreateAdminAtomic(ctx, user); err != nil {
+		if apperrors.Is(err, store.ErrForbidden) {
+			// 并发创建：另一个请求已经创建了管理员
+			return nil, apperrors.ErrForbidden
+		}
 		if apperrors.Is(err, store.ErrDuplicateEmail) {
+			// 邮箱冲突（应用层预检查通过但数据库层拒绝）
 			return nil, apperrors.ErrEmailExists
 		}
 		return nil, serviceutil.WrapServiceError("创建管理员", err)

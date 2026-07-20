@@ -6,6 +6,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -77,6 +78,7 @@ type Config struct {
 	MaxLoginAttempts   int           // 最大登录失败次数
 	LockoutDuration    time.Duration // 账户锁定时长
 	MFARecoveryHMACKey string        // MFA恢复码HMAC密钥（生产环境必须设置）
+	MFAChallengeTTL    time.Duration // MFA 两阶段登录 Challenge 有效期（默认 5 分钟）
 
 	// 邮件配置
 	SMTPHost     string // SMTP服务器地址
@@ -110,6 +112,12 @@ type Config struct {
 	// 优雅关闭配置
 	ShutdownTimeout time.Duration // 优雅关闭超时时间
 	LANDeployment   bool          // LAN部署模式（放宽部分生产环境校验）
+
+	// 初始化面板配置
+	// 安全设计：初始化路由仅注册在独立 loopback HTTP 服务器上，
+	// 与公网主路由完全隔离，杜绝反向代理绕过 isLocalRequest 的风险
+	InitEnabled    bool   // 是否启用初始化面板（初始化完成后应设为 false 永久关闭）
+	InitListenAddr string // 初始化面板监听地址（必须为 loopback，强制 127.0.0.1）
 }
 
 // Load 从环境变量加载配置
@@ -175,6 +183,7 @@ func Load() (*Config, error) {
 		MaxLoginAttempts:   getEnvInt("MAX_LOGIN_ATTEMPTS", 5),
 		LockoutDuration:    getEnvDuration("LOCKOUT_DURATION", 30*time.Minute),
 		MFARecoveryHMACKey: getEnv("MFA_RECOVERY_HMAC_KEY", ""),
+		MFAChallengeTTL:    getEnvDuration("MFA_CHALLENGE_TTL", 5*time.Minute),
 
 		// 邮件配置
 		SMTPHost:     getEnv("SMTP_HOST", "localhost"),
@@ -208,6 +217,12 @@ func Load() (*Config, error) {
 		// 优雅关闭配置
 		ShutdownTimeout: getEnvDuration("SHUTDOWN_TIMEOUT", 30*time.Second),
 		LANDeployment:   getEnvBool("LAN_DEPLOYMENT", false),
+
+		// 初始化面板配置
+		// 默认启用，监听 127.0.0.1:9091，与公网主路由完全隔离
+		// 初始化完成后应设置 INIT_ENABLED=false 永久关闭
+		InitEnabled:    getEnvBool("INIT_ENABLED", true),
+		InitListenAddr: getInitListenAddr(),
 	}
 
 	// 验证必需的配置
@@ -378,6 +393,13 @@ func validateProductionConfig(c *Config) error {
 		}
 	}
 
+	// 检查初始化面板配置：生产环境推荐初始化完成后关闭 INIT_ENABLED
+	// 不强制拒绝（允许重复初始化），但发出告警
+	if c.InitEnabled && !lanMode {
+		slog.Warn("生产环境启用 INIT_ENABLED，建议初始化完成后设置为 false 永久关闭",
+			"init_listen_addr", c.InitListenAddr)
+	}
+
 	return nil
 }
 
@@ -484,11 +506,51 @@ func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
 	return defaultValue
 }
 
+// getEnvBool 获取布尔类型环境变量
 func getEnvBool(key string, defaultValue bool) bool {
 	if value := os.Getenv(key); value != "" {
 		return strings.ToLower(value) == "true" || value == "1"
 	}
 	return defaultValue
+}
+
+// getInitListenAddr 获取初始化面板监听地址
+// 安全设计：强制 loopback（127.0.0.1），拒绝绑定到公网或局域网地址
+// 支持自定义端口：环境变量 INIT_LISTEN=9091 或 INIT_LISTEN=127.0.0.1:9091
+// 任何非 loopback 主机部分都会被忽略并回退到 127.0.0.1
+func getInitListenAddr() string {
+	raw := getEnv("INIT_LISTEN", "127.0.0.1:9091")
+
+	host, port, err := net.SplitHostPort(raw)
+	if err != nil {
+		// 仅端口格式（如 "9091"），回退到默认地址
+		slog.Warn("INIT_LISTEN 格式无效，应为 host:port 或 port，使用默认值", "raw", raw, "default", "127.0.0.1:9091")
+		return "127.0.0.1:9091"
+	}
+
+	// 强制 loopback：仅允许 127.0.0.1 / ::1 / localhost
+	if !isLoopbackHost(host) {
+		slog.Error("INIT_LISTEN 拒绝非 loopback 地址，初始化面板仅允许本地访问", "raw", raw)
+		return "127.0.0.1:9091"
+	}
+
+	// 校验端口范围
+	if portNum, err := strconv.Atoi(port); err != nil || portNum < 1 || portNum > 65535 {
+		slog.Warn("INIT_LISTEN 端口无效，使用默认 9091", "port", port)
+		return "127.0.0.1:9091"
+	}
+
+	return host + ":" + port
+}
+
+// isLoopbackHost 判断主机名是否为 loopback 地址
+func isLoopbackHost(host string) bool {
+	switch strings.ToLower(host) {
+	case "127.0.0.1", "::1", "localhost":
+		return true
+	default:
+		return false
+	}
 }
 
 // GetCORSAllowedOrigins 获取CORS允许的源列表

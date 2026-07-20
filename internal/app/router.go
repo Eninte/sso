@@ -100,12 +100,10 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 	// 绕过限流和 metrics 中间件，避免 k8s 探针流量干扰业务指标或触发限流
 	router.HandleFunc("/health", healthHandler).Methods("GET")
 
-	// 初始化面板端点 (无管理员时可用，有管理员时返回404)
-	initHandler := handler.NewInitHandler(svc.Store, svc.Password, svc.Cache, svc.Audit, version, buildTime)
-	router.HandleFunc("/init", initHandler.HandleInitPage).Methods("GET")
-	router.HandleFunc("/api/v1/init/status", initHandler.HandleSystemStatus).Methods("GET")
-	router.HandleFunc("/api/v1/init/admin", initHandler.HandleCreateAdmin).Methods("POST")
-	router.HandleFunc("/api/v1/init/client", initHandler.HandleCreateClient).Methods("POST")
+	// 安全设计：初始化面板路由 (/init, /api/v1/init/*) 不再注册到公网主路由
+	// 改由独立的 loopback HTTP 服务器承载（见 internal/app/init_server.go），
+	// 监听 127.0.0.1:9091，与公网主路由完全隔离，
+	// 杜绝反向代理在本机转发时把公网请求识别成本机请求的风险
 
 	// Prometheus指标端点 (使用Basic Auth保护)
 	router.Handle("/metrics", middleware.BasicAuth(cfg.MetricsUsername, cfg.MetricsPassword)(http.HandlerFunc(metricsHandler.HandleMetrics))).Methods("GET")
@@ -137,12 +135,14 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 		sensitive.Use(sensitiveLimiter.Middleware)
 		sensitive.HandleFunc("/register", registerHandler.Handle).Methods("POST")
 		sensitive.HandleFunc("/login", loginHandler.Handle).Methods("POST")
+		sensitive.HandleFunc("/login/mfa/verify", loginHandler.HandleVerifyMFALogin).Methods("POST")
 		sensitive.HandleFunc("/forgot-password", userHandler.HandleForgotPassword).Methods("POST")
 		sensitive.HandleFunc("/reset-password", userHandler.HandleResetPassword).Methods("POST")
 	} else {
 		// 无限流时直接注册到 api 路由器
 		api.HandleFunc("/register", registerHandler.Handle).Methods("POST")
 		api.HandleFunc("/login", loginHandler.Handle).Methods("POST")
+		api.HandleFunc("/login/mfa/verify", loginHandler.HandleVerifyMFALogin).Methods("POST")
 		api.HandleFunc("/forgot-password", userHandler.HandleForgotPassword).Methods("POST")
 		api.HandleFunc("/reset-password", userHandler.HandleResetPassword).Methods("POST")
 	}
@@ -161,6 +161,7 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 	protected.HandleFunc("/userinfo", userInfoHandler.Handle).Methods("GET")
 	protected.HandleFunc("/authorize", authorizeHandler.HandleAuthorize).Methods("GET")
 	protected.HandleFunc("/authorize/approve", authorizeHandler.HandleApprove).Methods("POST")
+	protected.HandleFunc("/authorize/deny", authorizeHandler.HandleDeny).Methods("POST")
 	protected.HandleFunc("/verify-email/send", userHandler.HandleSendVerificationEmail).Methods("POST")
 	protected.HandleFunc("/change-password", userHandler.HandleChangePassword).Methods("POST")
 	protected.HandleFunc("/logout-all", tokenHandler.HandleLogoutAll).Methods("POST")
@@ -168,6 +169,10 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 	protected.HandleFunc("/mfa/verify", mfaHandler.HandleVerifyMFA).Methods("POST")
 	protected.HandleFunc("/mfa/disable", mfaHandler.HandleDisableMFA).Methods("POST")
 	protected.HandleFunc("/mfa/status", mfaHandler.HandleMFAStatus).Methods("GET")
+	// MFA 恢复码管理（已认证用户才能生成/验证/查询恢复码）
+	protected.HandleFunc("/mfa/recovery-codes/generate", mfaHandler.HandleGenerateRecoveryCodes).Methods("POST")
+	protected.HandleFunc("/mfa/recovery-codes/verify", mfaHandler.HandleVerifyRecoveryCode).Methods("POST")
+	protected.HandleFunc("/mfa/recovery-codes/status", mfaHandler.HandleGetRecoveryCodeStatus).Methods("GET")
 
 	// 管理员端点 (需要认证 + 管理员角色)
 	admin := api.PathPrefix("/admin").Subrouter()

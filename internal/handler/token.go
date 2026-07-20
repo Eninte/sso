@@ -45,7 +45,7 @@ func (h *TokenHandler) HandleToken(w http.ResponseWriter, r *http.Request) {
 	switch req.GrantType {
 	case model.GrantTypeRefreshToken:
 		slog.Debug("HandleToken: 收到刷新Token请求", "refresh_token_length", len(req.RefreshToken))
-		h.handleRefreshToken(w, r, req.RefreshToken)
+		h.handleRefreshToken(w, r, &req)
 	case model.GrantTypeAuthorizationCode:
 		h.handleAuthorizationCode(w, r, &req)
 	default:
@@ -53,17 +53,20 @@ func (h *TokenHandler) HandleToken(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleRefreshToken 处理刷新Token请求
-func (h *TokenHandler) handleRefreshToken(w http.ResponseWriter, r *http.Request, refreshToken string) {
-	slog.Debug("handleRefreshToken: 开始处理", "refresh_token_length", len(refreshToken))
-	if refreshToken == "" {
+// handleRefreshToken 处理刷新Token请求（阶段 2.2：携带 client_id 校验归属）
+func (h *TokenHandler) handleRefreshToken(w http.ResponseWriter, r *http.Request, req *model.TokenRequest) {
+	slog.Debug("handleRefreshToken: 开始处理", "refresh_token_length", len(req.RefreshToken))
+	if req.RefreshToken == "" {
 		slog.Warn("handleRefreshToken: refresh_token为空")
 		handlerutil.WriteValidationError(w, "refresh_token", getMessage(r, apperrors.ErrCodeMissingRefreshToken))
 		return
 	}
 
-	slog.Debug("handleRefreshToken: 调用authSvc.RefreshToken")
-	resp, err := h.authSvc.RefreshToken(r.Context(), refreshToken)
+	// 阶段 2.2：调用 RefreshTokenWithClientID 校验 token 客户端归属
+	// 若 token 由 OAuth 流程签发（含 ClientID），则 req.ClientID 必须与之一致
+	// 登录流程签发的 token（ClientID 为 nil）不要求 req.ClientID
+	slog.Debug("handleRefreshToken: 调用authSvc.RefreshTokenWithClientID")
+	resp, err := h.authSvc.RefreshTokenWithClientID(r.Context(), req.RefreshToken, req.ClientID)
 	if err != nil {
 		slog.Error("handleRefreshToken: 刷新失败", "error", err)
 		handlerutil.WriteJSONError(w, err)

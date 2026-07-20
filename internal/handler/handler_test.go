@@ -364,7 +364,7 @@ func TestUserInfoHandler_Handle(t *testing.T) {
 		req := httptest.NewRequest("GET", "/api/v1/userinfo", nil)
 		ctx := context.WithValue(req.Context(), middleware.UserIDKey, userID)
 		ctx = context.WithValue(ctx, middleware.UserEmailKey, "cached@example.com")
-		ctx = context.WithValue(ctx, middleware.UserScopesKey, []string{"openid"})
+		ctx = context.WithValue(ctx, middleware.UserScopesKey, []string{"openid", "email"})
 		w := httptest.NewRecorder()
 
 		hWithCache.Handle(w, req.WithContext(ctx))
@@ -382,7 +382,7 @@ func TestUserInfoHandler_Handle(t *testing.T) {
 		req := httptest.NewRequest("GET", "/api/v1/userinfo", nil)
 		ctx := context.WithValue(req.Context(), middleware.UserIDKey, "nonexistent-user")
 		ctx = context.WithValue(ctx, middleware.UserEmailKey, "fallback@example.com")
-		ctx = context.WithValue(ctx, middleware.UserScopesKey, []string{"openid"})
+		ctx = context.WithValue(ctx, middleware.UserScopesKey, []string{"openid", "email"})
 		w := httptest.NewRecorder()
 
 		h.Handle(w, req.WithContext(ctx))
