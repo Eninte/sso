@@ -184,8 +184,10 @@ func TestFullAuthFlow(t *testing.T) {
 	// 5. 登出
 	// 阶段 B 审查修复（C2）：/token/revoke 已迁移到 protected 路由，
 	// 必须携带 access_token 通过 AuthMiddleware，否则返回 401
-	revokeReq := revokeRequest{Token: tokens.AccessToken}
-	logoutResp, _, err := doRequest("POST", "/api/v1/token/revoke", revokeReq, tokens.AccessToken)
+	// 阶段 2.1：Refresh Token 原子轮换会撤销旧 token（含 access_token），
+	// 必须使用 refresh 后的新 access_token 调用 revoke
+	revokeReq := revokeRequest{Token: newTokens.AccessToken}
+	logoutResp, _, err := doRequest("POST", "/api/v1/token/revoke", revokeReq, newTokens.AccessToken)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, logoutResp.StatusCode)
 	t.Logf("登出成功")
