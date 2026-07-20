@@ -611,9 +611,9 @@ func TestCreateAdmin_ConcurrentRace_AdvisoryLock(t *testing.T) {
 
 	// 统计结果
 	var (
-		successCount int
+		successCount   int
 		forbiddenCount int
-		otherErrCount int
+		otherErrCount  int
 	)
 	for r := range results {
 		if r.err == nil && r.user != nil {

@@ -161,8 +161,8 @@ func TestAccountLock_RevokesAllTokens(t *testing.T) {
 			storeInst,
 			passwordSvc,
 			jwtSvc,
-			2,                // maxAttempts=2 便于触发锁定
-			30*time.Minute,   // lockoutDuration
+			2,              // maxAttempts=2 便于触发锁定
+			30*time.Minute, // lockoutDuration
 			service.WithCache(cache.NewMemoryCache()),
 		)
 		ctx := context.Background()

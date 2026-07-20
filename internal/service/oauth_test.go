@@ -389,12 +389,12 @@ func TestOAuthService_RevokeToken(t *testing.T) {
 	t.Run("成功撤销已存在的Token", func(t *testing.T) {
 		// 准备一个有效 token
 		token := &model.Token{
-			ID:          "token-test-id",
-			AccessToken: "valid-access-token",
+			ID:           "token-test-id",
+			AccessToken:  "valid-access-token",
 			RefreshToken: "valid-refresh-token",
-			UserID:      "user-test",
-			ExpiresAt:   time.Now().Add(time.Hour),
-			CreatedAt:   time.Now(),
+			UserID:       "user-test",
+			ExpiresAt:    time.Now().Add(time.Hour),
+			CreatedAt:    time.Now(),
 		}
 		require.NoError(t, storeInst.StoreToken(ctx, token))
 
@@ -409,12 +409,12 @@ func TestOAuthService_RevokeToken(t *testing.T) {
 
 	t.Run("重复撤销不覆盖原撤销时间", func(t *testing.T) {
 		token := &model.Token{
-			ID:          "token-duplicate-id",
-			AccessToken: "dup-access-token",
+			ID:           "token-duplicate-id",
+			AccessToken:  "dup-access-token",
 			RefreshToken: "dup-refresh-token",
-			UserID:      "user-dup",
-			ExpiresAt:   time.Now().Add(time.Hour),
-			CreatedAt:   time.Now(),
+			UserID:       "user-dup",
+			ExpiresAt:    time.Now().Add(time.Hour),
+			CreatedAt:    time.Now(),
 		}
 		require.NoError(t, storeInst.StoreToken(ctx, token))
 

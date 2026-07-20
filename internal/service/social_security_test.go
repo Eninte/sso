@@ -490,7 +490,7 @@ func TestFindOrCreateSocialUser_UpdateSocialAccountPersisted(t *testing.T) {
 		identity := &service.ProviderIdentity{
 			ProviderUserID: "google-nochange-123",
 			Email:          account.ProviderEmail, // 相同 email
-			EmailVerified:  account.EmailVerified,  // 相同 verified
+			EmailVerified:  account.EmailVerified, // 相同 verified
 		}
 
 		_, err := svc.FindOrCreateSocialUserForTest(context.Background(), "google", identity)
