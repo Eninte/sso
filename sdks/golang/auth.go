@@ -27,6 +27,11 @@ func (c *Client) Register(ctx context.Context, email, password string) (*Registe
 }
 
 // Login 登录
+//
+// 阶段 5.4 契约扩展：若用户启用了 MFA，响应中的 MFARequired 字段为 true，
+// 此时 AccessToken/RefreshToken 为空，调用方需展示 MFA 输入页面，
+// 收到用户输入的 TOTP/恢复码后调用 VerifyMFALogin 完成第二阶段验证。
+// 若 MFARequired 为 false，则直接返回 Token 并自动缓存到客户端。
 func (c *Client) Login(ctx context.Context, email, password string) (*TokenResponse, error) {
 	body, err := c.doPost(ctx, "/api/v1/login", LoginRequest{
 		Email:    email,
@@ -39,6 +44,34 @@ func (c *Client) Login(ctx context.Context, email, password string) (*TokenRespo
 	var resp TokenResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("sso: parse login response: %w", err)
+	}
+
+	// MFA 两阶段登录：不缓存 Token，等待第二阶段验证
+	if !resp.MFARequired {
+		c.SetTokens(resp.AccessToken, resp.RefreshToken, resp.ExpiresIn)
+	}
+
+	return &resp, nil
+}
+
+// VerifyMFALogin 完成 MFA 两阶段登录的第二阶段
+//
+// 阶段 5.4 新增：调用 /api/v1/login/mfa/verify 端点。
+// 成功后返回标准 TokenResponse 并自动缓存到客户端。
+//
+// 错误处理建议：
+//   - ErrCodeMFAChallengeInvalid / ErrCodeMFAChallengeExpired → 重新发起登录获取新 challenge
+//   - ErrCodeInvalidMFACode → 提示用户重新输入（challenge 仍有效，尝试次数会递增）
+//   - ErrCodeTooManyMFAAttempts → challenge 已失效，需重新登录
+func (c *Client) VerifyMFALogin(ctx context.Context, req LoginMFAVerifyRequest) (*TokenResponse, error) {
+	body, err := c.doPost(ctx, "/api/v1/login/mfa/verify", req, false)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp TokenResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("sso: parse MFA login response: %w", err)
 	}
 
 	c.SetTokens(resp.AccessToken, resp.RefreshToken, resp.ExpiresIn)

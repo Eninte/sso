@@ -215,6 +215,12 @@ impl SSOClient {
         .await
     }
 
+    /// 用户登录（第一阶段）
+    ///
+    /// 阶段 5.4 契约扩展：当用户启用 MFA 时，服务端返回 mfa_required=true 与
+    /// 一次性 mfa_challenge 令牌（TTL 5 分钟），此时 access_token/refresh_token 为空。
+    /// 本方法在这种情况下不会调用 set_tokens；调用方应检查 resp.mfa_required，
+    /// 若为 true 则提示用户输入 MFA 验证码并调用 verify_mfa_login 完成第二阶段登录。
     pub async fn login(
         &self,
         email: &str,
@@ -230,6 +236,29 @@ impl SSOClient {
                 }),
                 false,
             )
+            .await?;
+
+        if !resp.mfa_required {
+            self.set_tokens(&resp.access_token, &resp.refresh_token, resp.expires_in)
+                .await;
+        }
+        Ok(resp)
+    }
+
+    /// MFA 两阶段登录第二阶段验证
+    ///
+    /// 阶段 5.4 契约扩展：POST /api/v1/login/mfa/verify
+    /// 使用 login 返回的 mfa_challenge 与用户输入的验证码完成登录。
+    /// 成功后服务端返回标准 TokenResponse，本方法会调用 set_tokens 持久化。
+    ///
+    /// 失败错误码：MFA_CHALLENGE_INVALID / MFA_CHALLENGE_EXPIRED /
+    /// INVALID_MFA_CODE / TOO_MANY_MFA_ATTEMPTS / MFA_SERVICE_UNAVAILABLE
+    pub async fn verify_mfa_login(
+        &self,
+        req: &LoginMFAVerifyRequest,
+    ) -> Result<TokenResponse, SSOError> {
+        let resp: TokenResponse = self
+            .request(Method::POST, "/api/v1/login/mfa/verify", Some(req), false)
             .await?;
 
         self.set_tokens(&resp.access_token, &resp.refresh_token, resp.expires_in)
@@ -410,6 +439,141 @@ impl SSOClient {
             url_encode(state),
         );
         self.request(Method::GET, &path, None::<&()>, true).await
+    }
+
+    /// 获取 OAuth2 授权（带 PKCE，consent_token）
+    ///
+    /// 阶段 5.3 新增：公共客户端必须使用 PKCE（S256）。
+    pub async fn authorize_with_pkce(
+        &self,
+        client_id: &str,
+        redirect_uri: &str,
+        scope: &str,
+        state: &str,
+        code_challenge: &str,
+    ) -> Result<AuthorizeResponse, SSOError> {
+        let path = format!(
+            "/api/v1/authorize?client_id={}&redirect_uri={}&response_type=code&scope={}&state={}&code_challenge={}&code_challenge_method=S256",
+            url_encode(client_id),
+            url_encode(redirect_uri),
+            url_encode(scope),
+            url_encode(state),
+            url_encode(code_challenge),
+        );
+        self.request(Method::GET, &path, None::<&()>, true).await
+    }
+
+    /// 批准 OAuth2 授权
+    ///
+    /// 阶段 5.3 新增：服务端期望请求体 {consent_token, state}，
+    /// 不再接受 client_id/redirect_uri/scope 等字段（consent_token JWT 内部已携带）。
+    /// 调用方需先调用 authorize/authorize_with_pkce 获取 consent_token，再传给本方法。
+    ///
+    /// 成功后返回 {code, state}，使用 code 调用 /api/v1/token 换取 Access Token。
+    pub async fn approve_authorization(
+        &self,
+        req: &AuthorizeApproveRequest,
+    ) -> Result<AuthorizeResponse, SSOError> {
+        self.request(Method::POST, "/api/v1/authorize/approve", Some(req), true)
+            .await
+    }
+
+    /// 拒绝 OAuth2 授权
+    ///
+    /// 阶段 5.3 新增：用户主动拒绝授权时调用 /api/v1/authorize/deny。
+    /// 服务端固定返回 HTTP 403 + {error:"access_denied", error_description, state}，
+    /// 本方法将此响应当作正常的 DenyResponse 返回（不视为错误），
+    /// 调用方拿到后应向客户端应用回传 ?error=access_denied&state=xxx。
+    ///
+    /// 注意：仅在用户主动拒绝时调用；其他场景的 403 仍按错误处理。
+    pub async fn deny_authorization(
+        &self,
+        req: &AuthorizeDenyRequest,
+    ) -> Result<AuthorizeDenyResponse, SSOError> {
+        match self
+            .request::<AuthorizeDenyResponse>(Method::POST, "/api/v1/authorize/deny", Some(req), true)
+            .await
+        {
+            Ok(resp) => Ok(resp),
+            Err(err) => {
+                // 服务端 deny 端点固定返回 403，解析错误响应体
+                if err.http_status == 403 && !err.raw_body.is_empty() {
+                    if let Ok(resp) = serde_json::from_str::<AuthorizeDenyResponse>(&err.raw_body) {
+                        return Ok(resp);
+                    }
+                }
+                Err(err)
+            }
+        }
+    }
+
+    // =======================================================================
+    // Social Login 社交登录
+    //
+    // 阶段 5.5 新增：服务端契约
+    //   - GET /auth/providers         公开端点，直接返回数组（不包裹 data）
+    //   - GET /auth/{provider}?state= 公开端点，返回 HTTP 307 重定向到 provider 授权页面
+    //   - GET /auth/{provider}/callback?code=&state= 公开端点，平铺返回 TokenResponse
+    // =======================================================================
+
+    /// 获取支持的社交登录提供商列表
+    ///
+    /// 阶段 5.5 新增：调用 GET /auth/providers 公开端点。
+    /// 服务端直接返回数组（不包裹在 data 中），无需认证。
+    pub async fn get_providers(&self) -> Result<Vec<OAuthProvider>, SSOError> {
+        self.request::<Vec<OAuthProvider>>(Method::GET, "/auth/providers", None::<&()>, false)
+            .await
+    }
+
+    /// 构造发起社交登录的 URL
+    ///
+    /// 阶段 5.5 新增：直接构造 URL 字符串，不发起 HTTP 请求。
+    /// 调用方应使用浏览器重定向到此 URL（服务端会返回 307 到 provider 授权页面），
+    /// 而不是 SDK 直接 GET。
+    ///
+    /// - `provider`: 社交登录提供商名称（如 "google" / "github"）
+    /// - `state`:    可选，CSRF 防护 state；为 None 时由服务端自动生成 UUID
+    pub fn get_social_login_url(&self, provider: &str, state: Option<&str>) -> String {
+        let encoded = url_encode(provider);
+        let mut url = format!("{}/auth/{}", self.base_url, encoded);
+        if let Some(s) = state {
+            if !s.is_empty() {
+                url.push_str("?state=");
+                url.push_str(&url_encode(s));
+            }
+        }
+        url
+    }
+
+    /// 用回调返回的 code+state 完成社交登录
+    ///
+    /// 阶段 5.5 新增：调用 GET /auth/{provider}/callback?code={code}&state={state} 公开端点。
+    /// 服务端直接平铺返回 TokenResponse（不包裹 data），无需认证。
+    /// 成功后调用 set_tokens 缓存到客户端。
+    ///
+    /// 失败错误码：MISSING_AUTH_CODE / OAUTH_STATE_INVALID / OAUTH_STATE_EXPIRED /
+    /// PROVIDER_NOT_SUPPORTED / OAUTH_CODE_EXCHANGE_FAILED / SOCIAL_LOGIN_FAILED /
+    /// PROVIDER_USER_ID_MISSING / PROVIDER_EMAIL_NOT_VERIFIED /
+    /// SOCIAL_ACCOUNT_CONFLICT / EMAIL_CONFLICT_WITH_LOCAL / ACCOUNT_DISABLED / ACCOUNT_LOCKED
+    pub async fn exchange_social_code(
+        &self,
+        provider: &str,
+        code: &str,
+        state: &str,
+    ) -> Result<TokenResponse, SSOError> {
+        let path = format!(
+            "/auth/{}/callback?code={}&state={}",
+            url_encode(provider),
+            url_encode(code),
+            url_encode(state),
+        );
+        let resp: TokenResponse = self
+            .request(Method::GET, &path, None::<&()>, false)
+            .await?;
+
+        self.set_tokens(&resp.access_token, &resp.refresh_token, resp.expires_in)
+            .await;
+        Ok(resp)
     }
 
     // =======================================================================

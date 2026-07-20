@@ -55,18 +55,40 @@ type ChangePasswordRequest struct {
 }
 
 // AuthorizeApproveRequest 授权批准请求
+//
+// 阶段 5.3 契约修复：服务端 /api/v1/authorize/approve 实际期望 {consent_token, state}。
+// 旧字段（client_id/redirect_uri/scope/code_challenge 等）已通过 consent_token JWT 携带，
+// 不再需要重复传递。请求体启用 DisallowUnknownFields，多余字段会被拒绝。
 type AuthorizeApproveRequest struct {
-	ClientID            string `json:"client_id"`
-	RedirectURI         string `json:"redirect_uri"`
-	Scope               string `json:"scope"`
-	State               string `json:"state"`
-	CodeChallenge       string `json:"code_challenge,omitempty"`
-	CodeChallengeMethod string `json:"code_challenge_method,omitempty"`
+	ConsentToken string `json:"consent_token"`
+	State        string `json:"state"`
+}
+
+// AuthorizeDenyRequest 授权拒绝请求
+//
+// 阶段 5.3 新增：用户主动拒绝授权时调用 /api/v1/authorize/deny。
+type AuthorizeDenyRequest struct {
+	ConsentToken string `json:"consent_token"`
+	State        string `json:"state"`
 }
 
 // MFAVerifyRequest MFA验证请求
+// 用于已登录用户在 /api/v1/mfa/verify 端点验证 TOTP 码以启用 MFA。
 type MFAVerifyRequest struct {
 	Code string `json:"code"`
+}
+
+// LoginMFAVerifyRequest 登录阶段 MFA 验证请求
+//
+// 阶段 5.4 新增：用于两阶段登录的第二阶段，调用 /api/v1/login/mfa/verify 端点。
+// 字段说明：
+//   - MFAChallenge：第一阶段登录返回的 mfa_challenge 令牌（64 字符 hex）
+//   - Method：验证方式，"totp" 或 "recovery_code"
+//   - Code：TOTP 6 位数字 或 恢复码字符串
+type LoginMFAVerifyRequest struct {
+	MFAChallenge string `json:"mfa_challenge"`
+	Method       string `json:"method"`
+	Code         string `json:"code"`
 }
 
 // DisableUserRequest 禁用用户请求
@@ -84,13 +106,30 @@ type EnableUserRequest struct {
 // ============================================================================
 
 // TokenResponse Token响应
+//
+// 阶段 5.4 契约扩展：当用户启用 MFA 时，登录响应不再直接返回 Token，
+// 而是返回 mfa_challenge + mfa_required + mfa_methods，调用方需展示 MFA 输入页面，
+// 收到用户输入的 TOTP/恢复码后调用 VerifyMFALogin 完成第二阶段验证。
+//
+// 字段语义：
+//   - 普通登录（无 MFA）：access_token/refresh_token/token_type/scopes 有值，
+//     expires_in 是 access_token 的 TTL（秒）
+//   - MFA required：mfa_required=true，mfa_challenge 是 64 字符 hex 令牌，
+//     mfa_methods 是支持的验证方式（如 ["totp","recovery_code"]），
+//     expires_in 是 challenge 的 TTL（默认 300 秒），access_token 等字段为空
 type TokenResponse struct {
-	AccessToken  string   `json:"access_token"`
-	RefreshToken string   `json:"refresh_token"`
-	TokenType    string   `json:"token_type"`
-	ExpiresIn    int      `json:"expires_in"`
+	// 普通登录字段
+	AccessToken  string   `json:"access_token,omitempty"`
+	RefreshToken string   `json:"refresh_token,omitempty"`
+	TokenType    string   `json:"token_type,omitempty"`
 	Scopes       []string `json:"scopes,omitempty"`
 	Scope        string   `json:"scope,omitempty"`
+	ExpiresIn    int      `json:"expires_in"`
+
+	// MFA 两阶段登录字段（阶段 5.4）
+	MFARequired  bool     `json:"mfa_required,omitempty"`
+	MFAChallenge string   `json:"mfa_challenge,omitempty"`
+	MFAMethods   []string `json:"mfa_methods,omitempty"`
 }
 
 // RegisterResponse 注册响应
@@ -131,9 +170,37 @@ type MFAStatusResponse struct {
 }
 
 // AuthorizeResponse 授权响应
+//
+// 阶段 5.3 契约修复：服务端 GET /api/v1/authorize 与 POST /api/v1/authorize/approve
+// 返回的响应结构不同。使用同一个类型并通过 omitempty 兼容两种场景：
+//   - GET /authorize 返回：ConsentToken/ClientID/RedirectURI/Scope/State/RequireApproval
+//     （Code 为空，前端需展示授权同意页面）
+//   - POST /authorize/approve 返回：Code/State
+//     （ConsentToken 等字段为空，客户端使用 Code 调用 /token 端点换取 Access Token）
+//
+// 集成方应根据 RequireApproval 判断当前是处于"待同意"还是"已批准"状态。
 type AuthorizeResponse struct {
-	Code  string `json:"code"`
-	State string `json:"state"`
+	// GET /authorize 返回字段
+	ConsentToken    string `json:"consent_token,omitempty"`
+	ClientID        string `json:"client_id,omitempty"`
+	RedirectURI     string `json:"redirect_uri,omitempty"`
+	Scope           string `json:"scope,omitempty"`
+	RequireApproval bool   `json:"require_approval,omitempty"`
+
+	// POST /authorize/approve 返回字段
+	Code  string `json:"code,omitempty"`
+	State string `json:"state,omitempty"`
+}
+
+// AuthorizeDenyResponse 授权拒绝响应
+//
+// 阶段 5.3 新增：服务端返回 HTTP 403，error 固定为 "access_denied"。
+// SDK 不应将其视为成功响应；调用方拿到此响应后应向客户端应用回传
+// ?error=access_denied&state=xxx。
+type AuthorizeDenyResponse struct {
+	Error            string `json:"error"`
+	ErrorDescription string `json:"error_description"`
+	State            string `json:"state"`
 }
 
 // UserListResponse 用户列表响应

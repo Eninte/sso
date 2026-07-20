@@ -12,9 +12,11 @@ from threading import Lock
 
 from .errors import SSOError, parse_error
 from .models import (
-    TokenResponse, RegisterResponse, UserInfo, MessageResponse,
+    TokenResponse, LoginMFAVerifyRequest, RegisterResponse, UserInfo, MessageResponse,
     MFASetupResponse, MFAStatusResponse, AuthorizeResponse,
+    AuthorizeApproveRequest, AuthorizeDenyRequest, AuthorizeDenyResponse,
     UserListResponse, UserItem, HealthResponse, DiscoveryResponse, JWKSResponse, JWK,
+    OAuthProvider,
 )
 
 
@@ -108,9 +110,38 @@ class SSOClient:
         return RegisterResponse(message=resp.get("message", ""))
 
     def login(self, email: str, password: str) -> TokenResponse:
+        """用户登录（第一阶段）
+
+        阶段 5.4 契约扩展：当用户启用 MFA 时，服务端返回 mfa_required=True 与
+        一次性 mfa_challenge 令牌（TTL 5 分钟），此时 access_token/refresh_token 为空。
+        本方法在这种情况下不会调用 set_tokens；调用方应检查 resp.mfa_required，
+        若为 True 则提示用户输入 MFA 验证码并调用 verify_mfa_login 完成第二阶段登录。
+        """
         resp = self._request("POST", "/api/v1/login", {"email": email, "password": password})
-        self.set_tokens(resp["access_token"], resp["refresh_token"], resp["expires_in"])
-        return self._to_token_response(resp)
+        token_resp = self._to_token_response(resp)
+        if not token_resp.mfa_required:
+            self.set_tokens(token_resp.access_token, token_resp.refresh_token, token_resp.expires_in)
+        return token_resp
+
+    def verify_mfa_login(self, req: LoginMFAVerifyRequest) -> TokenResponse:
+        """MFA 两阶段登录第二阶段验证
+
+        阶段 5.4 契约扩展：POST /api/v1/login/mfa/verify
+        使用 login 返回的 mfa_challenge 与用户输入的验证码完成登录。
+        成功后服务端返回标准 TokenResponse，本方法会调用 set_tokens 持久化。
+
+        失败错误码：MFA_CHALLENGE_INVALID / MFA_CHALLENGE_EXPIRED /
+        INVALID_MFA_CODE / TOO_MANY_MFA_ATTEMPTS / MFA_SERVICE_UNAVAILABLE
+        """
+        body = {
+            "mfa_challenge": req.mfa_challenge,
+            "method": req.method,
+            "code": req.code,
+        }
+        resp = self._request("POST", "/api/v1/login/mfa/verify", body)
+        token_resp = self._to_token_response(resp)
+        self.set_tokens(token_resp.access_token, token_resp.refresh_token, token_resp.expires_in)
+        return token_resp
 
     def refresh_token(self) -> TokenResponse:
         if not self._refresh_token:
@@ -195,23 +226,153 @@ class SSOClient:
     # =======================================================================
 
     def authorize(self, client_id: str, redirect_uri: str, scope: str, state: str) -> AuthorizeResponse:
+        """获取 OAuth2 授权（consent_token）
+
+        阶段 5.3 契约修复：服务端 GET /api/v1/authorize 返回 {consent_token, client_id,
+        redirect_uri, scope, state, require_approval}，不再直接返回 code。
+        调用方应展示授权同意页面，用户同意后调用 approve_authorization 获取 code。
+        """
         params = urllib.parse.urlencode({
             "client_id": client_id, "redirect_uri": redirect_uri,
             "response_type": "code", "scope": scope, "state": state,
         })
         resp = self._request("GET", f"/api/v1/authorize?{params}", auth=True)
-        return AuthorizeResponse(code=resp.get("code", ""), state=resp.get("state", ""))
+        return self._to_authorize_response(resp)
 
     def authorize_with_pkce(
         self, client_id: str, redirect_uri: str, scope: str, state: str, code_challenge: str,
     ) -> AuthorizeResponse:
+        """获取 OAuth2 授权（带 PKCE，consent_token）
+
+        阶段 5.3 契约修复：同 authorize()，但携带 PKCE challenge。
+        公共客户端必须使用此方法（S256）。
+        """
         params = urllib.parse.urlencode({
             "client_id": client_id, "redirect_uri": redirect_uri,
             "response_type": "code", "scope": scope, "state": state,
             "code_challenge": code_challenge, "code_challenge_method": "S256",
         })
         resp = self._request("GET", f"/api/v1/authorize?{params}", auth=True)
-        return AuthorizeResponse(code=resp.get("code", ""), state=resp.get("state", ""))
+        return self._to_authorize_response(resp)
+
+    def approve_authorization(self, req: AuthorizeApproveRequest) -> AuthorizeResponse:
+        """批准 OAuth2 授权
+
+        阶段 5.3 契约修复：服务端期望请求体 {consent_token, state}，
+        不再接受 client_id/redirect_uri/scope 等字段（consent_token JWT 内部已携带）。
+        调用方需先调用 authorize/authorize_with_pkce 获取 consent_token，再传给本方法。
+
+        成功后返回 {code, state}，使用 code 调用 exchange_code_for_token 换取 Access Token。
+        """
+        body = {"consent_token": req.consent_token, "state": req.state}
+        resp = self._request("POST", "/api/v1/authorize/approve", body, auth=True)
+        return self._to_authorize_response(resp)
+
+    def deny_authorization(self, req: AuthorizeDenyRequest) -> AuthorizeDenyResponse:
+        """拒绝 OAuth2 授权
+
+        阶段 5.3 新增：用户主动拒绝授权时调用 /api/v1/authorize/deny。
+        服务端固定返回 HTTP 403 + {error:"access_denied", error_description, state}，
+        本方法将此响应当作正常的 DenyResponse 返回（不视为错误），
+        调用方拿到后应向客户端应用回传 ?error=access_denied&state=xxx。
+
+        注意：仅在用户主动拒绝时调用；其他场景的 403 仍按错误处理。
+        """
+        body = {"consent_token": req.consent_token, "state": req.state}
+        try:
+            resp = self._request("POST", "/api/v1/authorize/deny", body, auth=True)
+            # 理论上不会进入此分支（服务端固定返回 403），但保留兼容性
+            return AuthorizeDenyResponse(
+                error=resp.get("error", ""),
+                error_description=resp.get("error_description", ""),
+                state=resp.get("state", ""),
+            )
+        except SSOError as e:
+            if e.http_status == 403:
+                import json as _json
+                try:
+                    resp = _json.loads(e.raw_body)
+                    return AuthorizeDenyResponse(
+                        error=resp.get("error", ""),
+                        error_description=resp.get("error_description", ""),
+                        state=resp.get("state", ""),
+                    )
+                except (ValueError, TypeError):
+                    pass
+            raise
+
+    @staticmethod
+    def _to_authorize_response(resp: Any) -> AuthorizeResponse:
+        """从 dict 构造 AuthorizeResponse（兼容 GET 与 POST approve 两种响应）"""
+        return AuthorizeResponse(
+            consent_token=resp.get("consent_token", ""),
+            client_id=resp.get("client_id", ""),
+            redirect_uri=resp.get("redirect_uri", ""),
+            scope=resp.get("scope", ""),
+            require_approval=resp.get("require_approval", False),
+            code=resp.get("code", ""),
+            state=resp.get("state", ""),
+        )
+
+    # =======================================================================
+    # Social Login 社交登录
+    #
+    # 阶段 5.5 新增：服务端契约
+    #   - GET /auth/providers         公开端点，直接返回数组（不包裹 data）
+    #   - GET /auth/{provider}?state= 公开端点，返回 HTTP 307 重定向到 provider 授权页面
+    #   - GET /auth/{provider}/callback?code=&state= 公开端点，平铺返回 TokenResponse
+    # =======================================================================
+
+    def get_providers(self) -> list[OAuthProvider]:
+        """获取支持的社交登录提供商列表
+
+        阶段 5.5 新增：调用 GET /auth/providers 公开端点。
+        服务端直接返回数组（不包裹在 data 中），无需认证。
+        """
+        resp = self._request("GET", "/auth/providers")
+        return [
+            OAuthProvider(
+                name=item.get("name", ""),
+                label=item.get("label", ""),
+                icon=item.get("icon", ""),
+            )
+            for item in resp
+        ]
+
+    def get_social_login_url(self, provider: str, state: str = "") -> str:
+        """构造发起社交登录的 URL
+
+        阶段 5.5 新增：直接构造 URL 字符串，不发起 HTTP 请求。
+        调用方应使用浏览器重定向到此 URL（服务端会返回 307 到 provider 授权页面），
+        而不是 SDK 直接 GET。
+
+        :param provider: 社交登录提供商名称（如 "google" / "github"）
+        :param state:    可选，CSRF 防护 state；为空时由服务端自动生成 UUID
+        """
+        encoded_provider = urllib.parse.quote(provider, safe="")
+        url = f"{self.base_url}/auth/{encoded_provider}"
+        if state:
+            url += f"?{urllib.parse.urlencode({'state': state})}"
+        return url
+
+    def exchange_social_code(self, provider: str, code: str, state: str) -> TokenResponse:
+        """用回调返回的 code+state 完成社交登录
+
+        阶段 5.5 新增：调用 GET /auth/{provider}/callback?code={code}&state={state} 公开端点。
+        服务端直接平铺返回 TokenResponse（不包裹 data），无需认证。
+        成功后调用 set_tokens 缓存到客户端。
+
+        失败错误码：MISSING_AUTH_CODE / OAUTH_STATE_INVALID / OAUTH_STATE_EXPIRED /
+        PROVIDER_NOT_SUPPORTED / OAUTH_CODE_EXCHANGE_FAILED / SOCIAL_LOGIN_FAILED /
+        PROVIDER_USER_ID_MISSING / PROVIDER_EMAIL_NOT_VERIFIED /
+        SOCIAL_ACCOUNT_CONFLICT / EMAIL_CONFLICT_WITH_LOCAL / ACCOUNT_DISABLED / ACCOUNT_LOCKED
+        """
+        encoded_provider = urllib.parse.quote(provider, safe="")
+        params = urllib.parse.urlencode({"code": code, "state": state})
+        resp = self._request("GET", f"/auth/{encoded_provider}/callback?{params}")
+        token_resp = self._to_token_response(resp)
+        self.set_tokens(token_resp.access_token, token_resp.refresh_token, token_resp.expires_in)
+        return token_resp
 
     # =======================================================================
     # MFA
@@ -320,4 +481,7 @@ class SSOClient:
             expires_in=data.get("expires_in", 0),
             scopes=data.get("scopes", []),
             scope=data.get("scope", ""),
+            mfa_required=data.get("mfa_required", False),
+            mfa_challenge=data.get("mfa_challenge", ""),
+            mfa_methods=data.get("mfa_methods", []),
         )

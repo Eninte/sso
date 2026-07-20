@@ -7,6 +7,7 @@ export type { ErrorCodeType } from './errors';
 export type {
   SSOClientOptions,
   TokenResponse,
+  LoginMFAVerifyRequest,
   RegisterResponse,
   UserInfo,
   MessageResponse,
@@ -14,6 +15,8 @@ export type {
   MFAStatusResponse,
   AuthorizeResponse,
   AuthorizeApproveRequest,
+  AuthorizeDenyRequest,
+  AuthorizeDenyResponse,
   UserListResponse,
   UserItem,
   HealthResponse,

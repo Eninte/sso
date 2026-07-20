@@ -41,13 +41,26 @@ export interface ChangePasswordRequest {
   new_password: string;
 }
 
+/**
+ * 授权批准请求
+ *
+ * 阶段 5.3 契约修复：服务端 /api/v1/authorize/approve 实际期望 {consent_token, state}。
+ * 旧字段（client_id/redirect_uri/scope/code_challenge 等）已通过 consent_token JWT 携带，
+ * 不再需要重复传递。请求体启用 DisallowUnknownFields，多余字段会被拒绝。
+ */
 export interface AuthorizeApproveRequest {
-  client_id: string;
-  redirect_uri: string;
-  scope: string;
+  consent_token: string;
   state: string;
-  code_challenge?: string;
-  code_challenge_method?: string;
+}
+
+/**
+ * 授权拒绝请求
+ *
+ * 阶段 5.3 新增：用户主动拒绝授权时调用 /api/v1/authorize/deny。
+ */
+export interface AuthorizeDenyRequest {
+  consent_token: string;
+  state: string;
 }
 
 export interface MFAVerifyRequest {
@@ -73,6 +86,30 @@ export interface TokenResponse {
   expires_in: number;
   scopes?: string[];
   scope?: string;
+  // 阶段 5.4 契约扩展：MFA 两阶段登录
+  // 当 mfa_required 为 true 时，access_token/refresh_token 为空，
+  // expires_in 表示 mfa_challenge 的 TTL（300 秒）。
+  // 客户端需提示用户输入 MFA 验证码，再调用 verifyMFALogin 完成第二阶段登录。
+  mfa_required?: boolean;
+  mfa_challenge?: string;
+  mfa_methods?: string[];
+}
+
+/**
+ * MFA 两阶段登录第二阶段验证请求
+ *
+ * 阶段 5.4 契约扩展：当 login 返回 mfa_required=true 时，
+ * 客户端使用返回的 mfa_challenge 调用本接口完成登录。
+ *
+ * - method: "totp"（6 位数字验证码）或 "recovery_code"（恢复码字符串）
+ * - code: 与 method 对应的验证值
+ *
+ * 成功后服务端返回标准 TokenResponse（含 access_token/refresh_token）。
+ */
+export interface LoginMFAVerifyRequest {
+  mfa_challenge: string;
+  method: string;
+  code: string;
 }
 
 export interface RegisterResponse {
@@ -105,8 +142,41 @@ export interface MFAStatusResponse {
   enabled: boolean;
 }
 
+/**
+ * 授权响应
+ *
+ * 阶段 5.3 契约修复：服务端 GET /api/v1/authorize 与 POST /api/v1/authorize/approve
+ * 返回的响应结构不同。使用同一个 interface 并通过可选字段兼容两种场景：
+ *   - GET /authorize 返回：consent_token/client_id/redirect_uri/scope/state/require_approval
+ *     （code 为空，前端需展示授权同意页面）
+ *   - POST /authorize/approve 返回：code/state
+ *     （consent_token 等字段为空，客户端使用 code 调用 /token 端点换取 Access Token）
+ *
+ * 集成方应根据 require_approval 判断当前是处于"待同意"还是"已批准"状态。
+ */
 export interface AuthorizeResponse {
-  code: string;
+  // GET /authorize 返回字段
+  consent_token?: string;
+  client_id?: string;
+  redirect_uri?: string;
+  scope?: string;
+  require_approval?: boolean;
+
+  // POST /authorize/approve 返回字段
+  code?: string;
+  state?: string;
+}
+
+/**
+ * 授权拒绝响应
+ *
+ * 阶段 5.3 新增：服务端返回 HTTP 403，error 固定为 "access_denied"。
+ * SDK 不应将其视为成功响应；调用方拿到此响应后应向客户端应用回传
+ * ?error=access_denied&state=xxx。
+ */
+export interface AuthorizeDenyResponse {
+  error: string;
+  error_description: string;
   state: string;
 }
 
