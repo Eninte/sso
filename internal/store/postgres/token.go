@@ -177,6 +177,7 @@ func (s *Store) getTokenByField(ctx context.Context, field, value string) (*mode
 		WHERE ` + field + ` = $1`
 
 	token := &model.Token{}
+	var accessTokenHash, refreshTokenHash sql.NullString
 	err := s.db.QueryRowContext(ctx, query, value).Scan(
 		&token.ID,
 		&token.AccessToken,
@@ -190,8 +191,8 @@ func (s *Store) getTokenByField(ctx context.Context, field, value string) (*mode
 		&token.RotatedAt,
 		&token.ReplacedByTokenID,
 		&token.RefreshExpiresAt,
-		&token.AccessTokenHash,
-		&token.RefreshTokenHash,
+		&accessTokenHash,
+		&refreshTokenHash,
 	)
 
 	if err != nil {
@@ -199,6 +200,14 @@ func (s *Store) getTokenByField(ctx context.Context, field, value string) (*mode
 			return nil, store.ErrNotFound
 		}
 		return nil, err
+	}
+
+	// 旧数据 hash 字段可能为 NULL（迁移期间兼容）
+	if accessTokenHash.Valid {
+		token.AccessTokenHash = accessTokenHash.String
+	}
+	if refreshTokenHash.Valid {
+		token.RefreshTokenHash = refreshTokenHash.String
 	}
 
 	return token, nil

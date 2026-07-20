@@ -1140,12 +1140,12 @@ func (m *Store) Reset() {
 
 // StoreAuditLog 存储审计日志
 func (m *Store) StoreAuditLog(ctx context.Context, log *model.AuditLog) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if m.StoreAuditLogErr != nil {
 		return m.StoreAuditLogErr
 	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	m.auditLogs = append(m.auditLogs, log)
 	return nil
