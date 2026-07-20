@@ -34,6 +34,10 @@ const (
 	ErrCodePasswordRequired     ErrorCode = "PASSWORD_REQUIRED"
 	ErrCodeInvalidRequestFormat ErrorCode = "INVALID_REQUEST_FORMAT"
 	ErrCodeRequestBodyTooLarge  ErrorCode = "REQUEST_BODY_TOO_LARGE"
+	// MISSING_AUTH_CODE：社交登录回调未携带 code 参数
+	// 阶段 B 审查修复：补齐服务端 internal/errors/errors.go:339 中已定义的错误码，
+	// ExchangeSocialCode 文档中已引用，需在 SDK 中暴露常量供调用方判断。
+	ErrCodeMissingAuthCode ErrorCode = "MISSING_AUTH_CODE"
 
 	// 阶段 5 SDK 同步：以下错误码由服务端阶段 2/3/4 引入，SDK 必须能识别以便正确处理
 	//
@@ -192,6 +196,9 @@ func (e *Error) IsTooManyMFAAttempts() bool {
 // 涵盖阶段 2.2/2.3 引入的所有社交登录错误码。
 // SDK 收到此错误应统一展示 "社交登录失败" 提示，并根据具体错误码决定是否提供
 // "切换本地账号" 或 "联系管理员" 引导。
+//
+// 阶段 B 审查修复：补入 ErrCodeMissingAuthCode。该错误码虽属于基础校验类，
+// 但发生在社交登录回调路径上，调用方通常会按社交登录错误统一处理。
 func (e *Error) IsSocialLoginError() bool {
 	switch e.Code {
 	case ErrCodeProviderNotSupported,
@@ -202,7 +209,8 @@ func (e *Error) IsSocialLoginError() bool {
 		ErrCodeProviderEmailNotVerified,
 		ErrCodeSocialAccountConflict,
 		ErrCodeEmailConflictWithLocal,
-		ErrCodeProviderUserIDMissing:
+		ErrCodeProviderUserIDMissing,
+		ErrCodeMissingAuthCode:
 		return true
 	}
 	return false

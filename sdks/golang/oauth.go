@@ -56,7 +56,7 @@ func (c *Client) AuthorizeWithPKCE(ctx context.Context, clientID, redirectURI, s
 // 不再接受 client_id/redirect_uri/scope 等字段（consent_token JWT 内部已携带）。
 // 调用方需先调用 Authorize/AuthorizeWithPKCE 获取 ConsentToken，再传给本方法。
 //
-// 成功后返回 {code, state}，使用 code 调用 ExchangeCodeForToken 换取 Access Token。
+// 成功后返回 {code, state}，使用 code 调用 ExchangeCode 换取 Access Token。
 func (c *Client) ApproveAuthorization(ctx context.Context, req AuthorizeApproveRequest) (*AuthorizeResponse, error) {
 	body, err := c.doPost(ctx, "/api/v1/authorize/approve", req, true)
 	if err != nil {

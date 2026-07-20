@@ -6,6 +6,13 @@ use reqwest::{Client as HttpClient, Method};
 use crate::errors::{parse_error, SSOError};
 use crate::models::*;
 
+/// 服务端 handlerutil.WriteJSONSuccess 返回的 {"data":{...}} 包装
+/// 仅用于剥离 data 字段，不应直接暴露给调用方。
+#[derive(serde::Deserialize)]
+struct DataWrapper<T> {
+    data: T,
+}
+
 /// Token 内部状态
 struct TokenState {
     access_token: String,
@@ -311,21 +318,26 @@ impl SSOClient {
         redirect_uri: &str,
         code_verifier: Option<&str>,
     ) -> Result<TokenResponse, SSOError> {
-        self.request(
-            Method::POST,
-            "/api/v1/token",
-            Some(&TokenRequest {
-                grant_type: "authorization_code".to_string(),
-                code: Some(code.to_string()),
-                client_id: Some(client_id.to_string()),
-                client_secret: Some(client_secret.to_string()),
-                redirect_uri: Some(redirect_uri.to_string()),
-                code_verifier: code_verifier.map(|s| s.to_string()),
-                refresh_token: None,
-            }),
-            false,
-        )
-        .await
+        // 阶段 B 审查修复：服务端 authorization_code grant 走 handlerutil.WriteJSONSuccess，
+        // 返回 {"data":{...}} 包裹格式（与 refresh_token grant 的平铺响应不同），需剥离 data 包装。
+        // 参考 internal/handler/token.go: handleToken authorization_code 分支。
+        let wrapper: DataWrapper<TokenResponse> = self
+            .request(
+                Method::POST,
+                "/api/v1/token",
+                Some(&TokenRequest {
+                    grant_type: "authorization_code".to_string(),
+                    code: Some(code.to_string()),
+                    client_id: Some(client_id.to_string()),
+                    client_secret: Some(client_secret.to_string()),
+                    redirect_uri: Some(redirect_uri.to_string()),
+                    code_verifier: code_verifier.map(|s| s.to_string()),
+                    refresh_token: None,
+                }),
+                false,
+            )
+            .await?;
+        Ok(wrapper.data)
     }
 
     pub async fn revoke_token(&self) -> Result<MessageResponse, SSOError> {

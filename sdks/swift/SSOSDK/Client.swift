@@ -4,6 +4,12 @@ import Foundation
 // SSOClient SSO 服务客户端
 // ============================================================================
 
+/// 服务端 handlerutil.WriteJSONSuccess 返回的 {"data":{...}} 包装
+/// 仅用于剥离 data 字段，不应直接暴露给调用方。
+private struct DataWrapper<T: Decodable>: Decodable {
+    let data: T
+}
+
 public actor SSOClient {
     private let baseURL: String
     private let session: URLSession
@@ -264,6 +270,39 @@ public actor SSOClient {
             }
             throw error
         }
+    }
+
+    /// 用授权码换取 Access Token
+    ///
+    /// 阶段 B 审查修复：补齐 OAuth 完整流程缺失的环。
+    /// 服务端 authorization_code grant 走 handlerutil.WriteJSONSuccess，
+    /// 返回 {"data":{...}} 包裹格式（与 refresh_token grant 的平铺响应不同），
+    /// 因此需先解码为 DataWrapper 再剥离 data 字段。
+    ///
+    /// 参考 internal/handler/token.go handleToken authorization_code 分支。
+    public func exchangeCode(
+        code: String,
+        clientID: String,
+        clientSecret: String,
+        redirectURI: String,
+        codeVerifier: String? = nil
+    ) async throws -> TokenResponse {
+        var body: [String: String] = [
+            "grant_type": "authorization_code",
+            "code": code,
+            "client_id": clientID,
+            "client_secret": clientSecret,
+            "redirect_uri": redirectURI,
+        ]
+        if let v = codeVerifier { body["code_verifier"] = v }
+
+        let wrapper: DataWrapper<TokenResponse> = try await request(
+            method: "POST", path: "/api/v1/token", body: body
+        )
+        setTokens(accessToken: wrapper.data.accessToken,
+                  refreshToken: wrapper.data.refreshToken,
+                  expiresIn: wrapper.data.expiresIn)
+        return wrapper.data
     }
 
     // =======================================================================

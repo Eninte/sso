@@ -23,6 +23,7 @@ pub enum ErrorCode {
     PasswordRequired,
     InvalidRequestFormat,
     RequestBodyTooLarge,
+    MissingAuthCode, // 社交登录回调未携带 code 参数
 
     // === 阶段 5 SDK 同步：服务端阶段 2/3/4 引入的错误码 ===
 
@@ -89,6 +90,7 @@ impl fmt::Display for ErrorCode {
             Self::PasswordRequired => write!(f, "PASSWORD_REQUIRED"),
             Self::InvalidRequestFormat => write!(f, "INVALID_REQUEST_FORMAT"),
             Self::RequestBodyTooLarge => write!(f, "REQUEST_BODY_TOO_LARGE"),
+            Self::MissingAuthCode => write!(f, "MISSING_AUTH_CODE"),
             Self::TokenRotated => write!(f, "TOKEN_ROTATED"),
             Self::InvalidScope => write!(f, "INVALID_SCOPE"),
             Self::PKCERequired => write!(f, "PKCE_REQUIRED"),
@@ -139,6 +141,7 @@ impl ErrorCode {
             "PASSWORD_REQUIRED" => Self::PasswordRequired,
             "INVALID_REQUEST_FORMAT" => Self::InvalidRequestFormat,
             "REQUEST_BODY_TOO_LARGE" => Self::RequestBodyTooLarge,
+            "MISSING_AUTH_CODE" => Self::MissingAuthCode,
             "TOKEN_ROTATED" => Self::TokenRotated,
             "INVALID_SCOPE" => Self::InvalidScope,
             "PKCE_REQUIRED" => Self::PKCERequired,

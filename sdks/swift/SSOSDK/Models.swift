@@ -23,6 +23,8 @@ public struct TokenResponse: Codable {
     public let mfaRequired: Bool?
     public let mfaChallenge: String?
     public let mfaMethods: [String]?
+    // 阶段 B 审查修复：补充 scopes 字段（服务端 LoginResponse 携带 scopes 数组）
+    public let scopes: [String]?
 
     enum CodingKeys: String, CodingKey {
         case accessToken = "access_token"
@@ -32,6 +34,7 @@ public struct TokenResponse: Codable {
         case mfaRequired = "mfa_required"
         case mfaChallenge = "mfa_challenge"
         case mfaMethods = "mfa_methods"
+        case scopes
     }
 
     public init(from decoder: Decoder) throws {
@@ -45,6 +48,7 @@ public struct TokenResponse: Codable {
         mfaRequired = try c.decodeIfPresent(Bool.self, forKey: .mfaRequired)
         mfaChallenge = try c.decodeIfPresent(String.self, forKey: .mfaChallenge)
         mfaMethods = try c.decodeIfPresent([String].self, forKey: .mfaMethods)
+        scopes = try c.decodeIfPresent([String].self, forKey: .scopes)
     }
 }
 
@@ -168,15 +172,26 @@ public struct AuthorizeDenyRequest: Encodable {
 /// 阶段 5.3 新增：服务端返回 HTTP 403，error 固定为 "access_denied"。
 /// SDK 不应将其视为成功响应；调用方拿到此响应后应向客户端应用回传
 /// ?error=access_denied&state=xxx。
+///
+/// 阶段 B 审查修复：errorDescription 与 state 改为可选。服务端在 state 无效或
+/// consent_token 已过期等异常场景下可能不返回 state 字段，使用 decodeIfPresent
+/// 兜底避免解码失败（参考 internal/handler/authorize.go DenyAuthorizationHandler）。
 public struct AuthorizeDenyResponse: Codable {
     public let error: String
-    public let errorDescription: String
-    public let state: String
+    public let errorDescription: String?
+    public let state: String?
 
     enum CodingKeys: String, CodingKey {
         case error
         case errorDescription = "error_description"
         case state
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        error = try c.decodeIfPresent(String.self, forKey: .error) ?? ""
+        errorDescription = try c.decodeIfPresent(String.self, forKey: .errorDescription)
+        state = try c.decodeIfPresent(String.self, forKey: .state)
     }
 }
 

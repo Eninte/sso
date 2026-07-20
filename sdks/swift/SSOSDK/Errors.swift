@@ -108,6 +108,7 @@ public enum SSOErrorCode {
     public static let passwordRequired = "PASSWORD_REQUIRED"
     public static let invalidRequestFormat = "INVALID_REQUEST_FORMAT"
     public static let requestBodyTooLarge = "REQUEST_BODY_TOO_LARGE"
+    public static let missingAuthCode = "MISSING_AUTH_CODE" // 社交登录回调未携带 code 参数
 
     // === 阶段 5 SDK 同步：服务端阶段 2/3/4 引入的错误码 ===
 

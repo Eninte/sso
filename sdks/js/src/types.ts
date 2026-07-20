@@ -80,11 +80,20 @@ export interface EnableUserRequest {
 // ============================================================================
 
 export interface TokenResponse {
-  access_token: string;
-  refresh_token: string;
-  token_type: string;
+  /**
+   * Access Token（MFA 第一阶段响应中会省略，故为可选）
+   * 来源：POST /api/v1/login（非 MFA）/ /api/v1/login/mfa/verify / /api/v1/token / /auth/{provider}/callback
+   */
+  access_token?: string;
+  /** Refresh Token（MFA 第一阶段响应中会省略，故为可选） */
+  refresh_token?: string;
+  /** Token 类型（通常为 "Bearer"；MFA 第一阶段响应中会省略） */
+  token_type?: string;
+  /** 过期秒数（始终返回；MFA 场景下为 challenge 的 TTL） */
   expires_in: number;
+  /** scopes 数组（来自 /login 与 /login/mfa/verify 端点） */
   scopes?: string[];
+  /** scope 空格分隔字符串（来自 /api/v1/token authorization_code grant） */
   scope?: string;
   // 阶段 5.4 契约扩展：MFA 两阶段登录
   // 当 mfa_required 为 true 时，access_token/refresh_token 为空，

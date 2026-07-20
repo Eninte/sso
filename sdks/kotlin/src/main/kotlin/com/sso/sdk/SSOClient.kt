@@ -11,6 +11,16 @@ import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 // ============================================================================
+// 内部辅助类型
+// ============================================================================
+
+/**
+ * 服务端 handlerutil.WriteJSONSuccess 返回的 {"data":{...}} 包装
+ * 仅用于剥离 data 字段，不应直接暴露给调用方。
+ */
+private data class DataWrapper<T>(val data: T)
+
+// ============================================================================
 // 错误类型
 // ============================================================================
 
@@ -80,10 +90,19 @@ data class SSOError(
 
     companion object {
         fun parse(httpStatus: Int, body: String): SSOError {
+            // 阶段 B 审查修复：原实现使用 `as String` 强转，当服务端返回的
+            // code/message 字段为 null 或非字符串类型时会抛 ClassCastException
+            // 被外层 catch 兜底为 UNKNOWN，丢失真实错误码。
+            // 改为 toString?  与字符串兜底，保留服务端原始 code/message。
+            if (body.isEmpty()) {
+                return SSOError(httpStatus, "UNKNOWN", "empty response body", body)
+            }
             return try {
-                val obj = Gson().fromJson(body, Map::class.java) as Map<*, *>
-                val code = (obj["code"] ?: obj["error"] ?: "") as String
-                val msg = (obj["message"] ?: body) as String
+                val obj = Gson().fromJson(body, Map::class.java) as? Map<*, *>
+                    ?: return SSOError(httpStatus, "UNKNOWN", body, body)
+                val code = (obj["code"] ?: obj["error"] ?: "").toString()
+                val msgRaw = obj["message"]
+                val msg = if (msgRaw is String) msgRaw else body
                 SSOError(httpStatus, code, msg, body)
             } catch (_: Exception) {
                 SSOError(httpStatus, "UNKNOWN", body, body)
@@ -113,6 +132,7 @@ object SSOErrorCode {
     const val PASSWORD_REQUIRED = "PASSWORD_REQUIRED"
     const val INVALID_REQUEST_FORMAT = "INVALID_REQUEST_FORMAT"
     const val REQUEST_BODY_TOO_LARGE = "REQUEST_BODY_TOO_LARGE"
+    const val MISSING_AUTH_CODE = "MISSING_AUTH_CODE" // 社交登录回调未携带 code 参数
 
     // === 阶段 5 SDK 同步：服务端阶段 2/3/4 引入的错误码 ===
 
@@ -165,16 +185,23 @@ object SSOErrorCode {
  * 当用户启用 MFA 时，服务端在第一阶段不返回 access_token/refresh_token（服务端 model
  * 使用 omitempty），而是返回 mfa_required=true 与一次性 mfa_challenge 令牌（TTL 5 分钟）。
  * 调用方应通过 mfaRequired 判断是否需要第二阶段验证。
+ *
+ * 阶段 B 审查修复：accessToken/refreshToken/tokenType 改为可空 String?。
+ * 原实现使用 `String = ""` 默认值看似能兼容字段缺失，但 Gson 通过 Unsafe.allocateInstance
+ * 创建对象不调用构造函数，缺失字段实际为 null 而非 ""，绕过 Kotlin 非空类型检查
+ * 后续读取时会抛 NullPointerException。改为可空类型并标注 @Nullable 才是真实语义。
  */
 data class TokenResponse(
-    @SerializedName("access_token") val accessToken: String = "",
-    @SerializedName("refresh_token") val refreshToken: String = "",
-    @SerializedName("token_type") val tokenType: String = "Bearer",
+    @SerializedName("access_token") val accessToken: String? = null,
+    @SerializedName("refresh_token") val refreshToken: String? = null,
+    @SerializedName("token_type") val tokenType: String? = null,
     @SerializedName("expires_in") val expiresIn: Int = 0,
     // 阶段 5.4 契约扩展：MFA 两阶段登录字段（服务端 omitempty，使用可空类型）
     @SerializedName("mfa_required") val mfaRequired: Boolean? = null,
     @SerializedName("mfa_challenge") val mfaChallenge: String? = null,
-    @SerializedName("mfa_methods") val mfaMethods: List<String>? = null
+    @SerializedName("mfa_methods") val mfaMethods: List<String>? = null,
+    // 阶段 B 审查修复：补充 scopes 字段（服务端 LoginResponse 携带 scopes 数组）
+    @SerializedName("scopes") val scopes: List<String>? = null
 )
 
 /**
@@ -322,11 +349,15 @@ data class AuthorizeDenyRequest(
  * 阶段 5.3 新增：服务端返回 HTTP 403，error 固定为 "access_denied"。
  * SDK 不应将其视为成功响应；调用方拿到此响应后应向客户端应用回传
  * ?error=access_denied&state=xxx。
+ *
+ * 阶段 B 审查修复：errorDescription 与 state 改为可空。服务端在 state 无效或
+ * consent_token 已过期等异常场景下可能不返回 state 字段（参考 internal/handler/authorize.go
+ * DenyAuthorizationHandler），使用 String? 才能正确解码这些响应。
  */
 data class AuthorizeDenyResponse(
     val error: String = "",
-    @SerializedName("error_description") val errorDescription: String = "",
-    val state: String = ""
+    @SerializedName("error_description") val errorDescription: String? = null,
+    val state: String? = null
 )
 
 // ============================================================================
@@ -365,6 +396,18 @@ class SSOClient(
 
     // HTTP 请求
     private inline fun <reified T> request(method: String, path: String, body: Any? = null, auth: Boolean = false): T {
+        val text = doRawRequest(method, path, body, auth)
+        if (text.isEmpty()) return MessageResponse() as T
+        return gson.fromJson(text, object : TypeToken<T>() {}.type)
+    }
+
+    /**
+     * 发起 HTTP 请求并返回原始响应体文本
+     *
+     * 阶段 B 审查修复：抽取自原 request 方法，供 exchangeCode 等需要自定义
+     * 反序列化路径（如剥离 {"data":{...}} 包装）的调用方使用。
+     */
+    private fun doRawRequest(method: String, path: String, body: Any? = null, auth: Boolean = false): String {
         val url = "$baseUrl$path"
         val builder = Request.Builder().url(url)
 
@@ -403,8 +446,7 @@ class SSOClient(
             if (!resp.isSuccessful) {
                 throw SSOError.parse(resp.code, text)
             }
-            if (text.isEmpty()) return MessageResponse() as T
-            return gson.fromJson(text, object : TypeToken<T>() {}.type)
+            return text
         }
     }
 
@@ -415,8 +457,11 @@ class SSOClient(
         if (needsRefresh && _refreshToken.isNotEmpty()) {
             val resp: TokenResponse = request("POST", "/api/v1/token",
                 mapOf("grant_type" to "refresh_token", "refresh_token" to _refreshToken))
-            setTokens(resp.accessToken, resp.refreshToken, resp.expiresIn)
-            return resp.accessToken
+            val at = resp.accessToken ?: ""
+            val rt = resp.refreshToken ?: ""
+            if (at.isEmpty()) throw SSOError(500, "INTERNAL_ERROR", "refresh token response missing access_token")
+            setTokens(at, rt, resp.expiresIn)
+            return at
         }
         return _accessToken
     }
@@ -436,7 +481,8 @@ class SSOClient(
     fun login(email: String, password: String): TokenResponse {
         val resp: TokenResponse = request("POST", "/api/v1/login", mapOf("email" to email, "password" to password))
         if (resp.mfaRequired != true) {
-            setTokens(resp.accessToken, resp.refreshToken, resp.expiresIn)
+            // 阶段 B 审查修复：accessToken/refreshToken 改为可空，使用 ?: "" 兜底
+            setTokens(resp.accessToken ?: "", resp.refreshToken ?: "", resp.expiresIn)
         }
         return resp
     }
@@ -453,7 +499,7 @@ class SSOClient(
      */
     fun verifyMFALogin(req: LoginMFAVerifyRequest): TokenResponse {
         val resp: TokenResponse = request("POST", "/api/v1/login/mfa/verify", req)
-        setTokens(resp.accessToken, resp.refreshToken, resp.expiresIn)
+        setTokens(resp.accessToken ?: "", resp.refreshToken ?: "", resp.expiresIn)
         return resp
     }
 
@@ -461,7 +507,7 @@ class SSOClient(
         if (_refreshToken.isEmpty()) throw SSOError(401, "UNAUTHORIZED", "no refresh token")
         val resp: TokenResponse = request("POST", "/api/v1/token",
             mapOf("grant_type" to "refresh_token", "refresh_token" to _refreshToken))
-        setTokens(resp.accessToken, resp.refreshToken, resp.expiresIn)
+        setTokens(resp.accessToken ?: "", resp.refreshToken ?: "", resp.expiresIn)
         return resp
     }
 
@@ -581,6 +627,41 @@ class SSOClient(
         }
     }
 
+    /**
+     * 用授权码换取 Access Token
+     *
+     * 阶段 B 审查修复：补齐 OAuth 完整流程缺失的环。
+     * 服务端 authorization_code grant 走 handlerutil.WriteJSONSuccess，
+     * 返回 {"data":{...}} 包裹格式（与 refresh_token grant 的平铺响应不同），
+     * 因此需先解码为 DataWrapper 再剥离 data 字段。
+     *
+     * 参考 internal/handler/token.go handleToken authorization_code 分支。
+     */
+    fun exchangeCode(
+        code: String,
+        clientId: String,
+        clientSecret: String,
+        redirectUri: String,
+        codeVerifier: String? = null
+    ): TokenResponse {
+        val body = mutableMapOf(
+            "grant_type" to "authorization_code",
+            "code" to code,
+            "client_id" to clientId,
+            "client_secret" to clientSecret,
+            "redirect_uri" to redirectUri
+        )
+        if (codeVerifier != null) body["code_verifier"] = codeVerifier
+
+        // 服务端返回 {"data":{...}}，先按 Wrapper 解码再取出 data
+        val type = object : TypeToken<DataWrapper<TokenResponse>>() {}.type
+        val text = doRawRequest("POST", "/api/v1/token", body)
+        val wrapper: DataWrapper<TokenResponse> = gson.fromJson(text, type)
+        val resp = wrapper.data
+        setTokens(resp.accessToken ?: "", resp.refreshToken ?: "", resp.expiresIn)
+        return resp
+    }
+
     // ========================================================================
     // Social Login 社交登录
     //
@@ -636,7 +717,7 @@ class SSOClient(
         val encodedState = URLEncoder.encode(state, "UTF-8")
         val path = "/auth/$encodedProvider/callback?code=$encodedCode&state=$encodedState"
         val resp: TokenResponse = request("GET", path)
-        setTokens(resp.accessToken, resp.refreshToken, resp.expiresIn)
+        setTokens(resp.accessToken ?: "", resp.refreshToken ?: "", resp.expiresIn)
         return resp
     }
 

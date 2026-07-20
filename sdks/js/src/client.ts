@@ -96,8 +96,11 @@ export class SSOClient {
       const resp = await this.request<TokenResponse>('POST', '/api/v1/token', {
         grant_type: 'refresh_token', refresh_token: this._refreshToken,
       });
-      this.setTokens(resp.access_token, resp.refresh_token, resp.expires_in);
-      return resp.access_token;
+      // 阶段 B 审查修复：access_token/refresh_token 改为可选后需兜底
+      const at = resp.access_token ?? '';
+      if (!at) throw new Error('sso: refresh token response missing access_token');
+      this.setTokens(at, resp.refresh_token ?? '', resp.expires_in);
+      return at;
     }
     return this._accessToken;
   }
@@ -121,7 +124,8 @@ export class SSOClient {
   async login(email: string, password: string): Promise<TokenResponse> {
     const resp = await this.request<TokenResponse>('POST', '/api/v1/login', { email, password });
     if (!resp.mfa_required) {
-      this.setTokens(resp.access_token, resp.refresh_token, resp.expires_in);
+      // 阶段 B 审查修复：access_token/refresh_token 改为可选后需兜底
+      this.setTokens(resp.access_token ?? '', resp.refresh_token ?? '', resp.expires_in);
     }
     return resp;
   }
@@ -138,7 +142,7 @@ export class SSOClient {
    */
   async verifyMFALogin(req: LoginMFAVerifyRequest): Promise<TokenResponse> {
     const resp = await this.request<TokenResponse>('POST', '/api/v1/login/mfa/verify', req);
-    this.setTokens(resp.access_token, resp.refresh_token, resp.expires_in);
+    this.setTokens(resp.access_token ?? '', resp.refresh_token ?? '', resp.expires_in);
     return resp;
   }
 
@@ -147,15 +151,18 @@ export class SSOClient {
     const resp = await this.request<TokenResponse>('POST', '/api/v1/token', {
       grant_type: 'refresh_token', refresh_token: this._refreshToken,
     });
-    this.setTokens(resp.access_token, resp.refresh_token, resp.expires_in);
+    this.setTokens(resp.access_token ?? '', resp.refresh_token ?? '', resp.expires_in);
     return resp;
   }
 
   async exchangeCode(code: string, clientId: string, clientSecret: string, redirectUri: string, codeVerifier?: string): Promise<TokenResponse> {
-    return this.request<TokenResponse>('POST', '/api/v1/token', {
+    // 服务端 authorization_code 响应使用 handlerutil.WriteJSONSuccess 包裹在 {"data":{...}}，
+    // 需先剥离外层 data 后再返回 TokenResponse。
+    const wrapper = await this.request<{ data: TokenResponse }>('POST', '/api/v1/token', {
       grant_type: 'authorization_code', code, client_id: clientId,
       client_secret: clientSecret, redirect_uri: redirectUri, code_verifier: codeVerifier,
     });
+    return wrapper.data;
   }
 
   async revokeToken(): Promise<MessageResponse> {
@@ -328,7 +335,7 @@ export class SSOClient {
   async exchangeSocialCode(provider: string, code: string, state: string): Promise<TokenResponse> {
     const path = `/auth/${encodeURIComponent(provider)}/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
     const resp = await this.request<TokenResponse>('GET', path);
-    this.setTokens(resp.access_token, resp.refresh_token, resp.expires_in);
+    this.setTokens(resp.access_token ?? '', resp.refresh_token ?? '', resp.expires_in);
     return resp;
   }
 
