@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/example/sso/internal/common"
 	"github.com/example/sso/internal/model"
 	"github.com/example/sso/internal/store"
 )
@@ -99,10 +100,22 @@ func (s *Store) UpdateAuthorizationCode(ctx context.Context, code *model.Authori
 }
 
 // StoreToken 存储Token记录
+//
+// 阶段 3.2 安全增强：同时存储 token 明文和 hash
+//   - 明文保留用于调试和审计
+//   - hash 用于安全查询（避免明文出现在 WHERE 条件中）
 func (s *Store) StoreToken(ctx context.Context, token *model.Token) error {
+	// 计算 hash（若调用方未设置）
+	if token.AccessTokenHash == "" && token.AccessToken != "" {
+		token.AccessTokenHash = common.HashToken(token.AccessToken)
+	}
+	if token.RefreshTokenHash == "" && token.RefreshToken != "" {
+		token.RefreshTokenHash = common.HashToken(token.RefreshToken)
+	}
+
 	query := `
-		INSERT INTO tokens (id, access_token, refresh_token, user_id, client_id, scopes, expires_at, created_at, refresh_expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO tokens (id, access_token, refresh_token, user_id, client_id, scopes, expires_at, created_at, refresh_expires_at, access_token_hash, refresh_token_hash)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`
 	_, err := s.db.ExecContext(ctx, query,
 		token.ID,
@@ -114,17 +127,41 @@ func (s *Store) StoreToken(ctx context.Context, token *model.Token) error {
 		token.ExpiresAt,
 		token.CreatedAt,
 		token.RefreshExpiresAt,
+		token.AccessTokenHash,
+		token.RefreshTokenHash,
 	)
 	return err
 }
 
 // GetTokenByRefreshToken 根据刷新令牌获取Token记录
+//
+// 阶段 3.2：优先使用 hash 查询，回退到明文（兼容旧数据）
 func (s *Store) GetTokenByRefreshToken(ctx context.Context, refreshToken string) (*model.Token, error) {
+	hash := common.HashToken(refreshToken)
+	token, err := s.getTokenByField(ctx, "refresh_token_hash", hash)
+	if err == nil {
+		return token, nil
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return nil, err
+	}
+	// 回退到明文查询（兼容旧数据，hash 字段为 NULL）
 	return s.getTokenByField(ctx, "refresh_token", refreshToken)
 }
 
 // GetTokenByAccessToken 根据访问令牌获取Token记录
+//
+// 阶段 3.2：优先使用 hash 查询，回退到明文（兼容旧数据）
 func (s *Store) GetTokenByAccessToken(ctx context.Context, accessToken string) (*model.Token, error) {
+	hash := common.HashToken(accessToken)
+	token, err := s.getTokenByField(ctx, "access_token_hash", hash)
+	if err == nil {
+		return token, nil
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return nil, err
+	}
+	// 回退到明文查询（兼容旧数据，hash 字段为 NULL）
 	return s.getTokenByField(ctx, "access_token", accessToken)
 }
 
@@ -135,7 +172,7 @@ func (s *Store) getTokenByField(ctx context.Context, field, value string) (*mode
 	}
 
 	query := `
-		SELECT id, access_token, refresh_token, user_id, client_id, scopes, expires_at, created_at, revoked_at, rotated_at, replaced_by_token_id, refresh_expires_at
+		SELECT id, access_token, refresh_token, user_id, client_id, scopes, expires_at, created_at, revoked_at, rotated_at, replaced_by_token_id, refresh_expires_at, access_token_hash, refresh_token_hash
 		FROM tokens
 		WHERE ` + field + ` = $1`
 
@@ -153,6 +190,8 @@ func (s *Store) getTokenByField(ctx context.Context, field, value string) (*mode
 		&token.RotatedAt,
 		&token.ReplacedByTokenID,
 		&token.RefreshExpiresAt,
+		&token.AccessTokenHash,
+		&token.RefreshTokenHash,
 	)
 
 	if err != nil {
@@ -169,11 +208,12 @@ func (s *Store) getTokenByField(ctx context.Context, field, value string) (*mode
 //
 // 在单个事务内：
 //  1. UPDATE tokens SET revoked_at=NOW(), rotated_at=NOW(), replaced_by_token_id=$newID
-//     WHERE refresh_token=$old AND revoked_at IS NULL AND rotated_at IS NULL
+//     WHERE refresh_token_hash=$hash AND revoked_at IS NULL AND rotated_at IS NULL
 //  2. 若 RowsAffected == 0 → 返回 store.ErrTokenRotated（重放或不存在）
-//  3. INSERT new token
+//  3. INSERT new token（含 hash）
 //
 // 安全设计：UPDATE + INSERT 在同一事务内，避免 TOCTOU 竞态
+// 阶段 3.2：优先使用 hash 查询，回退到明文（兼容旧数据）
 func (s *Store) RotateRefreshToken(ctx context.Context, oldRefreshToken string, newToken *model.Token) error {
 	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
@@ -187,15 +227,17 @@ func (s *Store) RotateRefreshToken(ctx context.Context, oldRefreshToken string, 
 	// 1. 原子地标记旧 token 为已轮换 + 已撤销
 	// 通过 WHERE rotated_at IS NULL AND revoked_at IS NULL 保证只能轮换一次
 	// 多个并发请求中只有一个会成功
+	// 阶段 3.2：优先使用 hash 查询
+	oldHash := common.HashToken(oldRefreshToken)
 	updateQuery := `
 		UPDATE tokens
 		SET revoked_at = NOW(),
 		    rotated_at = NOW(),
 		    replaced_by_token_id = $2
-		WHERE refresh_token = $1
+		WHERE refresh_token_hash = $1
 		  AND revoked_at IS NULL
 		  AND rotated_at IS NULL`
-	result, err := tx.ExecContext(ctx, updateQuery, oldRefreshToken, newToken.ID)
+	result, err := tx.ExecContext(ctx, updateQuery, oldHash, newToken.ID)
 	if err != nil {
 		return fmt.Errorf("rotate refresh token failed: %w", err)
 	}
@@ -206,15 +248,42 @@ func (s *Store) RotateRefreshToken(ctx context.Context, oldRefreshToken string, 
 	}
 
 	if rowsAffected == 0 {
-		// token 不存在，或已被撤销/已轮换
-		// 这是重放攻击的典型特征：已被轮换的 refresh token 再次出现
-		return store.ErrTokenRotated
+		// hash 查询未命中，回退到明文查询（兼容旧数据，hash 字段为 NULL）
+		updateQueryFallback := `
+			UPDATE tokens
+			SET revoked_at = NOW(),
+			    rotated_at = NOW(),
+			    replaced_by_token_id = $2
+			WHERE refresh_token = $1
+			  AND revoked_at IS NULL
+			  AND rotated_at IS NULL`
+		result, err = tx.ExecContext(ctx, updateQueryFallback, oldRefreshToken, newToken.ID)
+		if err != nil {
+			return fmt.Errorf("rotate refresh token (fallback) failed: %w", err)
+		}
+		rowsAffected, err = result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("get affected rows (fallback) failed: %w", err)
+		}
+		if rowsAffected == 0 {
+			// token 不存在，或已被撤销/已轮换
+			// 这是重放攻击的典型特征：已被轮换的 refresh token 再次出现
+			return store.ErrTokenRotated
+		}
 	}
 
-	// 2. 插入新的 token 记录
+	// 2. 计算新 token 的 hash（若调用方未设置）
+	if newToken.AccessTokenHash == "" && newToken.AccessToken != "" {
+		newToken.AccessTokenHash = common.HashToken(newToken.AccessToken)
+	}
+	if newToken.RefreshTokenHash == "" && newToken.RefreshToken != "" {
+		newToken.RefreshTokenHash = common.HashToken(newToken.RefreshToken)
+	}
+
+	// 3. 插入新的 token 记录（含 hash）
 	insertQuery := `
-		INSERT INTO tokens (id, access_token, refresh_token, user_id, client_id, scopes, expires_at, created_at, refresh_expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+		INSERT INTO tokens (id, access_token, refresh_token, user_id, client_id, scopes, expires_at, created_at, refresh_expires_at, access_token_hash, refresh_token_hash)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
 	_, err = tx.ExecContext(ctx, insertQuery,
 		newToken.ID,
 		newToken.AccessToken,
@@ -225,6 +294,8 @@ func (s *Store) RotateRefreshToken(ctx context.Context, oldRefreshToken string, 
 		newToken.ExpiresAt,
 		newToken.CreatedAt,
 		newToken.RefreshExpiresAt,
+		newToken.AccessTokenHash,
+		newToken.RefreshTokenHash,
 	)
 	if err != nil {
 		return fmt.Errorf("insert new token failed: %w", err)
@@ -243,9 +314,29 @@ func (s *Store) RotateRefreshToken(ctx context.Context, oldRefreshToken string, 
 //   - 避免覆盖首次撤销时间戳（审计友好）
 //   - token 不存在或已撤销时不报错（与 Mock 实现对齐）
 //   - 调用方需通过 AuthMiddleware 缓存失效感知撤销生效
+//
+// 阶段 3.2：优先使用 hash 查询，回退到明文（兼容旧数据）
 func (s *Store) RevokeToken(ctx context.Context, accessToken string) error {
-	query := `UPDATE tokens SET revoked_at = $2 WHERE access_token = $1 AND revoked_at IS NULL`
-	_, err := s.db.ExecContext(ctx, query, accessToken, time.Now())
+	hash := common.HashToken(accessToken)
+	now := time.Now()
+
+	// 优先使用 hash 查询
+	query := `UPDATE tokens SET revoked_at = $2 WHERE access_token_hash = $1 AND revoked_at IS NULL`
+	result, err := s.db.ExecContext(ctx, query, hash, now)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected > 0 {
+		return nil
+	}
+
+	// 回退到明文查询（兼容旧数据，hash 字段为 NULL）
+	queryFallback := `UPDATE tokens SET revoked_at = $2 WHERE access_token = $1 AND revoked_at IS NULL`
+	_, err = s.db.ExecContext(ctx, queryFallback, accessToken, now)
 	return err
 }
 

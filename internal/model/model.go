@@ -131,6 +131,14 @@ type Token struct {
 	// RefreshExpiresAt：refresh token 独立过期时间
 	// NULL 表示沿用 ExpiresAt（兼容旧数据）
 	RefreshExpiresAt *time.Time `json:"refresh_expires_at,omitempty" db:"refresh_expires_at"`
+
+	// 阶段 3.2 安全增强：Token 哈希存储
+	// AccessTokenHash：access_token 的 SHA-256 哈希（hex 编码，64 字符）
+	// RefreshTokenHash：refresh_token 的 SHA-256 哈希（hex 编码，64 字符）
+	// 用于安全查询：避免明文 token 出现在 WHERE 条件中
+	// 旧数据可能为 NULL（兼容），新数据必须填充
+	AccessTokenHash  string `json:"-" db:"access_token_hash"`  // JSON 不序列化
+	RefreshTokenHash string `json:"-" db:"refresh_token_hash"` // JSON 不序列化
 }
 
 func (t *Token) GetClientID() string {

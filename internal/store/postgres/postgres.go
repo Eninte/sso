@@ -168,10 +168,12 @@ var allowedUserFields = map[string]bool{
 
 // allowedTokenFields 允许用于Token查询的字段白名单
 var allowedTokenFields = map[string]bool{
-	"id":            true,
-	"access_token":  true,
-	"refresh_token": true,
-	"user_id":       true,
+	"id":                  true,
+	"access_token":        true,
+	"refresh_token":       true,
+	"user_id":             true,
+	"access_token_hash":   true,
+	"refresh_token_hash":  true,
 }
 
 // ErrInvalidFieldName 无效的字段名错误

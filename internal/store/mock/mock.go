@@ -10,9 +10,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/example/sso/internal/common"
 	"github.com/example/sso/internal/model"
 	"github.com/example/sso/internal/store"
 )
+
+// hashTokenMock 计算 token 的 SHA-256 哈希（hex 编码，64 字符）
+// 阶段 3.2：与 postgres 实现使用同一算法
+func hashTokenMock(token string) string {
+	return common.HashToken(token)
+}
 
 // ============================================================================
 // Store Mock存储实现
@@ -489,6 +496,8 @@ func (m *Store) UpdateAuthorizationCode(ctx context.Context, code *model.Authori
 }
 
 // StoreToken 存储Token记录
+//
+// 阶段 3.2：同时计算并存储 hash，与 Postgres 实现对齐
 func (m *Store) StoreToken(ctx context.Context, token *model.Token) error {
 	if m.StoreTokenErr != nil {
 		return m.StoreTokenErr
@@ -497,11 +506,21 @@ func (m *Store) StoreToken(ctx context.Context, token *model.Token) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// 计算 hash（与 postgres StoreToken 行为一致）
+	if token.AccessTokenHash == "" && token.AccessToken != "" {
+		token.AccessTokenHash = hashTokenMock(token.AccessToken)
+	}
+	if token.RefreshTokenHash == "" && token.RefreshToken != "" {
+		token.RefreshTokenHash = hashTokenMock(token.RefreshToken)
+	}
+
 	m.tokens[token.AccessToken] = token
 	return nil
 }
 
 // GetTokenByRefreshToken 根据刷新令牌获取Token记录
+//
+// 阶段 3.2：优先使用 hash 查询，回退到明文（与 Postgres 实现对齐）
 func (m *Store) GetTokenByRefreshToken(ctx context.Context, refreshToken string) (*model.Token, error) {
 	if m.GetTokenByRefreshTokenErr != nil {
 		return nil, m.GetTokenByRefreshTokenErr
@@ -510,6 +529,14 @@ func (m *Store) GetTokenByRefreshToken(ctx context.Context, refreshToken string)
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	hash := hashTokenMock(refreshToken)
+	for _, token := range m.tokens {
+		// 优先 hash 匹配
+		if token.RefreshTokenHash == hash && token.RefreshTokenHash != "" {
+			return token, nil
+		}
+	}
+	// 回退到明文（兼容旧数据）
 	for _, token := range m.tokens {
 		if token.RefreshToken == refreshToken {
 			return token, nil
@@ -519,6 +546,8 @@ func (m *Store) GetTokenByRefreshToken(ctx context.Context, refreshToken string)
 }
 
 // GetTokenByAccessToken 根据访问令牌获取Token记录
+//
+// 阶段 3.2：优先使用 hash 查询，回退到明文（与 Postgres 实现对齐）
 func (m *Store) GetTokenByAccessToken(ctx context.Context, accessToken string) (*model.Token, error) {
 	if m.GetTokenByAccessTokenErr != nil {
 		return nil, m.GetTokenByAccessTokenErr
@@ -527,6 +556,14 @@ func (m *Store) GetTokenByAccessToken(ctx context.Context, accessToken string) (
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	hash := hashTokenMock(accessToken)
+	for _, token := range m.tokens {
+		// 优先 hash 匹配
+		if token.AccessTokenHash == hash && token.AccessTokenHash != "" {
+			return token, nil
+		}
+	}
+	// 回退到明文（兼容旧数据）
 	token, ok := m.tokens[accessToken]
 	if !ok {
 		return nil, store.ErrNotFound
@@ -540,6 +577,8 @@ func (m *Store) GetTokenByAccessToken(ctx context.Context, accessToken string) (
 //   - token 不存在时不报错（Postgres UPDATE 0 行也返回 nil）
 //   - 已撤销时不覆盖原撤销时间（与 SQL WHERE revoked_at IS NULL 一致）
 //   - 仅当 RevokeTokenErr 注入时返回注入错误
+//
+// 阶段 3.2：优先使用 hash 查询，回退到明文
 func (m *Store) RevokeToken(ctx context.Context, accessToken string) error {
 	if m.RevokeTokenErr != nil {
 		return m.RevokeTokenErr
@@ -548,6 +587,19 @@ func (m *Store) RevokeToken(ctx context.Context, accessToken string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	hash := hashTokenMock(accessToken)
+	// 优先 hash 匹配
+	for _, token := range m.tokens {
+		if token.AccessTokenHash == hash && token.AccessTokenHash != "" {
+			// 仅在未撤销时设置撤销时间，避免覆盖首次撤销时间戳
+			if token.RevokedAt == nil {
+				now := time.Now()
+				token.RevokedAt = &now
+			}
+			return nil
+		}
+	}
+	// 回退到明文
 	token, ok := m.tokens[accessToken]
 	if !ok {
 		// 与 Postgres 行为对齐：token 不存在时不报错
@@ -592,6 +644,7 @@ func (m *Store) RevokeAllUserTokens(ctx context.Context, userID string) error {
 //  4. 插入新 token（深拷贝，避免外部修改）
 //
 // 安全设计：与 postgres 实现保持一致，通过 rotated_at==nil 保证一次性
+// 阶段 3.2：优先使用 hash 查找旧 token，回退到明文
 func (m *Store) RotateRefreshToken(ctx context.Context, oldRefreshToken string, newToken *model.Token) error {
 	if m.RotateRefreshTokenErr != nil {
 		return m.RotateRefreshTokenErr
@@ -600,12 +653,22 @@ func (m *Store) RotateRefreshToken(ctx context.Context, oldRefreshToken string, 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// 1. 查找旧 token
+	// 1. 查找旧 token（优先 hash）
+	oldHash := hashTokenMock(oldRefreshToken)
 	var oldToken *model.Token
 	for _, token := range m.tokens {
-		if token.RefreshToken == oldRefreshToken {
+		if token.RefreshTokenHash == oldHash && token.RefreshTokenHash != "" {
 			oldToken = token
 			break
+		}
+	}
+	if oldToken == nil {
+		// 回退到明文（兼容旧数据）
+		for _, token := range m.tokens {
+			if token.RefreshToken == oldRefreshToken {
+				oldToken = token
+				break
+			}
 		}
 	}
 	if oldToken == nil {
@@ -624,13 +687,23 @@ func (m *Store) RotateRefreshToken(ctx context.Context, oldRefreshToken string, 
 	newTokenID := newToken.ID
 	oldToken.ReplacedByTokenID = &newTokenID
 
-	// 4. 插入新 token（深拷贝 scopes，避免外部修改）
+	// 4. 计算新 token 的 hash（与 postgres 实现一致）
+	if newToken.AccessTokenHash == "" && newToken.AccessToken != "" {
+		newToken.AccessTokenHash = hashTokenMock(newToken.AccessToken)
+	}
+	if newToken.RefreshTokenHash == "" && newToken.RefreshToken != "" {
+		newToken.RefreshTokenHash = hashTokenMock(newToken.RefreshToken)
+	}
+
+	// 5. 插入新 token（深拷贝 scopes，避免外部修改）
 	newScopes := make([]string, len(newToken.Scopes))
 	copy(newScopes, newToken.Scopes)
 	storedToken := &model.Token{
 		ID:                newToken.ID,
 		AccessToken:       newToken.AccessToken,
 		RefreshToken:      newToken.RefreshToken,
+		AccessTokenHash:   newToken.AccessTokenHash,
+		RefreshTokenHash:  newToken.RefreshTokenHash,
 		UserID:            newToken.UserID,
 		Scopes:            newScopes,
 		ClientID:          newToken.ClientID,
