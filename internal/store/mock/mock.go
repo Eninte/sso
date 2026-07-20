@@ -58,8 +58,8 @@ type Store struct {
 	CreateAdminAtomicErr       error
 	GetClientByClientIDErr     error
 	CreateClientErr            error
-	StoreAuthorizationCodeErr   error
-	GetAuthorizationCodeErr     error
+	StoreAuthorizationCodeErr  error
+	GetAuthorizationCodeErr    error
 	StoreTokenErr              error
 	GetTokenByRefreshTokenErr  error
 	GetTokenByAccessTokenErr   error
@@ -84,12 +84,12 @@ type Store struct {
 	PingErr                    error
 
 	// 阶段 2.3：社交账号相关错误
-	CreateSocialAccountErr          error
-	GetSocialAccountErr             error
-	ListSocialAccountsByUserIDErr   error
-	DeleteSocialAccountErr          error
-	CreateSocialAccountAtomicErr    error
-	UpdateSocialAccountErr          error // 阶段 D 修复（L2）
+	CreateSocialAccountErr        error
+	GetSocialAccountErr           error
+	ListSocialAccountsByUserIDErr error
+	DeleteSocialAccountErr        error
+	CreateSocialAccountAtomicErr  error
+	UpdateSocialAccountErr        error // 阶段 D 修复（L2）
 
 	// 社交账号数据存储
 	// key 格式: provider + ":" + provider_user_id

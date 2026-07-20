@@ -596,14 +596,14 @@ func TestSocialLoginService_HandleCallback_GitHub_EmailsAPI(t *testing.T) {
 
 		providers := map[string]*service.OAuthProvider{
 			"github": {
-				Name:        "github",
-				ClientID:    "gh-id",
+				Name:         "github",
+				ClientID:     "gh-id",
 				ClientSecret: "gh-secret",
-				TokenURL:    server.URL + "/token",
-				UserInfoURL: server.URL + "/userinfo",
+				TokenURL:     server.URL + "/token",
+				UserInfoURL:  server.URL + "/userinfo",
 				// 阶段 D 修复（H2）：指向 mock /emails 端点
-				EmailsURL:   server.URL + "/emails",
-				Scopes:      []string{"user:email"},
+				EmailsURL: server.URL + "/emails",
+				Scopes:    []string{"user:email"},
 			},
 		}
 
@@ -666,12 +666,12 @@ func TestSocialLoginService_HandleCallback_GitHub_EmailsAPI(t *testing.T) {
 
 		providers := map[string]*service.OAuthProvider{
 			"github": {
-				Name:        "github",
-				ClientID:    "gh-id",
+				Name:         "github",
+				ClientID:     "gh-id",
 				ClientSecret: "gh-secret",
-				TokenURL:    server.URL + "/token",
-				UserInfoURL: server.URL + "/userinfo",
-				EmailsURL:   server.URL + "/emails",
+				TokenURL:     server.URL + "/token",
+				UserInfoURL:  server.URL + "/userinfo",
+				EmailsURL:    server.URL + "/emails",
 			},
 		}
 
@@ -719,12 +719,12 @@ func TestSocialLoginService_HandleCallback_GitHub_EmailsAPI(t *testing.T) {
 
 		providers := map[string]*service.OAuthProvider{
 			"github": {
-				Name:        "github",
-				ClientID:    "gh-id",
+				Name:         "github",
+				ClientID:     "gh-id",
 				ClientSecret: "gh-secret",
-				TokenURL:    server.URL + "/token",
-				UserInfoURL: server.URL + "/userinfo",
-				EmailsURL:   server.URL + "/emails",
+				TokenURL:     server.URL + "/token",
+				UserInfoURL:  server.URL + "/userinfo",
+				EmailsURL:    server.URL + "/emails",
 			},
 		}
 
@@ -782,12 +782,12 @@ func TestSocialLoginService_HandleCallback_GitHub_EmailsAPI(t *testing.T) {
 
 		providers := map[string]*service.OAuthProvider{
 			"github": {
-				Name:        "github",
-				ClientID:    "gh-id",
+				Name:         "github",
+				ClientID:     "gh-id",
 				ClientSecret: "gh-secret",
-				TokenURL:    server.URL + "/token",
-				UserInfoURL: server.URL + "/userinfo",
-				EmailsURL:   server.URL + "/emails",
+				TokenURL:     server.URL + "/token",
+				UserInfoURL:  server.URL + "/userinfo",
+				EmailsURL:    server.URL + "/emails",
 			},
 		}
 
@@ -848,12 +848,12 @@ func TestSocialLoginService_HandleCallback_GitHub_EmailsAPI(t *testing.T) {
 
 		providers := map[string]*service.OAuthProvider{
 			"github": {
-				Name:        "github",
-				ClientID:    "gh-id",
+				Name:         "github",
+				ClientID:     "gh-id",
 				ClientSecret: "gh-secret",
-				TokenURL:    server.URL + "/token",
-				UserInfoURL: server.URL + "/userinfo",
-				EmailsURL:   server.URL + "/emails",
+				TokenURL:     server.URL + "/token",
+				UserInfoURL:  server.URL + "/userinfo",
+				EmailsURL:    server.URL + "/emails",
 			},
 		}
 

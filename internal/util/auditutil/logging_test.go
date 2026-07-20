@@ -500,13 +500,13 @@ func TestSafeAuditLog_SensitiveFieldsAreSanitized(t *testing.T) {
 	mockSvc := &MockAuditService{}
 
 	metadata := map[string]interface{}{
-		"email":           "user@example.com",
-		"ip_address":      "192.168.1.1",
-		"access_token":    "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature",
-		"refresh_token":   "32bytes-long-refresh-token-value-1234567890",
-		"password":        "SuperSecretPassword123!",
-		"client_id":       "public-client-id",
-		"reason":          "refresh_token_replay",
+		"email":             "user@example.com",
+		"ip_address":        "192.168.1.1",
+		"access_token":      "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature",
+		"refresh_token":     "32bytes-long-refresh-token-value-1234567890",
+		"password":          "SuperSecretPassword123!",
+		"client_id":         "public-client-id",
+		"reason":            "refresh_token_replay",
 		"refresh_token_len": 21,
 	}
 
@@ -535,9 +535,9 @@ func TestCriticalAuditLog_SensitiveFieldsAreSanitized(t *testing.T) {
 	mockSvc := &MockAuditService{}
 
 	metadata := map[string]interface{}{
-		"key_id":      "key-12345",
+		"key_id":       "key-12345",
 		"access_token": "eyJsecret.token.value",
-		"password":    "should-be-redacted",
+		"password":     "should-be-redacted",
 	}
 
 	err := auditutil.CriticalAuditLog(ctx, mockSvc, string(model.EventKeyRotated), "", metadata)
