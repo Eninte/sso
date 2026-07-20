@@ -681,12 +681,21 @@ func (m *Store) RotateRefreshToken(ctx context.Context, oldRefreshToken string, 
 		return store.ErrTokenRotated
 	}
 
-	// 3. 标记旧 token
+	// 3. 标记旧 token（拷贝-替换，不原地修改）：
+	//    mock 的 map 存的是共享指针，getter 返回同一指针，调用方（service 层）
+	//    可能在锁外仍持有 oldToken 并读取其字段；原地写会与该读产生数据竞争。
+	//    拷贝替换后旧指针对象不再变化，与真实 DB 行更新语义一致。
 	now := time.Now()
-	oldToken.RevokedAt = &now
-	oldToken.RotatedAt = &now
 	newTokenID := newToken.ID
-	oldToken.ReplacedByTokenID = &newTokenID
+	updated := *oldToken // 浅拷贝足够：此处仅替换三个指针字段
+	updated.RevokedAt = &now
+	updated.RotatedAt = &now
+	updated.ReplacedByTokenID = &newTokenID
+	for k, v := range m.tokens {
+		if v == oldToken {
+			m.tokens[k] = &updated
+		}
+	}
 
 	// 4. 计算新 token 的 hash（与 postgres 实现一致）
 	if newToken.AccessTokenHash == "" && newToken.AccessToken != "" {
