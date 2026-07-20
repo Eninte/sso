@@ -108,7 +108,6 @@ func TestAuthService_RefreshToken_RotationSuccess(t *testing.T) {
 		require.NotNil(t, oldRecord.RotatedAt, "rotated_at 必须被设置")
 		require.NotNil(t, oldRecord.RevokedAt, "revoked_at 必须被设置")
 		require.NotNil(t, oldRecord.ReplacedByTokenID, "replaced_by_token_id 必须被设置")
-		assert.Equal(t, oldRecord.ReplacedByTokenID, oldRecord.ReplacedByTokenID, "replaced_by_token_id 应非空")
 
 		// 验证新 token 已存入 store 且未撤销/未轮换
 		newRecord, err := storeInst.GetTokenByRefreshToken(ctx, resp.RefreshToken)
@@ -117,6 +116,10 @@ func TestAuthService_RefreshToken_RotationSuccess(t *testing.T) {
 		assert.Nil(t, newRecord.RevokedAt, "新 token 的 revoked_at 应为 nil")
 		require.NotNil(t, newRecord.RefreshExpiresAt, "新 token 必须设置 refresh_expires_at")
 		assert.True(t, newRecord.RefreshExpiresAt.After(time.Now()), "新 token refresh_expires_at 应为未来时间")
+
+		// 阶段 D 修复（L1）：原断言恒真（自己等于自己），改为校验旧 token 的
+		// ReplacedByTokenID 应指向新生成的 token ID
+		assert.Equal(t, newRecord.ID, *oldRecord.ReplacedByTokenID, "旧 token 的 replaced_by_token_id 应指向新 token")
 	})
 }
 
@@ -386,6 +389,43 @@ func TestAuthService_RefreshToken_CacheInvalidation(t *testing.T) {
 	// 验证缓存已被清除（旧 access token 的缓存）
 	err = cacheSvc.Get(ctx, cacheKey, &cached)
 	assert.Error(t, err, "旧 access token 的缓存应被清除")
+}
+
+// ============================================================================
+// 阶段 D 审查修复（M6 fail-secure）：重放攻击下 RevokeAllUserTokens 失败也清缓存
+// ============================================================================
+
+func TestAuthService_RefreshToken_ReplayDetection_FailSecureCacheInvalidation(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("RevokeAllUserTokens失败-缓存仍应被清除(fail-secure)", func(t *testing.T) {
+		authSvc, storeInst, cacheSvc := createRotationTestAuthService(t)
+		addActiveUserAndToken(storeInst, "valid-refresh-fail-secure", "valid-access-fail-secure")
+
+		// 预先将旧 access token 写入缓存
+		cacheKey := cache.TokenKey("valid-access-fail-secure")
+		err := cacheSvc.Set(ctx, cacheKey, &model.Token{
+			AccessToken: "valid-access-fail-secure",
+		}, 5*time.Minute)
+		require.NoError(t, err)
+
+		// 注入 RevokeAllUserTokens 错误，模拟 DB 失败场景
+		storeInst.RevokeAllUserTokensErr = fmt.Errorf("database unavailable")
+
+		// 第一次刷新：成功
+		_, err = authSvc.RefreshToken(ctx, "valid-refresh-fail-secure")
+		require.NoError(t, err)
+
+		// 第二次使用同一个 refresh token：应触发重放防御
+		// 此时 RevokeAllUserTokens 返回错误，但缓存应已被清除
+		_, err = authSvc.RefreshToken(ctx, "valid-refresh-fail-secure")
+		require.Error(t, err)
+		// 阶段 D 修复（M6）：即使 RevokeAllUserTokens 失败，缓存也必须被清除
+		// 验证缓存已清除（fail-secure）
+		var cached model.Token
+		err = cacheSvc.Get(ctx, cacheKey, &cached)
+		assert.Error(t, err, "RevokeAllUserTokens 失败时缓存仍应被清除（fail-secure）")
+	})
 }
 
 // ============================================================================

@@ -667,11 +667,18 @@ func TestTokenHandler_HandleRevoke(t *testing.T) {
 
 		req := httptest.NewRequest("POST", "/api/v1/token/revoke", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
+		// 阶段 D 修复（M9）：/token/revoke 已移至 protected 路由，
+		// HandleRevoke 从 context 读取 AuthMiddleware 注入的 user_id，
+		// 测试需手动注入以模拟中间件行为
+		ctx := context.WithValue(req.Context(), middleware.UserIDKey, "test-user-id")
+		req = req.WithContext(ctx)
 		w := httptest.NewRecorder()
 
 		tokenHandler.HandleRevoke(w, req)
 
-		assert.Equal(t, http.StatusOK, w.Code)
+		// 阶段 D 修复（M9 + H3）：/token/revoke 按 RFC 7009 §2.2 返回 204 NoContent
+		// 成功撤销、token不存在、所有权不匹配均返回 204 以保证幂等性
+		assert.Equal(t, http.StatusNoContent, w.Code)
 	})
 
 	t.Run("缺少token参数", func(t *testing.T) {

@@ -49,13 +49,14 @@ func (s *AuthService) validateUserCredentials(ctx context.Context, email, passwo
 			return nil, ErrAccountLocked
 		}
 		// 使用原子操作解锁过期账户，避免竞态条件
-		if unlockErr := s.store.UnlockExpiredAccount(ctx, user.ID); unlockErr != nil {
-			if !apperrors.Is(unlockErr, store.ErrNotFound) {
-				logger.Warn("解锁过期账户失败", "error", unlockErr, "user_id", user.ID)
-			}
-
-			// 即使解锁失败也继续尝试登录（可能是并发解锁）
+	if unlockErr := s.store.UnlockExpiredAccount(ctx, user.ID); unlockErr != nil {
+		if !apperrors.Is(unlockErr, store.ErrNotFound) {
+			// 阶段 D 审查修复（H5）：store 错误可能含 DSN
+			logger.Warn("解锁过期账户失败", "error", logging.SanitizeDBURL(unlockErr.Error()), "user_id", user.ID)
 		}
+
+		// 即使解锁失败也继续尝试登录（可能是并发解锁）
+	}
 	}
 
 	// 验证密码
@@ -75,7 +76,8 @@ func (s *AuthService) handleLoginFailure(ctx context.Context, user *model.User, 
 	attempts, locked, _, incErr := s.store.IncrementLoginAttempts(ctx, user.ID, s.maxAttempts, s.lockoutDuration)
 	if incErr != nil {
 		// 安全修复：数据库错误时返回错误，防止绕过账户锁定机制
-		logger.Error("更新登录尝试次数失败", "error", incErr, "user_id", user.ID)
+		// 阶段 D 审查修复（H5）：store 错误可能含 DSN
+		logger.Error("更新登录尝试次数失败", "error", logging.SanitizeDBURL(incErr.Error()), "user_id", user.ID)
 		return serviceutil.WrapServiceError("更新登录尝试次数", incErr)
 	}
 
@@ -94,7 +96,8 @@ func (s *AuthService) handleLoginFailure(ctx context.Context, user *model.User, 
 		// 阶段 2.4：账户锁定时撤销所有 token，防止攻击者已获取的 token 继续使用
 		// 失败不影响主流程（锁定已生效），仅记录警告日志
 		if err := s.store.RevokeAllUserTokens(ctx, user.ID); err != nil {
-			logger.Warn("账户锁定时撤销用户Token失败", "error", err, "user_id", user.ID)
+			// 阶段 D 审查修复（H5）：store 错误可能含 DSN
+			logger.Warn("账户锁定时撤销用户Token失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", user.ID)
 		}
 		// 同步清 token 缓存，确保撤销立即生效
 		s.invalidateUserTokenCache(ctx, user.ID)
@@ -129,7 +132,8 @@ func (s *AuthService) handleLoginSuccess(ctx context.Context, user *model.User, 
 	safego.Go(logging.WithContext(bgCtx).With("component", "auth"), "重置登录尝试次数", func() {
 		defer wg.Done()
 		if err := s.store.ResetLoginAttempts(bgCtx, user.ID); err != nil {
-			logging.WithContext(bgCtx).Warn("重置登录尝试次数失败", "error", err, "user_id", user.ID)
+			// 阶段 D 审查修复（H5）：store 错误可能含 DSN
+			logging.WithContext(bgCtx).Warn("重置登录尝试次数失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", user.ID)
 		}
 	})
 
@@ -178,7 +182,8 @@ func (s *AuthService) LoginWithAudit(ctx context.Context, req *model.LoginReques
 	if s.loginRateLimit != nil && auditCtx != nil && auditCtx.IPAddress != "" {
 		allowed, _, rateLimitErr := s.loginRateLimit.CheckAndRecord(ctx, auditCtx.IPAddress)
 		if rateLimitErr != nil {
-			logger.Error("IP登录限流检查失败", "error", rateLimitErr, "ip", auditCtx.IPAddress)
+			// 阶段 D 审查修复（H5）：限流器错误可能含 Redis DSN
+			logger.Error("IP登录限流检查失败", "error", logging.SanitizeDBURL(rateLimitErr.Error()), "ip", auditCtx.IPAddress)
 		}
 		if !allowed {
 			logger.Warn("IP登录频率超限", "ip", auditCtx.IPAddress)
@@ -199,12 +204,13 @@ func (s *AuthService) LoginWithAudit(ctx context.Context, req *model.LoginReques
 		if apperrors.Is(err, ErrInvalidCredentials) && user != nil {
 			// validateUserCredentials在密码错误时返回user对象，避免重复查询DB
 			// 安全修复：检查handleLoginFailure的返回值，防止绕过账户锁定
-			if failErr := s.handleLoginFailure(ctx, user, auditCtx); failErr != nil {
-				logger.Error("处理登录失败时出错", "error", failErr, "user_id", user.ID)
-				// 安全修复：数据库错误时返回服务错误，防止绕过账户锁定机制
-				// 不返回ErrInvalidCredentials，因为我们无法确定是否成功记录失败次数
-				return nil, serviceutil.WrapServiceError("记录登录失败", failErr)
-			}
+		if failErr := s.handleLoginFailure(ctx, user, auditCtx); failErr != nil {
+			// 阶段 D 审查修复（H5）：包装错误可能含 DSN
+			logger.Error("处理登录失败时出错", "error", logging.SanitizeDBURL(failErr.Error()), "user_id", user.ID)
+			// 安全修复：数据库错误时返回服务错误，防止绕过账户锁定机制
+			// 不返回ErrInvalidCredentials，因为我们无法确定是否成功记录失败次数
+			return nil, serviceutil.WrapServiceError("记录登录失败", failErr)
+		}
 		}
 		return nil, err
 	}

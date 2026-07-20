@@ -27,20 +27,13 @@ UPDATE tokens SET refresh_token_hash = encode(digest(refresh_token, 'sha256'), '
 
 -- 在 hash 字段上创建唯一索引（与原明文索引对齐）
 -- 部分索引：仅对非 NULL 的 hash 建立唯一约束
+-- 阶段 D 审查修复（H7）：原迁移同时创建唯一索引 + 普通索引，写入需维护双索引
+-- 唯一索引已自动承担查询功能，普通索引冗余，删除以减少写入开销
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tokens_access_token_hash_unique
     ON tokens(access_token_hash)
     WHERE access_token_hash IS NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tokens_refresh_token_hash_unique
-    ON tokens(refresh_token_hash)
-    WHERE refresh_token_hash IS NOT NULL;
-
--- 普通索引：用于按 hash 高效查询
-CREATE INDEX IF NOT EXISTS idx_tokens_access_token_hash
-    ON tokens(access_token_hash)
-    WHERE access_token_hash IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_tokens_refresh_token_hash
     ON tokens(refresh_token_hash)
     WHERE refresh_token_hash IS NOT NULL;
 

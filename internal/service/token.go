@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/example/sso/internal/crypto"
+	"github.com/example/sso/internal/logging"
 	"github.com/example/sso/internal/model"
 	"github.com/example/sso/internal/store"
 	"github.com/example/sso/internal/util/serviceutil"
@@ -52,7 +53,9 @@ func (s *TokenService) GenerateTokenPair(
 
 	slog.Debug("GenerateTokenPair: 准备存储token", "userID", userID, "tokenID", tokenRecord.ID)
 	if err := s.store.StoreToken(ctx, tokenRecord); err != nil {
-		slog.Error("GenerateTokenPair: 存储token失败", "error", err, "userID", userID)
+		// 阶段 D 审查修复（H5）：store 错误可能含 DSN（pgx 错误消息含完整连接串）
+		// 使用 SanitizeDBURL 脱敏 password，非 DSN 字符串原样返回不破坏错误上下文
+		slog.Error("GenerateTokenPair: 存储token失败", "error", logging.SanitizeDBURL(err.Error()), "userID", userID)
 		return nil, serviceutil.WrapServiceError("存储token", err)
 	}
 	slog.Debug("GenerateTokenPair: token存储成功", "userID", userID)

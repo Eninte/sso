@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/example/sso/internal/cache"
+	"github.com/example/sso/internal/logging"
 	"github.com/example/sso/internal/model"
 	"github.com/example/sso/internal/store"
 	"github.com/example/sso/internal/util/auditutil"
@@ -154,7 +155,8 @@ func (s *AdminService) GetUser(ctx context.Context, userID string) (*model.User,
 	if s.cache != nil {
 		cacheKey := cache.UserIDKey(userID)
 		if err := s.cache.Set(ctx, cacheKey, user, cache.DefaultTTL); err != nil {
-			slog.Warn("缓存用户信息失败", "error", err, "user_id", userID)
+			// 阶段 D 审查修复（H5）：cache 错误可能含 Redis DSN
+			slog.Warn("缓存用户信息失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", userID)
 		}
 	}
 
@@ -177,7 +179,8 @@ func (s *AdminService) DisableUser(ctx context.Context, userID string) error {
 
 	// 撤销所有Token（失败不影响主流程）
 	if err := s.store.RevokeAllUserTokens(ctx, userID); err != nil {
-		slog.Warn("撤销用户Token失败", "error", err, "user_id", userID)
+		// 阶段 D 审查修复（H5）：store 错误可能含 DSN
+		slog.Warn("撤销用户Token失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", userID)
 	}
 
 	// 阶段 2.4：统一清 token 缓存（撤销后立即生效，避免 15 分钟延迟窗口）
@@ -187,15 +190,27 @@ func (s *AdminService) DisableUser(ctx context.Context, userID string) error {
 	if s.cache != nil {
 		cacheKey := cache.UserIDKey(userID)
 		if err := s.cache.Delete(ctx, cacheKey); err != nil {
-			slog.Warn("失效用户缓存失败", "error", err, "user_id", userID)
+			// 阶段 D 审查修复（H5）：cache 错误可能含 Redis DSN
+			slog.Warn("失效用户缓存失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", userID)
 		}
 	}
 
-	// 记录管理员操作审计日志（失败不影响主流程）
+	// 阶段 D 审查修复（L8）：用户禁用属于关键操作，必须使用 CriticalAuditLog 同步记录
+	// 原实现使用 SafeAuditLog（异步、best-effort），审计可能丢失或延迟
+	// 若 auditSvc 为 nil（测试场景），跳过审计但记录警告
 	if s.auditSvc != nil {
-		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventUserDisabled), userID, map[string]interface{}{
+		if err := auditutil.CriticalAuditLog(ctx, s.auditSvc, string(model.EventUserDisabled), userID, map[string]interface{}{
 			"ip_address": clientIPFromContext(ctx),
-		})
+		}); err != nil {
+			// 操作已完成无法回滚，但记录审计失败错误便于运维追溯
+			// 阶段 D 审查修复（H5）：audit 错误底层为 store 错误，可能含 DSN
+			slog.Error("禁用用户审计日志记录失败（操作已生效，无法回滚）",
+				"error", logging.SanitizeDBURL(err.Error()),
+				"user_id", userID,
+			)
+		}
+	} else {
+		slog.Warn("禁用用户操作缺少审计服务（仅测试/开发场景应出现）", "user_id", userID)
 	}
 
 	return nil
@@ -221,7 +236,8 @@ func (s *AdminService) EnableUser(ctx context.Context, userID string) error {
 	if s.cache != nil {
 		cacheKey := cache.UserIDKey(userID)
 		if err := s.cache.Delete(ctx, cacheKey); err != nil {
-			slog.Warn("失效用户缓存失败", "error", err, "user_id", userID)
+			// 阶段 D 审查修复（H5）：cache 错误可能含 Redis DSN
+			slog.Warn("失效用户缓存失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", userID)
 		}
 	}
 
@@ -239,7 +255,8 @@ func (s *AdminService) EnableUser(ctx context.Context, userID string) error {
 func (s *AdminService) DeleteUser(ctx context.Context, userID string) error {
 	// 先撤销所有Token
 	if err := s.store.RevokeAllUserTokens(ctx, userID); err != nil {
-		slog.Warn("撤销用户Token失败", "error", err, "user_id", userID)
+		// 阶段 D 审查修复（H5）：store 错误可能含 DSN
+		slog.Warn("撤销用户Token失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", userID)
 	}
 
 	// 删除用户
@@ -254,15 +271,27 @@ func (s *AdminService) DeleteUser(ctx context.Context, userID string) error {
 	if s.cache != nil {
 		cacheKey := cache.UserIDKey(userID)
 		if err := s.cache.Delete(ctx, cacheKey); err != nil {
-			slog.Warn("失效用户缓存失败", "error", err, "user_id", userID)
+			// 阶段 D 审查修复（H5）：cache 错误可能含 Redis DSN
+			slog.Warn("失效用户缓存失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", userID)
 		}
 	}
 
-	// 记录管理员操作审计日志（失败不影响主流程）
+	// 阶段 D 审查修复（L8）：用户删除属于关键操作，必须使用 CriticalAuditLog 同步记录
+	// 原实现使用 SafeAuditLog（异步、best-effort），审计可能丢失或延迟
+	// 若 auditSvc 为 nil（测试场景），跳过审计但记录警告
 	if s.auditSvc != nil {
-		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventUserDeleted), userID, map[string]interface{}{
+		if err := auditutil.CriticalAuditLog(ctx, s.auditSvc, string(model.EventUserDeleted), userID, map[string]interface{}{
 			"ip_address": clientIPFromContext(ctx),
-		})
+		}); err != nil {
+			// 操作已完成无法回滚，但记录审计失败错误便于运维追溯
+			// 阶段 D 审查修复（H5）：audit 错误底层为 store 错误，可能含 DSN
+			slog.Error("删除用户审计日志记录失败（操作已生效，无法回滚）",
+				"error", logging.SanitizeDBURL(err.Error()),
+				"user_id", userID,
+			)
+		}
+	} else {
+		slog.Warn("删除用户操作缺少审计服务（仅测试/开发场景应出现）", "user_id", userID)
 	}
 
 	return nil

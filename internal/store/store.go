@@ -177,6 +177,12 @@ type SocialAccountStore interface {
 	// 用于用户在个人中心查看/解绑社交账号
 	ListSocialAccountsByUserID(ctx context.Context, userID string) ([]*model.SocialAccount, error)
 
+	// UpdateSocialAccount 更新社交账号绑定信息
+	// 仅更新 provider_email / email_verified / provider_metadata / updated_at 字段
+	// 不修改 user_id 关联，防止通过修改 provider 端 email 接管其他用户账号
+	// 阶段 D 修复（L2）：原 updateSocialAccountIfNeeded 仅修改内存对象未持久化
+	UpdateSocialAccount(ctx context.Context, account *model.SocialAccount) error
+
 	// DeleteSocialAccount 解绑社交账号
 	// 用于用户主动解绑
 	DeleteSocialAccount(ctx context.Context, provider, providerUserID string) error

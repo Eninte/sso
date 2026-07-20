@@ -100,16 +100,19 @@ func NewTemplateEngine(config TemplateConfig) (*TemplateEngine, error) {
 		templateDir = config.TemplateDir
 	} else {
 		// 回退到操作系统文件系统（用于开发工具脚本）
-		// 注意：绝对路径处理仅适用于 Unix 系统（Linux/macOS），
-		// Windows 路径格式不同（如 C:\path），本项目部署目标为 Linux
-		if filepath.IsAbs(config.TemplateDir) {
-			fsys = os.DirFS("/")
-			templateDir = filepath.Clean(config.TemplateDir[1:])
-		} else {
-			fsys = os.DirFS(".")
-			templateDir = config.TemplateDir
-		}
+		// 阶段 D 审查修复：统一使用模板目录本身作为 FS 根，路径设为 "."
+		// 原实现尝试对绝对路径用 os.DirFS("/") + 去掉前导 / 的方式，
+		// 仅适用于 Unix，在 Windows 上因盘符（C:\）导致 fs.ReadFile 失败。
+		// 新实现以 config.TemplateDir 作为 FS 根，所有内部路径相对此根，
+		// 跨平台兼容，且语义更清晰。
+		fsys = os.DirFS(config.TemplateDir)
+		templateDir = "."
 	}
+	// 阶段 D 审查修复：规范化为正斜杠
+	// fs.FS 接口（embed.FS / os.DirFS）要求使用正斜杠分隔路径，
+	// 但 filepath.Join/Rel 在 Windows 上返回反斜杠，导致 fs.ReadFile 失败。
+	// 统一在此处转换为正斜杠，避免后续 fs.WalkDir / fs.ReadFile 出错。
+	templateDir = filepath.ToSlash(templateDir)
 
 	engine := &TemplateEngine{
 		config:    config,
@@ -135,7 +138,9 @@ func NewTemplateEngine(config TemplateConfig) (*TemplateEngine, error) {
 // loadTemplates 加载模板目录下的所有HTML文件
 // 将 base.html 布局模板与各语言内容模板组合解析
 func (e *TemplateEngine) loadTemplates() error {
-	basePath := filepath.Join(e.config.TemplateDir, "base.html")
+	// 阶段 D 审查修复：filepath.Join 在 Windows 返回反斜杠，
+	// 但 fs.FS 要求正斜杠，需 ToSlash 规范化
+	basePath := filepath.ToSlash(filepath.Join(e.config.TemplateDir, "base.html"))
 
 	// 读取 base.html 内容
 	baseContent, err := fs.ReadFile(e.fsys, basePath)

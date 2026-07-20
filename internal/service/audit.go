@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/example/sso/internal/common"
+	"github.com/example/sso/internal/logging"
 	"github.com/example/sso/internal/model"
 	"github.com/example/sso/internal/store"
 	"github.com/example/sso/internal/util/safego"
@@ -76,7 +77,8 @@ func (s *AuditService) worker(id int) {
 		case log := <-s.logChan:
 			// nosec G118 -- worker 是后台 goroutine，没有请求 ctx 可用，必须用 context.Background()
 			if err := s.store.StoreAuditLog(context.Background(), log); err != nil {
-				slogger.Error("存储审计日志失败", "error", err, "log_id", log.ID)
+				// 阶段 D 审查修复（H5）：store 错误可能含 DSN
+				slogger.Error("存储审计日志失败", "error", logging.SanitizeDBURL(err.Error()), "log_id", log.ID)
 			}
 		}
 	}
@@ -189,8 +191,9 @@ func (s *AuditService) fallbackLog(ctx context.Context, log *model.AuditLog) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := s.store.StoreAuditLog(ctx, log); err != nil {
+			// 阶段 D 审查修复（H5）：store 错误可能含 DSN
 			s.logger.ErrorContext(ctx, "降级存储审计日志失败",
-				"error", err,
+				"error", logging.SanitizeDBURL(err.Error()),
 				"log_id", log.ID,
 				"event_type", log.EventType,
 			)

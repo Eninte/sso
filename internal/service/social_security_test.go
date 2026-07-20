@@ -434,3 +434,90 @@ func TestFindOrCreateSocialUser_StoreError(t *testing.T) {
 		assert.NotEqual(t, assert.AnError, err)
 	})
 }
+
+// ============================================================================
+// 阶段 D 审查修复（L2）：updateSocialAccountIfNeeded 实际持久化测试
+// ============================================================================
+
+func TestFindOrCreateSocialUser_UpdateSocialAccountPersisted(t *testing.T) {
+	t.Run("provider_email变化-实际持久化到DB", func(t *testing.T) {
+		storeInst := setupTestStore()
+		svc := setupTestSocialService(storeInst)
+
+		// 预创建用户 + social_account，provider_email 为旧值
+		user, account := createBoundUserAndSocialAccount(storeInst, "google", "google-update-123")
+		account.ProviderEmail = "old-email@gmail.com"
+		account.EmailVerified = false
+		require.NoError(t, storeInst.UpdateSocialAccount(context.Background(), account))
+
+		// 记录调用前的 updated_at，用于验证后续更新
+		updatedBefore, err := storeInst.GetSocialAccount(context.Background(), "google", "google-update-123")
+		require.NoError(t, err)
+		oldUpdatedAt := updatedBefore.UpdatedAt
+
+		// 模拟 provider 端 email 变化 + verified 变为 true
+		identity := &service.ProviderIdentity{
+			ProviderUserID: "google-update-123",
+			Email:          "new-email@gmail.com",
+			EmailVerified:  true,
+		}
+
+		// 确保 time.Now() 推进以使 updated_at 严格大于 oldUpdatedAt
+		time.Sleep(10 * time.Millisecond)
+		result, err := svc.FindOrCreateSocialUserForTest(context.Background(), "google", identity)
+		require.NoError(t, err)
+		assert.Equal(t, user.ID, result.ID)
+
+		// 阶段 D 修复（L2）：验证 DB 中的 social_account 已实际更新
+		updated, err := storeInst.GetSocialAccount(context.Background(), "google", "google-update-123")
+		require.NoError(t, err)
+		assert.Equal(t, "new-email@gmail.com", updated.ProviderEmail, "provider_email 应已持久化更新")
+		assert.True(t, updated.EmailVerified, "email_verified 应已持久化更新")
+		assert.True(t, updated.UpdatedAt.After(oldUpdatedAt), "updated_at 应已更新")
+		// user_id 不应被修改
+		assert.Equal(t, user.ID, updated.UserID, "user_id 关联不应被修改")
+	})
+
+	t.Run("provider_email未变化-不调用Update", func(t *testing.T) {
+		storeInst := setupTestStore()
+		svc := setupTestSocialService(storeInst)
+
+		_, account := createBoundUserAndSocialAccount(storeInst, "google", "google-nochange-123")
+
+		// 注入 UpdateSocialAccount 错误，验证未被调用
+		storeInst.UpdateSocialAccountErr = assert.AnError
+
+		identity := &service.ProviderIdentity{
+			ProviderUserID: "google-nochange-123",
+			Email:          account.ProviderEmail, // 相同 email
+			EmailVerified:  account.EmailVerified,  // 相同 verified
+		}
+
+		_, err := svc.FindOrCreateSocialUserForTest(context.Background(), "google", identity)
+		require.NoError(t, err, "未变化时不应调用 Update，故注入错误也不应影响")
+	})
+
+	t.Run("UpdateSocialAccount失败-登录主流程不受影响", func(t *testing.T) {
+		storeInst := setupTestStore()
+		svc := setupTestSocialService(storeInst)
+
+		user, account := createBoundUserAndSocialAccount(storeInst, "google", "google-update-fail-123")
+		account.ProviderEmail = "old@gmail.com"
+		account.EmailVerified = false
+		require.NoError(t, storeInst.UpdateSocialAccount(context.Background(), account))
+
+		// 注入 UpdateSocialAccount 错误
+		storeInst.UpdateSocialAccountErr = assert.AnError
+
+		identity := &service.ProviderIdentity{
+			ProviderUserID: "google-update-fail-123",
+			Email:          "new@gmail.com",
+			EmailVerified:  true,
+		}
+
+		// 阶段 D 修复（L2）：更新失败不影响登录主流程（已通过身份校验）
+		result, err := svc.FindOrCreateSocialUserForTest(context.Background(), "google", identity)
+		require.NoError(t, err, "Update 失败不应影响登录主流程")
+		assert.Equal(t, user.ID, result.ID)
+	})
+}

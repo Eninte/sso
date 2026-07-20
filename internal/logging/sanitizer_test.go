@@ -253,12 +253,20 @@ func TestSanitizeDBURL(t *testing.T) {
 		{
 			name:     "纯字符串无法解析为URL",
 			dsn:      "some random error message",
-			expected: "***", // 解析失败回退到 SanitizeSecret
+			// 阶段 D 修复（H5）：非 DSN 字符串原样返回，保留错误上下文
+			expected: "some random error message",
 		},
 		{
-			name:     "非URL格式字符串（无用户信息）",
+			name:     "key=value格式含password",
 			dsn:      "password=secret user=admin",
-			expected: "***", // 无 host/user info，整体隐藏
+			// sanitizeKeyValueDSN 识别 password= 子串，仅脱敏值
+			expected: "password=*** user=admin",
+		},
+		{
+			name:     "key=value格式无password",
+			dsn:      "host=localhost user=admin dbname=sso",
+			// 不含 password 字段，原样返回
+			expected: "host=localhost user=admin dbname=sso",
 		},
 	}
 

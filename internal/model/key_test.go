@@ -107,25 +107,25 @@ func TestKeyVersion_CanVerify(t *testing.T) {
 // ============================================================================
 
 func TestKeyVersion_CanVerify_BoundaryConditions(t *testing.T) {
-	// 测试恰好过期的情况
-	now := time.Now()
+	// 阶段 D 审查修复：原测试用 time.Now() 作为 ExpiresAt，
+	// 但 CanVerify 用 ExpiresAt.Before(time.Now()) 判断过期（严格小于），
+	// 当 ExpiresAt == time.Now() 时返回 true（未过期），
+	// 而测试期望 false，导致偶发性失败。
+	// 修复：使用已过去的时间（1ms前）确保确定性地过期
+	pastTime := time.Now().Add(-1 * time.Millisecond)
 
 	t.Run("恰好过期时间返回false", func(t *testing.T) {
 		key := &model.KeyVersion{
 			Status:    model.KeyStatusActive,
-			ExpiresAt: &now,
+			ExpiresAt: &pastTime,
 		}
-		// 由于time.Now()在执行时可能已经稍微过去，这个测试可能有细微差异
-		// 但逻辑上应该是false
 		result := key.CanVerify()
-		// 如果ExpiresAt恰好等于或稍早于当前时间，应该返回false
-		if key.ExpiresAt.Before(time.Now()) || key.ExpiresAt.Equal(time.Now()) {
-			assert.False(t, result)
-		}
+		// ExpiresAt 已在 1ms 前过期，CanVerify 应返回 false
+		assert.False(t, result)
 	})
 
 	t.Run("非常远的未来时间返回true", func(t *testing.T) {
-		farFuture := now.Add(100 * 365 * 24 * time.Hour) // 100年后
+		farFuture := time.Now().Add(100 * 365 * 24 * time.Hour) // 100年后
 		key := &model.KeyVersion{
 			Status:    model.KeyStatusActive,
 			ExpiresAt: &farFuture,

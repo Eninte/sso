@@ -17,6 +17,7 @@ import (
 	"github.com/example/sso/internal/model"
 	"github.com/example/sso/internal/store"
 	"github.com/example/sso/internal/util/auditutil"
+	"github.com/example/sso/internal/util/safego"
 	"github.com/example/sso/internal/util/serviceutil"
 	"github.com/example/sso/internal/validator"
 )
@@ -121,7 +122,8 @@ func (s *UserService) SendVerificationEmail(ctx context.Context, userID string) 
 	if s.emailRateLimit != nil {
 		allowed, remaining, err := s.emailRateLimit.CheckLimit(ctx, user.Email)
 		if err != nil {
-			slog.Warn("检查邮件限流失败", "error", err, "email", logging.SanitizeEmail(user.Email))
+			// 阶段 D 审查修复（H5）：限流器错误可能含 Redis DSN
+			slog.Warn("检查邮件限流失败", "error", logging.SanitizeDBURL(err.Error()), "email", logging.SanitizeEmail(user.Email))
 		}
 		if !allowed {
 			ttl, _ := s.emailRateLimit.GetTTL(ctx, user.Email)
@@ -185,7 +187,8 @@ func (s *UserService) VerifyEmail(ctx context.Context, userID, token string) err
 
 	// 清理验证令牌（失败不影响主流程）
 	if err := s.store.DeleteVerificationToken(ctx, userID); err != nil {
-		slog.Warn("清理验证令牌失败", "error", err, "user_id", userID)
+		// 阶段 D 审查修复（H5）：store 错误可能含 DSN
+		slog.Warn("清理验证令牌失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", userID)
 	}
 
 	return nil
@@ -200,7 +203,8 @@ func (s *UserService) ForgotPassword(ctx context.Context, email string) error {
 	user, err := s.store.GetByEmail(ctx, email)
 	if err != nil {
 		// 安全设计：不泄露用户是否存在，但记录错误日志以便排查
-		logger.Debug("ForgotPassword: 获取用户失败", "error", err, "email", logging.SanitizeEmail(email))
+		// 阶段 D 审查修复（H5）：store 错误可能含 DSN
+		logger.Debug("ForgotPassword: 获取用户失败", "error", logging.SanitizeDBURL(err.Error()), "email", logging.SanitizeEmail(email))
 		return nil
 	}
 
@@ -208,7 +212,8 @@ func (s *UserService) ForgotPassword(ctx context.Context, email string) error {
 	if s.emailRateLimit != nil {
 		allowed, remaining, err := s.emailRateLimit.CheckLimit(ctx, email)
 		if err != nil {
-			logger.Warn("检查邮件限流失败", "error", err, "email", logging.SanitizeEmail(email))
+			// 阶段 D 审查修复（H5）：限流器错误可能含 Redis DSN
+			logger.Warn("检查邮件限流失败", "error", logging.SanitizeDBURL(err.Error()), "email", logging.SanitizeEmail(email))
 		}
 		if !allowed {
 			ttl, _ := s.emailRateLimit.GetTTL(ctx, email)
@@ -232,17 +237,35 @@ func (s *UserService) ForgotPassword(ctx context.Context, email string) error {
 
 	expiresAt := time.Now().Add(ResetTokenTTL)
 	if err := s.store.StoreResetToken(ctx, user.ID, token, expiresAt); err != nil {
-		logger.Error("ForgotPassword: 存储重置令牌失败", "error", err, "user_id", user.ID)
+		// 阶段 D 审查修复（H5）：store 错误可能含 DSN
+		logger.Error("ForgotPassword: 存储重置令牌失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", user.ID)
 		return nil
 	}
 
 	resetLink := fmt.Sprintf("%s/reset-password?token=%s&user_id=%s", s.baseURL, token, user.ID)
 
+	// 阶段 D 修复（L9）：密码重置邮件异步发送
+	// 原实现同步发送，SMTP 调用慢（数百 ms 到数秒）会阻塞请求，且 SMTP 故障会放大影响面
+	// 异步化后：
+	//   - 请求立即返回，提升用户体验
+	//   - SMTP 故障不影响主流程（令牌已入库，用户可重试请求触发重新发送）
+	//   - 使用 context.WithoutCancel 避免主请求 ctx 取消后子 ctx 也被取消（Go 1.21+）
+	//   - 使用 safego.Go 防 panic
 	if s.emailSvc != nil {
-		if err := s.emailSvc.SendPasswordResetEmail(ctx, user.Email, user.Email, resetLink); err != nil {
-			logger.Error("ForgotPassword: 发送重置邮件失败", "error", err, "user_id", user.ID)
-			// 仍然返回 nil，不泄露内部错误
-		}
+		asyncCtx := context.WithoutCancel(ctx)
+		asyncLogger := logger
+		emailSvc := s.emailSvc
+		to := user.Email
+		username := user.Email
+		safego.Go(asyncLogger, "异步发送密码重置邮件", func() {
+			if err := emailSvc.SendPasswordResetEmail(asyncCtx, to, username, resetLink); err != nil {
+				// 阶段 D 审查修复（H5）：email 错误可能含 SMTP 主机/端口
+				asyncLogger.Error("ForgotPassword: 异步发送重置邮件失败",
+					"error", logging.SanitizeDBURL(err.Error()),
+					"user_id", user.ID,
+				)
+			}
+		})
 	}
 
 	return nil
@@ -275,7 +298,8 @@ func (s *UserService) ResetPasswordWithAudit(ctx context.Context, userID, token,
 
 	// 先标记令牌为已使用（防止重复使用）
 	if err := s.store.MarkResetTokenUsed(ctx, userID); err != nil {
-		logger.Error("标记重置令牌为已使用失败", "error", err, "user_id", userID)
+		// 阶段 D 审查修复（H5）：store 错误可能含 DSN
+		logger.Error("标记重置令牌为已使用失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", userID)
 		return serviceutil.WrapServiceError("标记令牌已使用", err)
 	}
 
@@ -300,11 +324,13 @@ func (s *UserService) ResetPasswordWithAudit(ctx context.Context, userID, token,
 
 	// 清理重置令牌（失败不影响主流程）
 	if err := s.store.DeleteResetToken(ctx, userID); err != nil {
-		logger.Warn("清理重置令牌失败", "error", err, "user_id", userID)
+		// 阶段 D 审查修复（H5）：store 错误可能含 DSN
+		logger.Warn("清理重置令牌失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", userID)
 	}
 	// 撤销用户所有Token（失败不影响主流程）
 	if err := s.store.RevokeAllUserTokens(ctx, userID); err != nil {
-		logger.Warn("撤销用户Token失败", "error", err, "user_id", userID)
+		// 阶段 D 审查修复（H5）：store 错误可能含 DSN
+		logger.Warn("撤销用户Token失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", userID)
 	}
 	// 阶段 2.4：统一清 token 缓存，确保撤销立即生效
 	serviceutil.InvalidateUserTokenCache(ctx, s.cache, userID)
@@ -360,7 +386,8 @@ func (s *UserService) ChangePasswordWithAudit(ctx context.Context, userID, oldPa
 	// 与 ResetPasswordWithAudit 行为一致，防止旧密码泄露后 access_token 仍可用
 	// 失败不影响主流程（密码已更新成功），仅记录警告日志
 	if err := s.store.RevokeAllUserTokens(ctx, userID); err != nil {
-		slog.Warn("修改密码后撤销用户Token失败", "error", err, "user_id", userID)
+		// 阶段 D 审查修复（H5）：store 错误可能含 DSN
+		slog.Warn("修改密码后撤销用户Token失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", userID)
 	}
 	// 同步清 token 缓存，确保撤销立即生效
 	serviceutil.InvalidateUserTokenCache(ctx, s.cache, userID)

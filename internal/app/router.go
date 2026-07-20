@@ -111,9 +111,8 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 	router.HandleFunc("/.well-known/jwks.json", wellKnownHandler.HandleJWKS).Methods("GET")
 
 	// 第三方登录端点 (公开)
+	// /auth/providers 仅返回静态 provider 列表，使用全局限流即可
 	router.HandleFunc("/auth/providers", socialHandler.HandleProviders).Methods("GET")
-	router.HandleFunc("/auth/{provider}", socialHandler.HandleLogin).Methods("GET")
-	router.HandleFunc("/auth/{provider}/callback", socialHandler.HandleCallback).Methods("GET")
 
 	// API端点
 	api := router.PathPrefix("/api/v1").Subrouter()
@@ -127,6 +126,19 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 	sensitiveLimiter := newEndpointRateLimiter(svc.Cache, sensitiveLimit, 1*time.Minute, "ratelimit:sensitive")
 	// 阶段 4：注入指标回调（同主限流器）
 	injectRateLimitMetrics(sensitiveLimiter, svc.Metrics)
+
+	// 阶段 D 修复（L4）：/auth/{provider} 和 /auth/{provider}/callback 涉及 OAuth code 交换，
+	// 与登录/注册等敏感端点同等重要，需纳入敏感限流防止暴力枚举 provider/code 等攻击
+	// 由于位于 /api/v1 之外，独立应用 sensitiveLimiter 中间件
+	if sensitiveLimiter != nil {
+		authSensitive := router.PathPrefix("/auth").Subrouter()
+		authSensitive.Use(sensitiveLimiter.Middleware)
+		authSensitive.HandleFunc("/{provider}", socialHandler.HandleLogin).Methods("GET")
+		authSensitive.HandleFunc("/{provider}/callback", socialHandler.HandleCallback).Methods("GET")
+	} else {
+		router.HandleFunc("/auth/{provider}", socialHandler.HandleLogin).Methods("GET")
+		router.HandleFunc("/auth/{provider}/callback", socialHandler.HandleCallback).Methods("GET")
+	}
 
 	// 公开端点 (不需要认证)
 	if sensitiveLimiter != nil {

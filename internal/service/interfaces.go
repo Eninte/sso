@@ -45,6 +45,12 @@ type AuthServiceInterface interface {
 
 	// ValidateToken 验证Token
 	ValidateToken(ctx context.Context, accessToken string) (*crypto.AccessTokenClaims, error)
+
+	// GetTokenOwnerID 查询 token 所属用户 ID
+	// 阶段 B 审查修复（H3）：用于 /token/revoke 端点的 token 所有权校验
+	// 按顺序尝试 access_token / refresh_token 查询
+	// 返回 ("", nil) 表示 token 不存在，调用方应返回 204 不暴露存在性（RFC 7009 §2.2）
+	GetTokenOwnerID(ctx context.Context, token string) (string, error)
 }
 
 // ============================================================================
@@ -64,10 +70,15 @@ type OAuthServiceInterface interface {
 	// CreateAuthorizationCodeWithConsent 基于 consent_token 创建授权码（阶段 2.2）
 	// 用户在 GET /authorize 拿到 consent_token 后，POST /authorize/approve 回传，
 	// 由 service 校验签名/过期/用户归属/客户端/redirect_uri/scope/PKCE 后创建授权码
+	//
+	// 阶段 D 审查修复（H1）：增加 expectedState 参数用于校验 consent_token 内嵌 state
+	// 防止 GET /authorize 与 POST /authorize/approve 之间 state 被替换。
+	// expectedState 为空时不校验（向后兼容），生产环境调用方应始终传入。
 	CreateAuthorizationCodeWithConsent(
 		ctx context.Context,
 		userID string,
 		consentToken string,
+		expectedState string,
 	) (string, error)
 
 	// IssueConsentToken 签发短期 consent_token（阶段 2.2）

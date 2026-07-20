@@ -3,6 +3,7 @@ package service_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,6 +17,7 @@ import (
 // ============================================================================
 
 type mockMailSender struct {
+	mu           sync.Mutex
 	sentMessages []mockMessage
 	shouldError  bool
 }
@@ -29,11 +31,38 @@ type mockMessage struct {
 }
 
 func (m *mockMailSender) Send(addr, from string, to []string, msg []byte, config *service.EmailConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.shouldError {
 		return assert.AnError
 	}
 	m.sentMessages = append(m.sentMessages, mockMessage{addr, from, to, msg, config})
 	return nil
+}
+
+// GetSentMessages 线程安全地返回已发送邮件快照（阶段 D 修复 L9）
+// 异步发送邮件后测试需读取结果
+func (m *mockMailSender) GetSentMessages() []mockMessage {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]mockMessage, len(m.sentMessages))
+	copy(cp, m.sentMessages)
+	return cp
+}
+
+// Count 线程安全地返回已发送邮件数量
+func (m *mockMailSender) Count() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.sentMessages)
+}
+
+// SetShouldError 线程安全地设置 shouldError 标志（阶段 D 修复 L9）
+// 异步发送邮件时，直接修改 shouldError 会与 goroutine 中的读取产生 data race
+func (m *mockMailSender) SetShouldError(v bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.shouldError = v
 }
 
 // ============================================================================

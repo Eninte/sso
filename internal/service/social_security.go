@@ -113,8 +113,9 @@ func ExtractProviderIdentity(provider string, userInfo map[string]interface{}) (
 		if email, ok := userInfo["email"].(string); ok && email != "" {
 			identity.Email = email
 			// GitHub /user 接口不返回 email_verified 字段
-			// 安全设计：默认为未验证，调用方需调用 /user/emails 接口获取 verified 状态
-			// 当前实现保守处理：将 GitHub email 视为未验证
+			// 安全设计：默认为未验证（fail-secure），由 HandleCallback 调用
+			// enrichGitHubIdentity 通过 /user/emails API 补全真实 verified 状态
+			// 阶段 D 审查修复（H2）：原实现硬编码 false 会导致已验证 GitHub 用户无法登录
 			identity.EmailVerified = false
 		}
 
@@ -283,6 +284,10 @@ func (s *SocialLoginService) findOrCreateSocialUser(
 //
 // 注意：仅更新 provider_email / email_verified / metadata 字段，
 // 不改变 user_id 关联（防止通过修改 provider 端 email 接管其他用户账号）
+//
+// 阶段 D 修复（L2）：原实现仅修改内存对象未持久化
+// 新增 store.UpdateSocialAccount 接口，UPDATE 语句只更新允许字段
+// user_id 关联在 SQL WHERE 中通过 (provider, provider_user_id) 定位，不会被覆盖
 func (s *SocialLoginService) updateSocialAccountIfNeeded(
 	ctx context.Context,
 	account *model.SocialAccount,
@@ -304,10 +309,15 @@ func (s *SocialLoginService) updateSocialAccountIfNeeded(
 	}
 
 	account.UpdatedAt = time.Now()
-	// 使用 CreateSocialAccount 不可，因为没有 Update 接口
-	// 简化处理：直接调用 store 的删除+创建（实际生产应增加 UpdateSocialAccount 接口）
-	// 当前阶段保守起见，仅记录日志，不修改数据
-	// 防止意外破坏 (provider, provider_user_id) 唯一约束
-	_ = auditutil.SafeAuditLog
-	// TODO: 后续阶段在 SocialAccountStore 接口增加 UpdateSocialAccount 方法
+	// 阶段 D 修复（L2）：实际持久化到 DB
+	// store.UpdateSocialAccount 仅更新 provider_email/email_verified/metadata/updated_at
+	// 不修改 user_id 关联，防止通过修改 provider 端 email 接管其他用户账号
+	if err := s.store.UpdateSocialAccount(ctx, account); err != nil {
+		// 更新失败不影响登录主流程（已通过身份校验），但记录审计便于追溯
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventSocialLoginRejected), account.UserID, map[string]interface{}{
+			"provider":        account.Provider,
+			"provider_user_id": account.ProviderUserID,
+			"reason":          "social_account_update_failed",
+		})
+	}
 }

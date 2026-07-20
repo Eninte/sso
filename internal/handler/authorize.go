@@ -145,7 +145,9 @@ func (h *AuthorizeHandler) HandleApprove(w http.ResponseWriter, r *http.Request)
 	}
 
 	// 5. 通过 consent_token 创建授权码
-	code, err := h.oauthSvc.CreateAuthorizationCodeWithConsent(r.Context(), userID, req.ConsentToken)
+	// 阶段 D 审查修复（H1）：传入请求 state 用于与 consent_token 内 state 对比，
+	// 防止 GET /authorize 与 POST /authorize/approve 之间 state 被替换
+	code, err := h.oauthSvc.CreateAuthorizationCodeWithConsent(r.Context(), userID, req.ConsentToken, req.State)
 	if err != nil {
 		writeOAuthError(w, r, err)
 		return

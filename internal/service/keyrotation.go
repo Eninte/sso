@@ -8,6 +8,7 @@ import (
 
 	"github.com/example/sso/internal/crypto"
 	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/logging"
 	"github.com/example/sso/internal/model"
 	"github.com/example/sso/internal/store"
 	"github.com/example/sso/internal/util/auditutil"
@@ -72,7 +73,8 @@ func (s *KeyRotationService) RotateKey(ctx context.Context) (*model.KeyVersion, 
 	if activeKey != nil {
 		expiresAt := time.Now().Add(s.transitionPeriod)
 		if err := s.keyStore.DeprecateKey(ctx, activeKey.ID, expiresAt); err != nil {
-			slog.Warn("failed to deprecate old key", "error", err, "key_id", activeKey.ID)
+			// 阶段 D 审查修复（H5）：keyStore 错误可能含 DSN
+			slog.Warn("failed to deprecate old key", "error", logging.SanitizeDBURL(err.Error()), "key_id", activeKey.ID)
 		} else {
 			slog.Info("old key deprecated",
 				"key_id", activeKey.ID,
@@ -87,8 +89,9 @@ func (s *KeyRotationService) RotateKey(ctx context.Context) (*model.KeyVersion, 
 		"key_id": newKeyVersion.ID,
 	}); err != nil {
 		// 密钥已生效无法回滚，但记录审计失败错误，便于运维追溯
+		// 阶段 D 审查修复（H5）：audit 错误底层为 store 错误，可能含 DSN
 		slog.Error("密钥轮换审计日志记录失败（密钥已生效，无法回滚）",
-			"error", err,
+			"error", logging.SanitizeDBURL(err.Error()),
 			"key_id", newKeyVersion.ID,
 		)
 		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "密钥轮换审计日志记录失败", 500, err)
@@ -114,7 +117,8 @@ func (s *KeyRotationService) CleanupExpiredKeys(ctx context.Context) (int, error
 	for _, key := range keys {
 		if key.Status == model.KeyStatusDeprecated && key.ExpiresAt != nil && key.ExpiresAt.Before(now) {
 			if err := s.keyStore.RevokeKey(ctx, key.ID); err != nil {
-				slog.Warn("failed to revoke expired key", "error", err, "key_id", key.ID)
+				// 阶段 D 审查修复（H5）：keyStore 错误可能含 DSN
+				slog.Warn("failed to revoke expired key", "error", logging.SanitizeDBURL(err.Error()), "key_id", key.ID)
 				continue
 			}
 			s.jwtSvc.RemoveKey(key.ID)
@@ -126,8 +130,9 @@ func (s *KeyRotationService) CleanupExpiredKeys(ctx context.Context) (int, error
 			if err := auditutil.CriticalAuditLog(ctx, s.auditSvc, string(model.EventKeyRevoked), "", map[string]interface{}{
 				"key_id": key.ID,
 			}); err != nil {
+				// 阶段 D 审查修复（H5）：audit 错误底层为 store 错误，可能含 DSN
 				slog.Error("密钥撤销审计日志记录失败",
-					"error", err,
+					"error", logging.SanitizeDBURL(err.Error()),
 					"key_id", key.ID,
 				)
 				return cleanedCount, apperrors.Wrap(apperrors.ErrCodeInternal, "密钥撤销审计日志记录失败", 500, err)
@@ -159,8 +164,9 @@ func (s *KeyRotationService) RevokeKey(ctx context.Context, keyID string) error 
 	if err := auditutil.CriticalAuditLog(ctx, s.auditSvc, string(model.EventKeyRevoked), "", map[string]interface{}{
 		"key_id": keyID,
 	}); err != nil {
+		// 阶段 D 审查修复（H5）：audit 错误底层为 store 错误，可能含 DSN
 		slog.Error("密钥撤销审计日志记录失败",
-			"error", err,
+			"error", logging.SanitizeDBURL(err.Error()),
 			"key_id", keyID,
 		)
 		return apperrors.Wrap(apperrors.ErrCodeInternal, "密钥撤销审计日志记录失败", 500, err)

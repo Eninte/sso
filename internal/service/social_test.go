@@ -540,3 +540,333 @@ func TestSocialLoginService_HandleCallback_FullFlow(t *testing.T) {
 		assert.ErrorIs(t, err, service.ErrProviderUserIDMissing)
 	})
 }
+
+// ============================================================================
+// 阶段 D 审查修复（H2）：GitHub /user/emails API 补全 email_verified 测试
+// ============================================================================
+
+func TestSocialLoginService_HandleCallback_GitHub_EmailsAPI(t *testing.T) {
+	// GitHub 标准 /user/emails 响应：两项均为 verified
+	ghEmailsResp := []map[string]interface{}{
+		{
+			"email":      "ghuser@example.com",
+			"primary":    true,
+			"verified":   true,
+			"visibility": "public",
+		},
+		{
+			"email":      "ghuser-alt@example.com",
+			"primary":    false,
+			"verified":   true,
+			"visibility": "private",
+		},
+	}
+
+	t.Run("GitHub回调-通过/user/emails补全verified=true-创建新用户", func(t *testing.T) {
+		storeInst := mock.New()
+		jwtSvc := createTestJWTService()
+
+		tokenResp := map[string]interface{}{"access_token": "gh-token", "token_type": "bearer"}
+		// GitHub /user 不返回 email_verified
+		userInfoResp := map[string]interface{}{
+			"id":    float64(12345),
+			"login": "ghuser",
+			"name":  "GitHub User",
+			"email": "ghuser@example.com",
+		}
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(tokenResp)
+		})
+		mux.HandleFunc("/userinfo", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(userInfoResp)
+		})
+		mux.HandleFunc("/emails", func(w http.ResponseWriter, r *http.Request) {
+			// 阶段 D 修复（H2）：校验 Authorization 头
+			auth := r.Header.Get("Authorization")
+			require.Equal(t, "Bearer gh-token", auth)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(ghEmailsResp)
+		})
+		server := httptest.NewServer(mux)
+		defer server.Close()
+
+		providers := map[string]*service.OAuthProvider{
+			"github": {
+				Name:        "github",
+				ClientID:    "gh-id",
+				ClientSecret: "gh-secret",
+				TokenURL:    server.URL + "/token",
+				UserInfoURL: server.URL + "/userinfo",
+				// 阶段 D 修复（H2）：指向 mock /emails 端点
+				EmailsURL:   server.URL + "/emails",
+				Scopes:      []string{"user:email"},
+			},
+		}
+
+		svc := service.NewSocialLoginServiceWithProviders(storeInst, jwtSvc, providers, http.DefaultClient)
+
+		authURL, err := svc.GetAuthorizationURL("github", "")
+		require.NoError(t, err)
+		parsedURL, _ := url.Parse(authURL)
+		state := parsedURL.Query().Get("state")
+		require.NotEmpty(t, state)
+
+		resp, err := svc.HandleCallback(context.Background(), "github", "code", state)
+		require.NoError(t, err)
+		assert.NotEmpty(t, resp.AccessToken)
+
+		// 验证用户已创建且 email_verified=true
+		user, err := storeInst.GetByEmail(context.Background(), "ghuser@example.com")
+		require.NoError(t, err)
+		assert.Equal(t, "ghuser@example.com", user.Email)
+		assert.True(t, user.EmailVerified)
+
+		// 验证 social_account 已创建且 EmailVerified=true
+		account, err := storeInst.GetSocialAccount(context.Background(), "github", "12345")
+		require.NoError(t, err)
+		assert.True(t, account.EmailVerified)
+	})
+
+	t.Run("GitHub回调-/user/emails返回verified=false-拒绝登录", func(t *testing.T) {
+		storeInst := mock.New()
+		jwtSvc := createTestJWTService()
+
+		tokenResp := map[string]interface{}{"access_token": "gh-token"}
+		userInfoResp := map[string]interface{}{
+			"id":    float64(67890),
+			"login": "unverified-user",
+			"email": "unverified-gh@example.com",
+		}
+		// /user/emails 返回 verified=false
+		emailsResp := []map[string]interface{}{
+			{
+				"email":    "unverified-gh@example.com",
+				"primary":  true,
+				"verified": false,
+			},
+		}
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(tokenResp)
+		})
+		mux.HandleFunc("/userinfo", func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(userInfoResp)
+		})
+		mux.HandleFunc("/emails", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(emailsResp)
+		})
+		server := httptest.NewServer(mux)
+		defer server.Close()
+
+		providers := map[string]*service.OAuthProvider{
+			"github": {
+				Name:        "github",
+				ClientID:    "gh-id",
+				ClientSecret: "gh-secret",
+				TokenURL:    server.URL + "/token",
+				UserInfoURL: server.URL + "/userinfo",
+				EmailsURL:   server.URL + "/emails",
+			},
+		}
+
+		svc := service.NewSocialLoginServiceWithProviders(storeInst, jwtSvc, providers, http.DefaultClient)
+
+		authURL, _ := svc.GetAuthorizationURL("github", "")
+		parsedURL, _ := url.Parse(authURL)
+		state := parsedURL.Query().Get("state")
+
+		_, err := svc.HandleCallback(context.Background(), "github", "code", state)
+
+		// 阶段 D 修复（H2）：未验证 email 应被拒绝
+		require.Error(t, err)
+		assert.ErrorIs(t, err, service.ErrProviderEmailNotVerified)
+
+		// 验证不会创建用户
+		users, _, _ := storeInst.ListUsers(context.Background(), 0, 100)
+		assert.Len(t, users, 0)
+	})
+
+	t.Run("GitHub回调-/user/emails API 5xx-保守保持false-拒绝登录", func(t *testing.T) {
+		storeInst := mock.New()
+		jwtSvc := createTestJWTService()
+
+		tokenResp := map[string]interface{}{"access_token": "gh-token"}
+		userInfoResp := map[string]interface{}{
+			"id":    float64(11111),
+			"login": "api-fail-user",
+			"email": "api-fail@example.com",
+		}
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(tokenResp)
+		})
+		mux.HandleFunc("/userinfo", func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(userInfoResp)
+		})
+		mux.HandleFunc("/emails", func(w http.ResponseWriter, r *http.Request) {
+			// 模拟 GitHub API 5xx 错误
+			w.WriteHeader(http.StatusInternalServerError)
+		})
+		server := httptest.NewServer(mux)
+		defer server.Close()
+
+		providers := map[string]*service.OAuthProvider{
+			"github": {
+				Name:        "github",
+				ClientID:    "gh-id",
+				ClientSecret: "gh-secret",
+				TokenURL:    server.URL + "/token",
+				UserInfoURL: server.URL + "/userinfo",
+				EmailsURL:   server.URL + "/emails",
+			},
+		}
+
+		svc := service.NewSocialLoginServiceWithProviders(storeInst, jwtSvc, providers, http.DefaultClient)
+
+		authURL, _ := svc.GetAuthorizationURL("github", "")
+		parsedURL, _ := url.Parse(authURL)
+		state := parsedURL.Query().Get("state")
+
+		_, err := svc.HandleCallback(context.Background(), "github", "code", state)
+
+		// 阶段 D 修复（H2）：fail-secure，API 失败保守保持 EmailVerified=false
+		require.Error(t, err)
+		assert.ErrorIs(t, err, service.ErrProviderEmailNotVerified)
+	})
+
+	t.Run("GitHub回调-identity.Email为空-取primary_verified_email填充", func(t *testing.T) {
+		storeInst := mock.New()
+		jwtSvc := createTestJWTService()
+
+		tokenResp := map[string]interface{}{"access_token": "gh-token"}
+		// GitHub /user 未公开 email
+		userInfoResp := map[string]interface{}{
+			"id":    float64(22222),
+			"login": "no-public-email",
+			"name":  "No Public Email",
+			// 无 email 字段
+		}
+		emailsResp := []map[string]interface{}{
+			{
+				"email":    "private@example.com",
+				"primary":  true,
+				"verified": true,
+			},
+			{
+				"email":    "alt@example.com",
+				"primary":  false,
+				"verified": true,
+			},
+		}
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(tokenResp)
+		})
+		mux.HandleFunc("/userinfo", func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(userInfoResp)
+		})
+		mux.HandleFunc("/emails", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(emailsResp)
+		})
+		server := httptest.NewServer(mux)
+		defer server.Close()
+
+		providers := map[string]*service.OAuthProvider{
+			"github": {
+				Name:        "github",
+				ClientID:    "gh-id",
+				ClientSecret: "gh-secret",
+				TokenURL:    server.URL + "/token",
+				UserInfoURL: server.URL + "/userinfo",
+				EmailsURL:   server.URL + "/emails",
+			},
+		}
+
+		svc := service.NewSocialLoginServiceWithProviders(storeInst, jwtSvc, providers, http.DefaultClient)
+
+		authURL, _ := svc.GetAuthorizationURL("github", "")
+		parsedURL, _ := url.Parse(authURL)
+		state := parsedURL.Query().Get("state")
+
+		resp, err := svc.HandleCallback(context.Background(), "github", "code", state)
+		require.NoError(t, err)
+		assert.NotEmpty(t, resp.AccessToken)
+
+		// 验证用户已使用 primary verified email 创建
+		user, err := storeInst.GetByEmail(context.Background(), "private@example.com")
+		require.NoError(t, err)
+		assert.Equal(t, "private@example.com", user.Email)
+		assert.True(t, user.EmailVerified)
+	})
+
+	t.Run("GitHub回调-无primary_verified_email-拒绝", func(t *testing.T) {
+		storeInst := mock.New()
+		jwtSvc := createTestJWTService()
+
+		tokenResp := map[string]interface{}{"access_token": "gh-token"}
+		userInfoResp := map[string]interface{}{
+			"id":    float64(33333),
+			"login": "no-verified-email",
+			"name":  "No Verified Email",
+		}
+		// identity.Email 为空，/user/emails 无 primary && verified 项
+		emailsResp := []map[string]interface{}{
+			{
+				"email":    "primary-unverified@example.com",
+				"primary":  true,
+				"verified": false,
+			},
+			{
+				"email":    "alt-verified@example.com",
+				"primary":  false,
+				"verified": true,
+			},
+		}
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(tokenResp)
+		})
+		mux.HandleFunc("/userinfo", func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(userInfoResp)
+		})
+		mux.HandleFunc("/emails", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(emailsResp)
+		})
+		server := httptest.NewServer(mux)
+		defer server.Close()
+
+		providers := map[string]*service.OAuthProvider{
+			"github": {
+				Name:        "github",
+				ClientID:    "gh-id",
+				ClientSecret: "gh-secret",
+				TokenURL:    server.URL + "/token",
+				UserInfoURL: server.URL + "/userinfo",
+				EmailsURL:   server.URL + "/emails",
+			},
+		}
+
+		svc := service.NewSocialLoginServiceWithProviders(storeInst, jwtSvc, providers, http.DefaultClient)
+
+		authURL, _ := svc.GetAuthorizationURL("github", "")
+		parsedURL, _ := url.Parse(authURL)
+		state := parsedURL.Query().Get("state")
+
+		_, err := svc.HandleCallback(context.Background(), "github", "code", state)
+
+		// identity.Email 为空且无 primary && verified 项，保守保持 EmailVerified=false
+		require.Error(t, err)
+		assert.ErrorIs(t, err, service.ErrProviderEmailNotVerified)
+	})
+}

@@ -532,6 +532,64 @@ func (c *RedisCache) Delete(ctx context.Context, key string) error {
 	return c.client.Del(ctx, key).Err()
 }
 
+// GetAndDelete 原子地获取并删除 key（阶段 D 修复 M4）
+//
+// 使用 Lua 脚本实现 GET+DEL 原子化，避免非原子 Get+Delete 的 TOCTOU 窗口。
+// 兼容 Redis 2.6+（Lua 脚本支持）。
+//
+// 返回：
+//   - *stateInfo：仅用于 oauth:state: 前缀的 key，反序列化为 stateInfo
+//   - error：key 不存在时返回 ErrCacheMiss
+//
+// 注意：此方法仅用于特定结构（stateInfo）的原子操作。
+// 如需通用原子 GetAndDelete，应抽象为泛型方法或返回原始 bytes。
+// 此处为最小侵入实现，避免破坏 cache.Cache 接口契约。
+func (c *RedisCache) GetAndDelete(ctx context.Context, key string) (*stateInfoShim, error) {
+	// 使用 Lua 脚本：原子 GET + DEL
+	// 若 key 不存在返回 nil；否则返回 value 并删除
+	const script = `
+		local val = redis.call('GET', KEYS[1])
+		if val == false then
+			return nil
+		end
+		redis.call('DEL', KEYS[1])
+		return val
+	`
+	result, err := c.client.Eval(ctx, script, []string{key}).Result()
+	if err != nil {
+		// redis.Nil 表示脚本返回 nil（key 不存在）
+		if errors.Is(err, redis.Nil) {
+			return nil, ErrCacheMiss
+		}
+		return nil, err
+	}
+	if result == nil {
+		return nil, ErrCacheMiss
+	}
+
+	// result 应为 string（GET 命令返回的 value）
+	data, ok := result.(string)
+	if !ok {
+		return nil, fmt.Errorf("unexpected lua result type: %T", result)
+	}
+
+	var info stateInfoShim
+	if err := json.Unmarshal([]byte(data), &info); err != nil {
+		return nil, fmt.Errorf("反序列化 stateInfo 失败: %w", err)
+	}
+	return &info, nil
+}
+
+// stateInfoShim 用于 GetAndDelete 反序列化的临时结构
+//
+// 为避免 cache 包循环依赖 service 包，此处使用 shim 类型复制 stateInfo 字段。
+// service.stateInfo 通过 json.Marshal/Unmarshal 与 shim 互转。
+type stateInfoShim struct {
+	Provider    string    `json:"provider"`
+	RedirectURI string    `json:"redirect_uri"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 // DeletePattern 按模式删除缓存
 // 使用SCAN命令代替KEYS，避免在大数据集上阻塞Redis
 func (c *RedisCache) DeletePattern(ctx context.Context, pattern string) error {

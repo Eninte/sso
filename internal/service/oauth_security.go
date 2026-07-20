@@ -164,6 +164,8 @@ type ConsentClaims struct {
 //
 // 签名方式：复用 JWTService 的私钥（RS256），保证 token 不可伪造
 // 有效期：ConsentTokenTTL（5 分钟）
+//
+// 阶段 D 审查修复（M2）：增加输入参数校验，防止空值绕过下游校验逻辑
 func (s *OAuthService) IssueConsentToken(
 	ctx context.Context,
 	userID, clientID, redirectURI string,
@@ -172,6 +174,23 @@ func (s *OAuthService) IssueConsentToken(
 ) (string, error) {
 	if s.tokenSvc == nil || s.tokenSvc.jwtSvc == nil {
 		return "", fmt.Errorf("token service is not initialized")
+	}
+
+	// 阶段 D 审查修复（M2）：输入校验，防止空值签发无效 consent_token
+	// 原实现仅在 VerifyConsentToken 时校验，但签发时若允许空值，
+	// 可能让攻击者获得合法签名的空 consent_token，用于绕过授权流程
+	if userID == "" {
+		return "", fmt.Errorf("%w: userID 不能为空", ErrConsentInvalid)
+	}
+	if clientID == "" {
+		return "", fmt.Errorf("%w: clientID 不能为空", ErrConsentInvalid)
+	}
+	if redirectURI == "" {
+		return "", fmt.Errorf("%w: redirectURI 不能为空", ErrConsentInvalid)
+	}
+	// state 用于 CSRF 防护，必填且需达到最低熵
+	if state == "" || len(state) < 16 {
+		return "", fmt.Errorf("%w: state 必填且长度至少 16", ErrConsentInvalid)
 	}
 
 	// 获取 RS256 签名所需私钥

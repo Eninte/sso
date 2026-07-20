@@ -316,13 +316,14 @@ func TestOAuthService_CreateAuthorizationCodeWithConsent(t *testing.T) {
 		require.NoError(t, err)
 
 		// 2. 通过 consent_token 创建授权码
-		code, err := oauthSvc.CreateAuthorizationCodeWithConsent(ctx, user.ID, consentToken)
+		// 阶段 D 修复（H1）：传入与 IssueConsentToken 一致的 state 用于校验
+		code, err := oauthSvc.CreateAuthorizationCodeWithConsent(ctx, user.ID, consentToken, "state-csrf-1234567890")
 		require.NoError(t, err)
 		assert.NotEmpty(t, code)
 	})
 
 	t.Run("拒绝-consent_token无效", func(t *testing.T) {
-		_, err := oauthSvc.CreateAuthorizationCodeWithConsent(ctx, user.ID, "invalid-consent-token")
+		_, err := oauthSvc.CreateAuthorizationCodeWithConsent(ctx, user.ID, "invalid-consent-token", "state-csrf-1234567890")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, service.ErrConsentInvalid)
 	})
@@ -341,7 +342,7 @@ func TestOAuthService_CreateAuthorizationCodeWithConsent(t *testing.T) {
 		require.NoError(t, err)
 
 		// 用不同用户ID调用
-		_, err = oauthSvc.CreateAuthorizationCodeWithConsent(ctx, "different-user-id", consentToken)
+		_, err = oauthSvc.CreateAuthorizationCodeWithConsent(ctx, "different-user-id", consentToken, "state-csrf-1234567890")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, service.ErrConsentInvalid)
 	})
@@ -361,7 +362,7 @@ func TestOAuthService_CreateAuthorizationCodeWithConsent(t *testing.T) {
 		// IssueConsentToken 本身不校验 redirect_uri，需要 CreateAuthorizationCodeWithConsent 校验
 		// 但 ValidateRedirectURI 在 store 层会拒绝
 		require.NoError(t, err)
-		_, err = oauthSvc.CreateAuthorizationCodeWithConsent(ctx, user.ID, consentToken)
+		_, err = oauthSvc.CreateAuthorizationCodeWithConsent(ctx, user.ID, consentToken, "state-csrf-1234567890")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, service.ErrInvalidRedirectURI)
 	})
@@ -385,9 +386,28 @@ func TestOAuthService_CreateAuthorizationCodeWithConsent(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		_, err = oauthSvc.CreateAuthorizationCodeWithConsent(ctx, user.ID, consentToken)
+		_, err = oauthSvc.CreateAuthorizationCodeWithConsent(ctx, user.ID, consentToken, "state-csrf-1234567890")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, service.ErrPKCERequired)
+	})
+
+	t.Run("拒绝-state不匹配（阶段 D H1 修复）", func(t *testing.T) {
+		consentToken, err := oauthSvc.IssueConsentToken(
+			ctx,
+			user.ID,
+			client.ClientID,
+			"http://localhost:3000/callback",
+			[]string{"openid"},
+			"original-state-abcdef",
+			"",
+			"",
+		)
+		require.NoError(t, err)
+
+		// 用不同的 state 调用应被拒绝
+		_, err = oauthSvc.CreateAuthorizationCodeWithConsent(ctx, user.ID, consentToken, "tampered-state-xyz")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, service.ErrConsentInvalid)
 	})
 }
 

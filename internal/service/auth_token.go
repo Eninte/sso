@@ -35,7 +35,8 @@ func (s *AuthService) revokeTokenWithRetry(ctx context.Context, accessToken stri
 		if s.cache != nil {
 			cacheKey := cache.TokenKey(accessToken)
 			if err := s.cache.Delete(ctx, cacheKey); err != nil {
-				logger.Warn("清除Token缓存失败", "error", err, "token", maskToken(accessToken))
+				// 阶段 D 审查修复（H5）：Redis 错误可能含 DSN 密码
+				logger.Warn("清除Token缓存失败", "error", logging.SanitizeDBURL(err.Error()), "token", maskToken(accessToken))
 			}
 		}
 
@@ -75,16 +76,24 @@ func (s *AuthService) handleRefreshTokenReplay(ctx context.Context, userID, refr
 	})
 
 	// 撤销该用户的全部 token（失败也返回错误，但优先记录日志）
-	if err := s.store.RevokeAllUserTokens(ctx, userID); err != nil {
-		logger.Error("重放攻击下撤销全部 Token 失败",
-			"error", err,
-			"user_id", userID,
-		)
-		return serviceutil.WrapServiceError("撤销全部Token", err)
-	}
+	// 阶段 D 审查修复（M6 fail-secure）：即使 RevokeAllUserTokens 失败也必须清缓存
+	// 原实现：失败时直接 return，导致缓存中仍存在已签发 token，攻击者可在缓存 TTL
+	//   （默认 15 分钟）内继续使用已撤销 token，违背 fail-secure 原则
+	// 修复：先执行缓存清除（无论撤销是否成功），再返回错误
+	revokeErr := s.store.RevokeAllUserTokens(ctx, userID)
 
 	// 阶段 2.4：同步清缓存，避免 15 分钟内被撤销 token 仍可使用
+	// 无论撤销是否成功都执行（fail-secure：DB 部分撤销或撤销失败时也保守清缓存）
 	s.invalidateUserTokenCache(ctx, userID)
+
+	if revokeErr != nil {
+		// 阶段 D 审查修复（H5）：store 错误可能含 DSN
+		logger.Error("重放攻击下撤销全部 Token 失败",
+			"error", logging.SanitizeDBURL(revokeErr.Error()),
+			"user_id", userID,
+		)
+		return serviceutil.WrapServiceError("撤销全部Token", revokeErr)
+	}
 
 	return apperrors.ErrTokenRotated
 }
@@ -120,7 +129,8 @@ func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken, c
 	// 1. 获取旧 token 记录
 	tokenRecord, err := s.store.GetTokenByRefreshToken(ctx, refreshToken)
 	if err != nil {
-		logger.Error("RefreshToken: 查询Token失败", "error", err, "refresh_token_length", len(refreshToken))
+		// 阶段 D 审查修复（H5）：store 错误可能含 DSN
+		logger.Error("RefreshToken: 查询Token失败", "error", logging.SanitizeDBURL(err.Error()), "refresh_token_length", len(refreshToken))
 		// 安全设计：不暴露token是否存在，所有错误都返回ErrInvalidToken
 		return nil, ErrInvalidToken
 	}
@@ -179,7 +189,8 @@ func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken, c
 	// 5. 获取用户、检查状态
 	user, err := s.store.GetByID(ctx, tokenRecord.UserID)
 	if err != nil {
-		logger.Error("RefreshToken: 查询用户失败", "error", err, "user_id", tokenRecord.UserID)
+		// 阶段 D 审查修复（H5）：store 错误可能含 DSN
+		logger.Error("RefreshToken: 查询用户失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", tokenRecord.UserID)
 		return nil, serviceutil.WrapServiceError("查询用户", err)
 	}
 	logger.Debug("RefreshToken: 查询到用户", "user_id", user.ID, "email", logging.SanitizeEmail(user.Email))
@@ -215,8 +226,9 @@ func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken, c
 			)
 			return nil, s.handleRefreshTokenReplay(ctx, user.ID, refreshToken, auditCtx)
 		}
+		// 阶段 D 审查修复（H5）：store 错误可能含 DSN
 		logger.Error("RefreshToken: 原子轮换失败",
-			"error", err,
+			"error", logging.SanitizeDBURL(err.Error()),
 			"token_id", tokenRecord.ID,
 			"user_id", user.ID,
 		)
@@ -227,8 +239,9 @@ func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken, c
 	if s.cache != nil {
 		cacheKey := cache.TokenKey(tokenRecord.AccessToken)
 		if err := s.cache.Delete(ctx, cacheKey); err != nil {
+			// 阶段 D 审查修复（H5）：cache 错误可能含 DSN
 			logger.Warn("清除旧Token缓存失败",
-				"error", err,
+				"error", logging.SanitizeDBURL(err.Error()),
 				"token_prefix", maskToken(tokenRecord.AccessToken),
 			)
 		}
@@ -277,8 +290,9 @@ func (s *AuthService) LogoutWithAudit(ctx context.Context, accessToken string, a
 	claims, err := s.jwtSvc.ValidateAccessToken(accessToken)
 
 	if err := s.revokeTokenWithRetry(ctx, accessToken); err != nil {
+		// 阶段 D 审查修复（H5）：store 错误可能含 DSN
 		logger.Error("登出时撤销Token失败",
-			"error", err,
+			"error", logging.SanitizeDBURL(err.Error()),
 			"token_prefix", maskToken(accessToken),
 		)
 		return serviceutil.WrapServiceError("登出", err)
@@ -300,12 +314,41 @@ func (s *AuthService) Logout(ctx context.Context, accessToken string) error {
 	return s.LogoutWithAudit(ctx, accessToken, nil)
 }
 
+// GetTokenOwnerID 查询 token 所属用户 ID
+// 阶段 B 审查修复（H3）：用于 /token/revoke 端点的 token 所有权校验
+// 按顺序尝试 access_token / refresh_token 查询
+// 返回 ("", nil) 表示 token 不存在，调用方应返回 204 不暴露存在性（RFC 7009 §2.2）
+func (s *AuthService) GetTokenOwnerID(ctx context.Context, token string) (string, error) {
+	// 先尝试 access_token 查询
+	tokenRecord, err := s.store.GetTokenByAccessToken(ctx, token)
+	if err == nil {
+		return tokenRecord.UserID, nil
+	}
+	// ErrNotFound 不算错误，继续尝试 refresh_token
+	if !errors.Is(err, store.ErrNotFound) {
+		// DB 错误：fail-closed，返回错误
+		return "", serviceutil.HandleStoreError(err, store.ErrNotFound)
+	}
+
+	// 尝试 refresh_token 查询
+	tokenRecord, err = s.store.GetTokenByRefreshToken(ctx, token)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			// 两者都不存在：返回空字符串 + nil，调用方应返回 204
+			return "", nil
+		}
+		return "", serviceutil.HandleStoreError(err, store.ErrNotFound)
+	}
+	return tokenRecord.UserID, nil
+}
+
 // LogoutAllWithAudit 登出所有设备（带审计日志）
 func (s *AuthService) LogoutAllWithAudit(ctx context.Context, userID string, auditCtx *AuditContext) error {
 	logger := logging.WithContext(ctx)
 	if err := s.store.RevokeAllUserTokens(ctx, userID); err != nil {
+		// 阶段 D 审查修复（H5）：store 错误可能含 DSN
 		logger.Error("撤销所有Token失败",
-			"error", err,
+			"error", logging.SanitizeDBURL(err.Error()),
 			"user_id", userID,
 		)
 		return serviceutil.WrapServiceError("登出所有设备", err)

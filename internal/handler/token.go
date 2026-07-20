@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/logging"
 	"github.com/example/sso/internal/middleware"
 	"github.com/example/sso/internal/model"
 	"github.com/example/sso/internal/service"
@@ -120,6 +121,13 @@ func (h *TokenHandler) handleAuthorizationCode(w http.ResponseWriter, r *http.Re
 
 // HandleRevoke 处理Token撤销请求
 // POST /api/v1/token/revoke
+//
+// 阶段 B 审查修复（H3 + L6）：
+//   - H3: 增加 token 所有权校验，防止已认证用户撤销他人 token（RFC 7009 §2.1）
+//   - L6: 返回 204 No Content 空响应体（RFC 7009 §2.2 规定响应体应为空）
+//
+// 即使 token 不存在或不属于当前用户，也返回 204 不暴露存在性（RFC 7009 §2.2）。
+// 仅在 JSON 解析失败或 token 字段为空时返回 400。
 func (h *TokenHandler) HandleRevoke(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Token string `json:"token"`
@@ -134,12 +142,53 @@ func (h *TokenHandler) HandleRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.authSvc.Logout(r.Context(), req.Token); err != nil {
-		handlerutil.WriteJSONError(w, err)
+	// 阶段 B 审查修复（H3）：token 所有权校验
+	// 当前认证用户 ID（AuthMiddleware 从 JWT claims 注入）
+	authenticatedUserID := middleware.GetUserIDFromContext(r.Context())
+	if authenticatedUserID == "" {
+		// 极端情况：AuthMiddleware 未注入 user_id（应不可能，已 protected 路由）
+		slog.Error("HandleRevoke: 认证用户ID为空")
+		writeError(w, http.StatusUnauthorized, getMessage(r, apperrors.ErrCodeUnauthorized))
 		return
 	}
 
-	writeSuccess(w, http.StatusOK, "Token已撤销", nil)
+	tokenUserID, err := h.authSvc.GetTokenOwnerID(r.Context(), req.Token)
+	if err != nil {
+		// DB 错误：fail-closed，记录日志但返回 204 不暴露内部错误
+		slog.Error("HandleRevoke: 查询token所有者失败",
+			"error", logging.SanitizeDBURL(err.Error()),
+			"authenticated_user_id", authenticatedUserID)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if tokenUserID == "" {
+		// token 不存在：按 RFC 7009 §2.2 返回 204 不暴露存在性
+		slog.Info("HandleRevoke: token不存在", "authenticated_user_id", authenticatedUserID)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if tokenUserID != authenticatedUserID {
+		// 所有权不匹配：记录可疑活动，但返回 204 不暴露存在性
+		// 防止已认证恶意用户枚举或撤销他人 token
+		slog.Warn("HandleRevoke: token所有权不匹配，拒绝撤销",
+			"authenticated_user_id", authenticatedUserID,
+			"token_user_id", tokenUserID)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// 所有权校验通过，执行撤销
+	if err := h.authSvc.Logout(r.Context(), req.Token); err != nil {
+		// 撤销失败：仍返回 204 不暴露内部错误（RFC 7009 §2.2）
+		slog.Error("HandleRevoke: 撤销失败",
+			"error", logging.SanitizeDBURL(err.Error()),
+			"user_id", authenticatedUserID)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// 撤销成功：返回 204 No Content 空响应体
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // HandleLogoutAll 处理登出所有设备请求

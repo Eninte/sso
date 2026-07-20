@@ -12,6 +12,7 @@ import (
 	"github.com/example/sso/internal/common"
 	"github.com/example/sso/internal/crypto"
 	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/logging"
 	"github.com/example/sso/internal/model"
 	"github.com/example/sso/internal/store"
 	"github.com/example/sso/internal/util/auditutil"
@@ -115,7 +116,8 @@ func (s *OAuthService) getClient(ctx context.Context, clientID string) (*model.C
 	if s.cache != nil {
 		cacheKey := cache.ClientKey(clientID)
 		if err := s.cache.Set(ctx, cacheKey, client, cache.ClientTTL); err != nil {
-			slog.Warn("缓存客户端信息失败", "error", err, "client_id", clientID)
+			// 阶段 D 审查修复（H5）：cache 错误可能含 Redis DSN
+			slog.Warn("缓存客户端信息失败", "error", logging.SanitizeDBURL(err.Error()), "client_id", clientID)
 		}
 	}
 
@@ -214,9 +216,11 @@ func (s *OAuthService) CreateAuthorizationCode(
 // 流程：
 //  1. 校验 consent_token 的签名、过期、issuer
 //  2. 校验 consent_token 中的 user_id 必须等于当前登录用户
-//  3. 获取客户端，校验 redirect_uri 与 grant_type
-//  4. 深度防御：再次校验 scope（防篡改）与 PKCE（防绕过）
-//  5. 生成授权码并存储
+//  3. 阶段 D 审查修复（H1）：校验 consent_token 内 state == expectedState
+//     防止 GET /authorize 与 POST /authorize/approve 之间 state 被替换
+//  4. 获取客户端，校验 redirect_uri 与 grant_type
+//  5. 深度防御：再次校验 scope（防篡改）与 PKCE（防绕过）
+//  6. 生成授权码并存储
 //
 // 安全设计：
 //   - consent_token 由 GET /authorize 签发，POST /authorize/approve 回传
@@ -226,6 +230,7 @@ func (s *OAuthService) CreateAuthorizationCodeWithConsent(
 	ctx context.Context,
 	userID string,
 	consentToken string,
+	expectedState string,
 ) (string, error) {
 	// 1. 校验 consent_token
 	claims, err := s.VerifyConsentToken(ctx, consentToken)
@@ -245,18 +250,32 @@ func (s *OAuthService) CreateAuthorizationCodeWithConsent(
 		return "", ErrConsentInvalid
 	}
 
-	// 3. 获取客户端
+	// 3. 阶段 D 审查修复（H1）：校验 consent_token 内 state 与请求 state 一致
+	// 原设计声明 state 用于 CSRF 防护，但实际从未对比 claims.State 与请求 state，
+	// 导致攻击者可重放他人 consent_token 配合自己的 state 完成授权。
+	// expectedState 为空时跳过校验（向后兼容老调用方），生产环境应始终传入。
+	if expectedState != "" && claims.State != expectedState {
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventAuthCodeInvalid), userID, map[string]interface{}{
+			"client_id":     claims.ClientID,
+			"reason":        "consent_state_mismatch",
+			"expected_state_length": len(expectedState),
+			"actual_state_length":   len(claims.State),
+		})
+		return "", ErrConsentInvalid
+	}
+
+	// 4. 获取客户端
 	client, err := s.getClient(ctx, claims.ClientID)
 	if err != nil {
 		return "", ErrInvalidClient
 	}
 
-	// 4. 校验 redirect_uri
+	// 5. 校验 redirect_uri
 	if !s.store.ValidateRedirectURI(ctx, claims.ClientID, claims.RedirectURI) {
 		return "", ErrInvalidRedirectURI
 	}
 
-	// 5. 校验 grant_type
+	// 6. 校验 grant_type
 	hasAuthCodeGrant := false
 	for _, grant := range client.GrantTypes {
 		if grant == model.GrantTypeAuthorizationCode {
@@ -268,7 +287,7 @@ func (s *OAuthService) CreateAuthorizationCodeWithConsent(
 		return "", ErrInvalidGrantType
 	}
 
-	// 6. 深度防御：再次校验 scope（防篡改）
+	// 7. 深度防御：再次校验 scope（防篡改）
 	validScopes, err := s.ValidateScope(ctx, client, claims.Scopes)
 	if err != nil {
 		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventAuthCodeInvalid), userID, map[string]interface{}{
@@ -278,7 +297,7 @@ func (s *OAuthService) CreateAuthorizationCodeWithConsent(
 		return "", err
 	}
 
-	// 7. 深度防御：再次校验 PKCE
+	// 8. 深度防御：再次校验 PKCE
 	if err := s.ValidatePKCEChallenge(ctx, client, claims.CodeChallenge, claims.CodeChallengeMethod); err != nil {
 		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventAuthCodeInvalid), userID, map[string]interface{}{
 			"client_id": claims.ClientID,
@@ -287,7 +306,7 @@ func (s *OAuthService) CreateAuthorizationCodeWithConsent(
 		return "", err
 	}
 
-	// 8. 生成授权码
+	// 9. 生成授权码
 	code, err := common.GenerateRandomString(32)
 	if err != nil {
 		return "", serviceutil.WrapServiceError("生成授权码", err)

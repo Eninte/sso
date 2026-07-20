@@ -187,9 +187,15 @@ func TestUserService_ForgotPassword(t *testing.T) {
 		err := userSvc.ForgotPassword(ctx, "test@example.com")
 
 		assert.NoError(t, err)
+		// 阶段 D 修复（L9）：邮件异步发送，需等待 goroutine 完成
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) && mockSender.Count() < 1 {
+			time.Sleep(5 * time.Millisecond)
+		}
 		// 验证邮件已发送
-		assert.Len(t, mockSender.sentMessages, 1)
-		assert.Contains(t, string(mockSender.sentMessages[0].Msg), "重置密码")
+		msgs := mockSender.GetSentMessages()
+		require.Len(t, msgs, 1)
+		assert.Contains(t, string(msgs[0].Msg), "重置密码")
 	})
 }
 
@@ -664,7 +670,7 @@ func TestUserService_SendVerificationEmail_WithEmail(t *testing.T) {
 	t.Run("邮件发送失败", func(t *testing.T) {
 		mockStore.Reset()
 		mockSender.sentMessages = nil
-		mockSender.shouldError = true
+		mockSender.SetShouldError(true)
 		user := &model.User{
 			ID:            "user-email-fail",
 			Email:         "fail@example.com",
@@ -675,13 +681,26 @@ func TestUserService_SendVerificationEmail_WithEmail(t *testing.T) {
 		err := userSvc.SendVerificationEmail(ctx, "user-email-fail")
 
 		assert.Error(t, err)
-		mockSender.shouldError = false
+		mockSender.SetShouldError(false)
 	})
 }
 
 func TestUserService_ForgotPassword_WithEmail(t *testing.T) {
 	userSvc, mockStore, mockSender := createTestUserServiceWithEmail(t)
 	ctx := context.Background()
+
+	// waitForEmail 等待异步邮件发送完成（阶段 D 修复 L9：邮件异步化）
+	// 通过轮询 mockSender.Count() 直到达到期望值或超时
+	waitForEmail := func(t *testing.T, expected int, timeout time.Duration) {
+		deadline := time.Now().Add(timeout)
+		for time.Now().Before(deadline) {
+			if mockSender.Count() >= expected {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		t.Fatalf("等待邮件发送超时: 期望 %d, 实际 %d", expected, mockSender.Count())
+	}
 
 	t.Run("用户存在-发送重置邮件", func(t *testing.T) {
 		mockStore.Reset()
@@ -695,7 +714,10 @@ func TestUserService_ForgotPassword_WithEmail(t *testing.T) {
 		err := userSvc.ForgotPassword(ctx, "forgot@example.com")
 
 		assert.NoError(t, err)
-		assert.Len(t, mockSender.sentMessages, 1)
+		// 阶段 D 修复（L9）：邮件异步发送，需等待 goroutine 完成
+		waitForEmail(t, 1, 2*time.Second)
+		msgs := mockSender.GetSentMessages()
+		assert.Len(t, msgs, 1)
 	})
 
 	t.Run("用户不存在-安全返回成功", func(t *testing.T) {
@@ -705,13 +727,15 @@ func TestUserService_ForgotPassword_WithEmail(t *testing.T) {
 		err := userSvc.ForgotPassword(ctx, "nonexistent@example.com")
 
 		assert.NoError(t, err)
-		assert.Len(t, mockSender.sentMessages, 0)
+		// 异步等待一小段确保无邮件被发送
+		time.Sleep(50 * time.Millisecond)
+		assert.Equal(t, 0, mockSender.Count())
 	})
 
 	t.Run("邮件发送失败", func(t *testing.T) {
 		mockStore.Reset()
 		mockSender.sentMessages = nil
-		mockSender.shouldError = true
+		mockSender.SetShouldError(true)
 		user := &model.User{
 			ID:    "user-fp-fail",
 			Email: "fail@example.com",
@@ -723,7 +747,11 @@ func TestUserService_ForgotPassword_WithEmail(t *testing.T) {
 		err := userSvc.ForgotPassword(ctx, "fail@example.com")
 
 		assert.NoError(t, err)
-		mockSender.shouldError = false
+		// 阶段 D 修复（L9）：shouldError 时 mock 不记录消息，
+		// 无法用 waitForEmail 等待 Count()。改用短睡眠等待 goroutine 完成
+		// 以避免后续测试的 race condition
+		time.Sleep(100 * time.Millisecond)
+		mockSender.SetShouldError(false)
 	})
 }
 

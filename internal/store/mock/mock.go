@@ -89,6 +89,7 @@ type Store struct {
 	ListSocialAccountsByUserIDErr   error
 	DeleteSocialAccountErr          error
 	CreateSocialAccountAtomicErr    error
+	UpdateSocialAccountErr          error // 阶段 D 修复（L2）
 
 	// 社交账号数据存储
 	// key 格式: provider + ":" + provider_user_id
@@ -973,6 +974,33 @@ func (m *Store) DeleteSocialAccount(ctx context.Context, provider, providerUserI
 	return nil
 }
 
+// UpdateSocialAccount 更新社交账号绑定信息
+// 阶段 D 修复（L2）：原 updateSocialAccountIfNeeded 仅修改内存对象未持久化
+// 仅更新 provider_email / email_verified / provider_metadata / updated_at 字段
+// 不修改 user_id 关联（防止通过修改 provider 端 email 接管其他用户账号）
+func (m *Store) UpdateSocialAccount(ctx context.Context, account *model.SocialAccount) error {
+	if m.UpdateSocialAccountErr != nil {
+		return m.UpdateSocialAccountErr
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	key := socialAccountKey(account.Provider, account.ProviderUserID)
+	existing, exists := m.socialAccounts[key]
+	if !exists {
+		return store.ErrNotFound
+	}
+
+	// 仅更新允许的字段，保留 user_id 不变
+	existing.ProviderEmail = account.ProviderEmail
+	existing.EmailVerified = account.EmailVerified
+	existing.ProviderMetadata = account.ProviderMetadata
+	existing.UpdatedAt = account.UpdatedAt
+
+	// 同步更新 userSocialAccounts 索引中的指针指向的内容（同一指针，无需额外操作）
+	return nil
+}
+
 // CreateSocialAccountAtomic 原子地创建用户 + 社交账号绑定
 func (m *Store) CreateSocialAccountAtomic(ctx context.Context, user *model.User, account *model.SocialAccount) error {
 	if m.CreateSocialAccountAtomicErr != nil {
@@ -1103,6 +1131,7 @@ func (m *Store) Reset() {
 	m.ListSocialAccountsByUserIDErr = nil
 	m.DeleteSocialAccountErr = nil
 	m.CreateSocialAccountAtomicErr = nil
+	m.UpdateSocialAccountErr = nil
 }
 
 // ============================================================================

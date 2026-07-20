@@ -176,6 +176,56 @@ func (s *Store) DeleteSocialAccount(ctx context.Context, provider, providerUserI
 	return nil
 }
 
+// UpdateSocialAccount 更新社交账号绑定信息
+//
+// 阶段 D 修复（L2）：原 updateSocialAccountIfNeeded 仅修改内存对象未持久化
+//
+// 仅更新以下字段：
+//   - provider_email
+//   - email_verified
+//   - provider_metadata
+//   - updated_at
+//
+// 不修改 user_id 关联，防止通过修改 provider 端 email 接管其他用户账号
+// 通过 (provider, provider_user_id) 定位记录，不存在返回 ErrNotFound
+func (s *Store) UpdateSocialAccount(ctx context.Context, account *model.SocialAccount) error {
+	ctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+
+	metadataJSON, _ := json.Marshal(account.ProviderMetadata)
+
+	query := `
+		UPDATE social_accounts
+		SET provider_email = $3,
+		    email_verified = $4,
+		    provider_metadata = $5,
+		    updated_at = $6
+		WHERE provider = $1 AND provider_user_id = $2
+	`
+	result, err := s.db.ExecContext(ctx, query,
+		account.Provider,
+		account.ProviderUserID,
+		account.ProviderEmail,
+		account.EmailVerified,
+		metadataJSON,
+		account.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("update social account: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return store.ErrNotFound
+	}
+
+	return nil
+}
+
 // CreateSocialAccountAtomic 原子地创建用户 + 社交账号绑定
 //
 // 在单个事务中执行：

@@ -243,7 +243,20 @@ func (s *JWTService) GenerateRefreshToken() (string, error) {
 // ValidateAccessToken 验证访问令牌并返回Claims
 // 验证签名、过期时间、算法、Issuer、密钥过期状态和JTI重放
 // 返回解析后的Claims或错误
+//
+// 注意：此方法不接受 ctx 参数，无法继承请求的超时/取消。
+// 内部对 keyStore 的查询使用 context.Background()，因 keyStore 查询通常很快
+// 且 token 验证是同步阻塞调用方的主流程。
+// 若调用方需要请求级 ctx 控制，请使用 ValidateAccessTokenWithContext。
 func (s *JWTService) ValidateAccessToken(tokenString string) (*AccessTokenClaims, error) {
+	return s.ValidateAccessTokenWithContext(context.Background(), tokenString)
+}
+
+// ValidateAccessTokenWithContext 使用请求 ctx 验证访问令牌
+// 阶段 D 审查修复（M10）：原 ValidateAccessToken 内部对 keyStore 查询使用
+// context.Background()，请求级超时无法传播到 keyStore 查询，
+// 在 keyStore 慢响应时可能阻塞请求 goroutine。
+func (s *JWTService) ValidateAccessTokenWithContext(ctx context.Context, tokenString string) (*AccessTokenClaims, error) {
 	var usedKeyID string
 	s.mu.RLock()
 	issuer := s.issuer
@@ -263,6 +276,14 @@ func (s *JWTService) ValidateAccessToken(tokenString string) (*AccessTokenClaims
 				usedKeyID = kid
 				return pubKey, nil
 			}
+		}
+
+		// 阶段 D 审查修复（M1）：密钥轮换模式下，kid 缺失应拒绝
+		// 原实现在 keyStore 已配置（多密钥轮换模式）时仍回退到 activeKeyID，
+		// 导致无 kid 的 token 在轮换后仍可被验证通过，无法识别其使用的是哪把旧密钥，
+		// 增加密钥撤销难度。仅当未配置 keyStore（单密钥模式）时允许回退。
+		if s.keyStore != nil {
+			return nil, ErrInvalidToken
 		}
 
 		if s.publicKey != nil {
@@ -289,8 +310,8 @@ func (s *JWTService) ValidateAccessToken(tokenString string) (*AccessTokenClaims
 	}
 
 	// 检查密钥是否已过期（如果配置了keyStore）
+	// 阶段 D 审查修复（M10）：使用请求 ctx 而非 context.Background()
 	if s.keyStore != nil && usedKeyID != "" {
-		ctx := context.Background()
 		keyVersion, err := s.keyStore.GetKeyByID(ctx, usedKeyID)
 		if err != nil {
 			// 如果无法获取密钥信息，为了安全起见拒绝token

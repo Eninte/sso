@@ -46,14 +46,22 @@ type OAuthProvider struct {
 	TokenURL     string
 	UserInfoURL  string
 	Scopes       []string
+	// EmailsURL GitHub /user/emails API 端点（阶段 D 修复 H2）
+	// 仅 GitHub 使用，用于补全 email_verified 字段
+	// 为空时回退到 githubEmailsURL 常量
+	EmailsURL string
 }
 
 // stateInfo OAuth state信息
 // 用于验证回调请求，防止CSRF攻击
+//
+// 阶段 D 审查修复（M4 配套）：字段必须导出并加 JSON tag，
+// 原字段为小写未导出，json.Marshal 会输出 "{}"，
+// 导致从 Redis 反序列化时所有字段为零值，state 绑定 provider 校验失效。
 type stateInfo struct {
-	provider    string    // 提供商名称
-	redirectURI string    // 回调URL
-	createdAt   time.Time // 创建时间
+	Provider    string    `json:"provider"`     // 提供商名称
+	RedirectURI string    `json:"redirect_uri"` // 回调URL
+	CreatedAt   time.Time `json:"created_at"`   // 创建时间
 }
 
 // HTTPClient HTTP客户端接口
@@ -120,6 +128,8 @@ func NewSocialLoginService(
 			TokenURL:     "https://github.com/login/oauth/access_token",
 			UserInfoURL:  "https://api.github.com/user",
 			Scopes:       []string{"user:email"},
+			// 阶段 D 修复（H2）：GitHub /user 不返回 email_verified，需额外调用 /user/emails
+			EmailsURL: githubEmailsURL,
 		}
 	}
 
@@ -183,9 +193,9 @@ func (s *SocialLoginService) cleanupExpiredStates() {
 					return true
 				}
 				// 删除超过5分钟的state
-				if time.Since(info.createdAt) > 5*time.Minute {
-					s.stateCache.Delete(key)
-				}
+			if time.Since(info.CreatedAt) > 5*time.Minute {
+				s.stateCache.Delete(key)
+			}
 				return true
 			})
 		case <-s.stopChan:
@@ -235,9 +245,9 @@ func (s *SocialLoginService) GetAuthorizationURL(provider, state string) (string
 
 	// 阶段 2.3：state 存入 Redis（如可用）+ 内存回退
 	info := stateInfo{
-		provider:    provider,
-		redirectURI: redirectURI,
-		createdAt:   time.Now(),
+		Provider:    provider,
+		RedirectURI: redirectURI,
+		CreatedAt:   time.Now(),
 	}
 
 	if s.cache != nil {
@@ -280,9 +290,21 @@ func (s *SocialLoginService) HandleCallback(ctx context.Context, provider, code,
 		return nil, err
 	}
 
+	// 阶段 D 审查修复（M5）：校验 state 绑定的 provider 与当前请求 provider 一致
+	// 原实现仅校验 state 存在性，未校验其绑定 provider。
+	// 攻击者可能用 Google 流程的 state 在 GitHub 回调中重放，绕过 provider 校验。
+	if info.Provider != provider {
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventSocialLoginRejected), "", map[string]interface{}{
+			"provider":          provider,
+			"expected_provider": info.Provider,
+			"reason":            "state_provider_mismatch",
+		})
+		return nil, ErrOAuthStateInvalid
+	}
+
 	// 使用state缓存中存储的redirectURI（由GetAuthorizationURL设置）
 	// 不接受客户端传入的redirectURI，防止开放重定向攻击
-	redirectURI := info.redirectURI
+	redirectURI := info.RedirectURI
 
 	accessToken, err := s.exchangeCode(ctx, p, code, redirectURI)
 	if err != nil {
@@ -304,6 +326,17 @@ func (s *SocialLoginService) HandleCallback(ctx context.Context, provider, code,
 			"error":    err.Error(),
 		})
 		return nil, err
+	}
+
+	// 阶段 D 审查修复（H2）：GitHub /user API 不返回 email_verified 字段
+	// ExtractProviderIdentity 默认置为 false，需调用 /user/emails API 补全真实状态
+	// 原实现硬编码 false 会导致已验证 GitHub 用户无法登录（findOrCreateSocialUser 拒绝 false）
+	if provider == model.ProviderGitHub {
+		emailsURL := p.EmailsURL
+		if emailsURL == "" {
+			emailsURL = githubEmailsURL
+		}
+		s.enrichGitHubIdentity(ctx, emailsURL, identity, accessToken)
 	}
 
 	// 阶段 2.3：通过 (provider, provider_user_id) 查找或创建用户
@@ -333,26 +366,49 @@ func (s *SocialLoginService) HandleCallback(ctx context.Context, provider, code,
 // loadAndDeleteState 原子地从缓存中加载并删除 state
 //
 // 优先使用 Redis（如配置），fallback 到内存 sync.Map
-// 原子性保证：使用 Redis 的 GET + DEL（非事务但足够防 TOCTOU），或 sync.Map.LoadAndDelete
+// 原子性保证：
+//   - Redis：使用 Lua 脚本实现 GET+DEL 原子化（阶段 D 修复 M4）
+//     原实现 Get+Delete 非原子，存在 TOCTOU 窗口，并发重放可绕过
+//   - 内存：sync.Map.LoadAndDelete 天然原子
+//
 // 5 分钟过期：Redis 通过 TTL，内存通过 createdAt 检查
 func (s *SocialLoginService) loadAndDeleteState(ctx context.Context, state string) (*stateInfo, error) {
-	// 1. 优先从 Redis 加载
+	// 1. 优先从 Redis 原子加载并删除
 	if s.cache != nil {
-		var info stateInfo
-		err := s.cache.Get(ctx, stateCachePrefix+state, &info)
-		if err == nil {
-			// 加载成功，立即删除（防重放）
-			_ = s.cache.Delete(ctx, stateCachePrefix+state)
-			// 检查过期（双保险，Redis TTL 应已处理）
-			if time.Since(info.createdAt) > OAuthStateTTL {
-				return nil, ErrOAuthStateExpired
+		// 阶段 D 审查修复（M4）：使用 GETDEL 原子操作替代 Get+Delete
+		// 通过 *redis.Client 直接调用 GETDEL 命令（Redis 6.2+）
+		// 兼容方案：使用 Lua 脚本（支持 Redis 2.6+）
+		if rc, ok := s.cache.(*cache.RedisCache); ok {
+			shim, err := rc.GetAndDelete(ctx, stateCachePrefix+state)
+			if err == nil && shim != nil {
+				// 将 shim 转换为 stateInfo
+				info := &stateInfo{
+					Provider:    shim.Provider,
+					RedirectURI: shim.RedirectURI,
+					CreatedAt:   shim.CreatedAt,
+				}
+				// 检查过期（双保险，Redis TTL 应已处理）
+				if time.Since(info.CreatedAt) > OAuthStateTTL {
+					return nil, ErrOAuthStateExpired
+				}
+				return info, nil
 			}
-			return &info, nil
+			// Redis 未命中或错误，回退到内存
+		} else {
+			// 非 Redis 实现，回退到非原子 Get+Delete（接口约束，已尽力）
+			var info stateInfo
+			err := s.cache.Get(ctx, stateCachePrefix+state, &info)
+			if err == nil {
+				_ = s.cache.Delete(ctx, stateCachePrefix+state)
+				if time.Since(info.CreatedAt) > OAuthStateTTL {
+					return nil, ErrOAuthStateExpired
+				}
+				return &info, nil
+			}
 		}
-		// Redis 未命中，回退到内存（可能服务刚启动，Redis 还没数据）
 	}
 
-	// 2. 内存回退
+	// 2. 内存回退（sync.Map.LoadAndDelete 天然原子）
 	stateVal, loaded := s.stateCache.LoadAndDelete(state)
 	if !loaded {
 		return nil, ErrOAuthStateInvalid
@@ -363,7 +419,7 @@ func (s *SocialLoginService) loadAndDeleteState(ctx context.Context, state strin
 		return nil, ErrOAuthStateInvalid
 	}
 
-	if time.Since(info.createdAt) > OAuthStateTTL {
+	if time.Since(info.CreatedAt) > OAuthStateTTL {
 		return nil, ErrOAuthStateExpired
 	}
 
@@ -437,6 +493,101 @@ func (s *SocialLoginService) getUserInfo(ctx context.Context, p *OAuthProvider, 
 	}
 
 	return userInfo, nil
+}
+
+// ============================================================================
+// GitHub /user/emails API 调用
+// ============================================================================
+
+// githubEmailsURL GitHub /user/emails API 端点
+// 该 API 返回当前用户的所有 email 列表（包括 primary 和 verified 状态）
+const githubEmailsURL = "https://api.github.com/user/emails"
+
+// githubEmailEntry GitHub /user/emails 响应项
+type githubEmailEntry struct {
+	Email      string `json:"email"`
+	Primary    bool   `json:"primary"`
+	Verified   bool   `json:"verified"`
+	Visibility string `json:"visibility"`
+}
+
+// enrichGitHubIdentity 调用 GitHub /user/emails API 补全 identity.EmailVerified
+//
+// 阶段 D 审查修复（H2）：原 ExtractProviderIdentity 对 GitHub email_verified 硬编码为 false，
+// 导致已验证 GitHub 用户也无法登录（findOrCreateSocialUser 拒绝 EmailVerified=false 的新用户）。
+// GitHub /user API 不返回 email_verified 字段，必须额外调用 /user/emails API 获取。
+//
+// 流程：
+//  1. 调用 GET {emailsURL}
+//  2. 响应体格式: [{"email":"...","primary":true,"verified":true,"visibility":"public"}, ...]
+//  3. 若 identity.Email 非空 → 查找匹配项，读取 verified
+//  4. 若 identity.Email 为空 → 取 primary && verified 的 email 填充 identity
+//
+// 错误处理（fail-secure，保守保持 false）：
+//   - API 调用失败：保持 EmailVerified=false
+//   - 找不到匹配 email：保持 EmailVerified=false
+//   - 无 primary verified email：保持 EmailVerified=false
+//
+// 安全设计：
+//   - 仅当 verified=true 的 email 才被认可
+//   - 防止用户在 GitHub 添加未验证 email 后用于本系统登录
+//   - 调用失败时保守保持 false，由 findOrCreateSocialUser 拒绝登录
+//
+// 注意：本方法为 internal 方法，仅在 HandleCallback 中针对 GitHub 调用。
+func (s *SocialLoginService) enrichGitHubIdentity(ctx context.Context, emailsURL string, identity *ProviderIdentity, accessToken string) {
+	if identity == nil {
+		return
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", emailsURL, nil)
+	if err != nil {
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 限制响应体最大1MB
+	if err != nil {
+		return
+	}
+
+	var emails []githubEmailEntry
+	if err := json.Unmarshal(body, &emails); err != nil {
+		return
+	}
+
+	// 找到匹配的 email 项
+	if identity.Email != "" {
+		for _, e := range emails {
+			if e.Email == identity.Email {
+				identity.EmailVerified = e.Verified
+				return
+			}
+		}
+		// 未找到匹配 email，保持 false
+		return
+	}
+
+	// identity.Email 为空：取 primary && verified 的 email 填充
+	// 防止用户未公开 email 时取到未验证 email
+	for _, e := range emails {
+		if e.Primary && e.Verified {
+			identity.Email = e.Email
+			identity.EmailVerified = true
+			return
+		}
+	}
+	// 无 primary verified email，保持 false
 }
 
 func (s *SocialLoginService) generateTokenPair(ctx context.Context, user *model.User) (*model.LoginResponse, error) {

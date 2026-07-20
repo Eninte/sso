@@ -113,8 +113,10 @@ func TestTokenRevoked(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// 撤销Token
+	// 阶段 B 审查修复（C2）：/token/revoke 已迁移到 protected 路由，
+	// 必须携带 access_token 通过 AuthMiddleware，否则返回 401
 	revokeReq := revokeRequest{Token: tokens.AccessToken}
-	revokeResp, _, err := doRequest("POST", "/api/v1/token/revoke", revokeReq, "")
+	revokeResp, _, err := doRequest("POST", "/api/v1/token/revoke", revokeReq, tokens.AccessToken)
 	require.NoError(t, err)
 	assert.True(t, revokeResp.StatusCode == http.StatusOK || revokeResp.StatusCode == http.StatusNoContent,
 		"期望 200 或 204，实际 %d", revokeResp.StatusCode)
