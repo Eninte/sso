@@ -224,10 +224,13 @@ func LogOAuth(event string, clientID string, userID string, success bool, err er
 }
 
 // LogSecurity 安全相关日志
+//
+// 阶段 3.1：遍历 details 时按 key 名自动脱敏敏感字段（password/secret/token 等），
+// 防止调用方误传入敏感数据导致泄露
 func LogSecurity(event string, details map[string]interface{}) {
 	attrs := []any{"event", event}
 	for k, v := range details {
-		attrs = append(attrs, k, v)
+		attrs = append(attrs, k, SanitizeValue(k, v))
 	}
 	slog.Warn("安全事件", attrs...)
 }

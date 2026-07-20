@@ -15,6 +15,7 @@ import (
 	"github.com/example/sso/internal/captcha"
 	"github.com/example/sso/internal/config"
 	"github.com/example/sso/internal/crypto"
+	"github.com/example/sso/internal/logging"
 	"github.com/example/sso/internal/metrics"
 	"github.com/example/sso/internal/quality/dashboard"
 	"github.com/example/sso/internal/service"
@@ -225,10 +226,16 @@ func initServices(cfg *config.Config, version, buildTime string) (*Services, *sq
 }
 
 // connectDatabase 连接数据库并验证连接
+//
+// 阶段 3.1：错误日志避免泄露 DSN（含密码）
+// pgx 驱动错误可能包含完整连接字符串，故日志只打印通用消息 + 通用错误描述
 func connectDatabase(cfg *config.Config) (*sql.DB, error) {
 	db, err := sql.Open("pgx", cfg.DatabaseURL())
 	if err != nil {
-		return nil, err
+		// sql.Open 错误一般是 DSN 格式问题，可能包含连接字符串
+		slog.Error("数据库 sql.Open 失败（DSN 可能含敏感信息，已脱敏）",
+			"error", logging.SanitizeDBURL(err.Error()))
+		return nil, fmt.Errorf("database open failed: %w", err)
 	}
 
 	// 使用配置的连接池参数
@@ -243,7 +250,12 @@ func connectDatabase(cfg *config.Config) (*sql.DB, error) {
 	defer cancel()
 
 	if err := db.PingContext(ctx); err != nil {
-		return nil, err
+		// PingContext 错误可能包含完整 DSN（pgx 驱动特性）
+		// 日志中脱敏后再打印，但错误对象原样返回上层用于判断
+		slog.Error("数据库 Ping 失败（DSN 可能含敏感信息，已脱敏）",
+			"error", logging.SanitizeDBURL(err.Error()),
+			"host", cfg.DBHost, "port", cfg.DBPort, "database", cfg.DBName)
+		return nil, fmt.Errorf("database ping failed: %w", err)
 	}
 
 	return db, nil

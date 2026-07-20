@@ -121,7 +121,7 @@ func (s *UserService) SendVerificationEmail(ctx context.Context, userID string) 
 	if s.emailRateLimit != nil {
 		allowed, remaining, err := s.emailRateLimit.CheckLimit(ctx, user.Email)
 		if err != nil {
-			slog.Warn("检查邮件限流失败", "error", err, "email", user.Email)
+			slog.Warn("检查邮件限流失败", "error", err, "email", logging.SanitizeEmail(user.Email))
 		}
 		if !allowed {
 			ttl, _ := s.emailRateLimit.GetTTL(ctx, user.Email)
@@ -132,7 +132,7 @@ func (s *UserService) SendVerificationEmail(ctx context.Context, userID string) 
 				apperrors.ErrEmailRateLimitExceeded,
 			)
 		}
-		slog.Debug("邮件限流检查通过", "email", user.Email, "remaining", remaining)
+		slog.Debug("邮件限流检查通过", "email", logging.SanitizeEmail(user.Email), "remaining", remaining)
 	}
 
 	token, err := common.GenerateToken()
@@ -200,7 +200,7 @@ func (s *UserService) ForgotPassword(ctx context.Context, email string) error {
 	user, err := s.store.GetByEmail(ctx, email)
 	if err != nil {
 		// 安全设计：不泄露用户是否存在，但记录错误日志以便排查
-		logger.Debug("ForgotPassword: 获取用户失败", "error", err, "email", email)
+		logger.Debug("ForgotPassword: 获取用户失败", "error", err, "email", logging.SanitizeEmail(email))
 		return nil
 	}
 
@@ -208,12 +208,12 @@ func (s *UserService) ForgotPassword(ctx context.Context, email string) error {
 	if s.emailRateLimit != nil {
 		allowed, remaining, err := s.emailRateLimit.CheckLimit(ctx, email)
 		if err != nil {
-			logger.Warn("检查邮件限流失败", "error", err, "email", email)
+			logger.Warn("检查邮件限流失败", "error", err, "email", logging.SanitizeEmail(email))
 		}
 		if !allowed {
 			ttl, _ := s.emailRateLimit.GetTTL(ctx, email)
 			// 为了安全，不暴露限流错误，但记录日志
-			logger.Warn("密码重置邮件发送受限", "email", email, "ttl_minutes", int(ttl.Minutes()))
+			logger.Warn("密码重置邮件发送受限", "email", logging.SanitizeEmail(email), "ttl_minutes", int(ttl.Minutes()))
 			return apperrors.Wrap(
 				apperrors.ErrCodeEmailRateLimitExceeded,
 				FormatRateLimitError(ttl),
@@ -221,7 +221,7 @@ func (s *UserService) ForgotPassword(ctx context.Context, email string) error {
 				apperrors.ErrEmailRateLimitExceeded,
 			)
 		}
-		logger.Debug("邮件限流检查通过", "email", email, "remaining", remaining)
+		logger.Debug("邮件限流检查通过", "email", logging.SanitizeEmail(email), "remaining", remaining)
 	}
 
 	token, err := common.GenerateToken()

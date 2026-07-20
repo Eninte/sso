@@ -35,7 +35,9 @@ func Run(version, buildTime string) {
 	// 3. 初始化服务
 	svc, db, err := initServices(cfg, version, buildTime)
 	if err != nil {
-		slog.Error("服务初始化失败", "error", err)
+		// 阶段 3.1：错误消息可能包含 DSN（含密码），脱敏后再打印
+		// err.Error() 中可能包含 pgx 驱动返回的完整连接字符串
+		slog.Error("服务初始化失败", "error", logging.SanitizeDBURL(err.Error()))
 		os.Exit(1)
 	}
 	defer db.Close()

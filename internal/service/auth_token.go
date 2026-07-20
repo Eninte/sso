@@ -182,7 +182,7 @@ func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken, c
 		logger.Error("RefreshToken: 查询用户失败", "error", err, "user_id", tokenRecord.UserID)
 		return nil, serviceutil.WrapServiceError("查询用户", err)
 	}
-	logger.Debug("RefreshToken: 查询到用户", "user_id", user.ID, "email", user.Email)
+	logger.Debug("RefreshToken: 查询到用户", "user_id", user.ID, "email", logging.SanitizeEmail(user.Email))
 
 	if user.Status == model.UserStatusDisabled {
 		logger.Warn("RefreshToken: 用户已被禁用", "user_id", user.ID)
@@ -393,7 +393,7 @@ func (s *AuthService) generateTokenPair(
 	clientID *string,
 ) (*model.LoginResponse, error) {
 	logger := logging.WithContext(ctx)
-	logger.Debug("generateTokenPair开始", "userID", userID, "email", email)
+	logger.Debug("generateTokenPair开始", "userID", userID, "email", logging.SanitizeEmail(email))
 	resp, err := s.tokenSvc.GenerateTokenPair(ctx, userID, email, role, scopes, clientID)
 	if err != nil {
 		logger.Error("generateTokenPair失败", "error", err, "userID", userID)
