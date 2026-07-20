@@ -72,8 +72,8 @@ func TestGetKeyPathWhitelist(t *testing.T) {
 	// 阶段 D 预存问题修复：filepath.Clean 在 Windows 上将 / 转为 \，
 	// 测试期望值需用 filepath.Clean 规范化以跨平台一致
 	t.Run("使用默认白名单", func(t *testing.T) {
-		// 清除环境变量
-		os.Unsetenv("KEY_PATH_WHITELIST")
+		// 清除环境变量（CI/CD 修复：使用 t.Setenv 自动清理，避免泄漏到后续测试）
+		t.Setenv("KEY_PATH_WHITELIST", "")
 
 		whitelist := getKeyPathWhitelist()
 
@@ -85,8 +85,7 @@ func TestGetKeyPathWhitelist(t *testing.T) {
 	})
 
 	t.Run("自定义单个路径", func(t *testing.T) {
-		os.Setenv("KEY_PATH_WHITELIST", "/custom/keys")
-		defer os.Unsetenv("KEY_PATH_WHITELIST")
+		t.Setenv("KEY_PATH_WHITELIST", "/custom/keys")
 
 		whitelist := getKeyPathWhitelist()
 
@@ -95,8 +94,7 @@ func TestGetKeyPathWhitelist(t *testing.T) {
 	})
 
 	t.Run("自定义多个路径", func(t *testing.T) {
-		os.Setenv("KEY_PATH_WHITELIST", "/custom/keys,/opt/sso/keys,/var/lib/sso")
-		defer os.Unsetenv("KEY_PATH_WHITELIST")
+		t.Setenv("KEY_PATH_WHITELIST", "/custom/keys,/opt/sso/keys,/var/lib/sso")
 
 		whitelist := getKeyPathWhitelist()
 
@@ -107,8 +105,7 @@ func TestGetKeyPathWhitelist(t *testing.T) {
 	})
 
 	t.Run("自定义路径包含空格", func(t *testing.T) {
-		os.Setenv("KEY_PATH_WHITELIST", " /custom/keys , /opt/sso/keys ")
-		defer os.Unsetenv("KEY_PATH_WHITELIST")
+		t.Setenv("KEY_PATH_WHITELIST", " /custom/keys , /opt/sso/keys ")
 
 		whitelist := getKeyPathWhitelist()
 
@@ -118,8 +115,7 @@ func TestGetKeyPathWhitelist(t *testing.T) {
 	})
 
 	t.Run("自定义路径包含相对路径", func(t *testing.T) {
-		os.Setenv("KEY_PATH_WHITELIST", "/custom/keys,relative/path,/opt/sso/keys")
-		defer os.Unsetenv("KEY_PATH_WHITELIST")
+		t.Setenv("KEY_PATH_WHITELIST", "/custom/keys,relative/path,/opt/sso/keys")
 
 		whitelist := getKeyPathWhitelist()
 
@@ -131,8 +127,7 @@ func TestGetKeyPathWhitelist(t *testing.T) {
 	})
 
 	t.Run("自定义路径全部无效", func(t *testing.T) {
-		os.Setenv("KEY_PATH_WHITELIST", "relative/path,another/relative")
-		defer os.Unsetenv("KEY_PATH_WHITELIST")
+		t.Setenv("KEY_PATH_WHITELIST", "relative/path,another/relative")
 
 		whitelist := getKeyPathWhitelist()
 
@@ -144,8 +139,7 @@ func TestGetKeyPathWhitelist(t *testing.T) {
 	})
 
 	t.Run("空环境变量", func(t *testing.T) {
-		os.Setenv("KEY_PATH_WHITELIST", "")
-		defer os.Unsetenv("KEY_PATH_WHITELIST")
+		t.Setenv("KEY_PATH_WHITELIST", "")
 
 		whitelist := getKeyPathWhitelist()
 
@@ -155,8 +149,7 @@ func TestGetKeyPathWhitelist(t *testing.T) {
 	})
 
 	t.Run("只有逗号的环境变量", func(t *testing.T) {
-		os.Setenv("KEY_PATH_WHITELIST", ",,,")
-		defer os.Unsetenv("KEY_PATH_WHITELIST")
+		t.Setenv("KEY_PATH_WHITELIST", ",,,")
 
 		whitelist := getKeyPathWhitelist()
 
@@ -172,8 +165,7 @@ func TestGetKeyPathWhitelist(t *testing.T) {
 
 func TestValidateKeyPath_WithCustomWhitelist(t *testing.T) {
 	t.Run("自定义白名单路径验证", func(t *testing.T) {
-		os.Setenv("KEY_PATH_WHITELIST", "/custom/keys")
-		defer os.Unsetenv("KEY_PATH_WHITELIST")
+		t.Setenv("KEY_PATH_WHITELIST", "/custom/keys")
 
 		// 自定义路径应该有效
 		err := ValidateKeyPath("/custom/keys/private.pem")
@@ -185,8 +177,7 @@ func TestValidateKeyPath_WithCustomWhitelist(t *testing.T) {
 	})
 
 	t.Run("多个自定义白名单路径", func(t *testing.T) {
-		os.Setenv("KEY_PATH_WHITELIST", "/custom/keys,/opt/sso/keys")
-		defer os.Unsetenv("KEY_PATH_WHITELIST")
+		t.Setenv("KEY_PATH_WHITELIST", "/custom/keys,/opt/sso/keys")
 
 		// 两个路径都应该有效
 		err := ValidateKeyPath("/custom/keys/private.pem")
@@ -337,8 +328,7 @@ func TestSetupHandler_HandleSetupGenerateKeys(t *testing.T) {
 	t.Run("成功生成密钥", func(t *testing.T) {
 		tmpDir := t.TempDir()
 
-		os.Setenv("KEY_PATH_WHITELIST", tmpDir)
-		defer os.Unsetenv("KEY_PATH_WHITELIST")
+		t.Setenv("KEY_PATH_WHITELIST", tmpDir)
 
 		privatePath := filepath.Join(tmpDir, "private.pem")
 		publicPath := filepath.Join(tmpDir, "public.pem")
@@ -425,8 +415,7 @@ func TestValidateKeyPath_EdgeCases(t *testing.T) {
 
 func TestGetKeyPathWhitelist_EdgeCases(t *testing.T) {
 	t.Run("环境变量包含重复路径", func(t *testing.T) {
-		os.Setenv("KEY_PATH_WHITELIST", "/custom/keys,/custom/keys,/opt/sso")
-		defer os.Unsetenv("KEY_PATH_WHITELIST")
+		t.Setenv("KEY_PATH_WHITELIST", "/custom/keys,/custom/keys,/opt/sso")
 
 		whitelist := getKeyPathWhitelist()
 
@@ -435,8 +424,7 @@ func TestGetKeyPathWhitelist_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("环境变量包含特殊字符", func(t *testing.T) {
-		os.Setenv("KEY_PATH_WHITELIST", "/custom/keys with spaces,/opt/sso-keys")
-		defer os.Unsetenv("KEY_PATH_WHITELIST")
+		t.Setenv("KEY_PATH_WHITELIST", "/custom/keys with spaces,/opt/sso-keys")
 
 		whitelist := getKeyPathWhitelist()
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -12,6 +13,20 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// getTestRedisAddr 返回测试用 Redis 地址（CI/CD 修复：支持 REDIS_TEST_ADDR 环境变量）
+// AGENTS.md 约定：集成测试通过 REDIS_TEST_ADDR 读取连接信息，避免硬编码导致 CI 失败
+func getTestRedisAddr() string {
+	if addr := os.Getenv("REDIS_TEST_ADDR"); addr != "" {
+		return addr
+	}
+	return "localhost:6379"
+}
+
+// getTestRedisPassword 返回测试用 Redis 密码
+func getTestRedisPassword() string {
+	return os.Getenv("REDIS_PASSWORD")
+}
 
 // ============================================================================
 // IsolationHelper Tests
@@ -687,9 +702,10 @@ func TestNamespacedRedisClient_GetNamespace(t *testing.T) {
 
 func TestNamespacedRedisClient_Integration(t *testing.T) {
 	// Skip if Redis is not available
-	redisAddr := "localhost:6379"
+	// CI/CD 修复：从 REDIS_TEST_ADDR 读取地址，REDIS_PASSWORD 读取密码
 	client := redis.NewClient(&redis.Options{
-		Addr: redisAddr,
+		Addr:     getTestRedisAddr(),
+		Password: getTestRedisPassword(),
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -768,9 +784,10 @@ func TestNamespacedRedisClient_Integration(t *testing.T) {
 
 func TestIsolationHelper_Integration(t *testing.T) {
 	// Skip if Redis is not available
-	redisAddr := "localhost:6379"
+	// CI/CD 修复：从 REDIS_TEST_ADDR 读取地址，REDIS_PASSWORD 读取密码
 	redisClient := redis.NewClient(&redis.Options{
-		Addr: redisAddr,
+		Addr:     getTestRedisAddr(),
+		Password: getTestRedisPassword(),
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

@@ -253,7 +253,7 @@ jobs:
           JWT_PUBLIC_KEY_PATH: ./keys/public.pem
           BCRYPT_COST: "10"
           RATE_LIMIT_REQUESTS: "0"
-          RATE_LIMIT_WINDOW: 1m
+          RATE_LIMIT_WINDOW: "1m"
           MFA_RECOVERY_HMAC_KEY: test-hmac-key-for-ci
           METRICS_USERNAME: metrics
           METRICS_PASSWORD: test123
@@ -281,13 +281,13 @@ jobs:
         env:
           DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
           E2E_ADMIN_EMAIL: system@eninte.com
-          E2E_ADMIN_PASSWORD: Admin1234!
+          E2E_ADMIN_PASSWORD: "Admin1234!"
         run: make test-e2e-prepare
 
       - name: Run E2E tests
         env:
           E2E_ADMIN_EMAIL: system@eninte.com
-          E2E_ADMIN_PASSWORD: Admin1234!
+          E2E_ADMIN_PASSWORD: "Admin1234!"
           RATE_LIMIT_REQUESTS: "0"
           CAPTCHA_ENABLED: "false"
           DATABASE_URL: ${{ env.TEST_DATABASE_URL }}

@@ -29,10 +29,10 @@
 --                                       确保一个用户在同一 provider 下只能绑定一个账号
 
 CREATE TABLE IF NOT EXISTS social_accounts (
-    id                  VARCHAR(36) PRIMARY KEY,
+    id                  UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
     provider            VARCHAR(32)  NOT NULL,
     provider_user_id    VARCHAR(255) NOT NULL,
-    user_id             VARCHAR(36)  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id             UUID         NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     provider_email      VARCHAR(255),
     email_verified      BOOLEAN      NOT NULL DEFAULT FALSE,
     provider_metadata   JSONB,

@@ -319,7 +319,9 @@ func TestService_Verify_RemainingTTL(t *testing.T) {
 		c, err := svc.Generate(ctx)
 		require.NoError(t, err)
 
-		// 等待接近 TTL 过期
+		// 等待接近 TTL 过期。算术约束：1800+300=2100ms > 2000ms TTL 才能验证过期。
+		// 注意：若 CI 慢导致 setup 耗时，captcha 可能在 wrong 提交前就已过期，
+		// 此时 Verify 仍返回 (false, nil)，后续 Get 也返回 error，测试仍通过。
 		time.Sleep(1800 * time.Millisecond)
 
 		// 此时提交错误答案，剩余 TTL 很短

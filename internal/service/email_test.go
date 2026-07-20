@@ -4,6 +4,7 @@ package service_test
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -20,6 +21,11 @@ type mockMailSender struct {
 	mu           sync.Mutex
 	sentMessages []mockMessage
 	shouldError  bool
+	// callCount 记录 Send() 调用次数（无论 shouldError 如何）
+	// CI/CD 修复：异步 goroutine 中 shouldError=true 时不会追加 sentMessages，
+	// 测试无法用 Count() 等待 goroutine 完成。用原子计数器记录调用次数，
+	// 测试可轮询 CallCount() 确认 goroutine 已进入 Send()
+	callCount atomic.Int64
 }
 
 type mockMessage struct {
@@ -31,6 +37,8 @@ type mockMessage struct {
 }
 
 func (m *mockMailSender) Send(addr, from string, to []string, msg []byte, config *service.EmailConfig) error {
+	// CI/CD 修复：先递增 callCount（无论 shouldError 如何），让测试可等待 goroutine 进入 Send()
+	m.callCount.Add(1)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.shouldError {
@@ -55,6 +63,21 @@ func (m *mockMailSender) Count() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.sentMessages)
+}
+
+// CallCount 返回 Send() 调用次数（包括 shouldError=true 的调用）
+// CI/CD 修复：用于异步测试等待 goroutine 进入 Send()，替代固定 sleep
+func (m *mockMailSender) CallCount() int64 {
+	return m.callCount.Load()
+}
+
+// Reset 线程安全地清空 sentMessages 和 callCount（CI/CD 修复 L2）
+// 替代测试中直接访问字段 `mockSender.sentMessages = nil`，避免潜在 data race
+func (m *mockMailSender) Reset() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sentMessages = nil
+	m.callCount.Store(0)
 }
 
 // SetShouldError 线程安全地设置 shouldError 标志（阶段 D 修复 L9）

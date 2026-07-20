@@ -28,20 +28,13 @@ import (
 // Bug Condition: ENV_FILE_PATH not set, .env doesn't exist in cwd → returns non-existent cwd path
 // Expected Behavior: Should return "/app/.env" (default fallback)
 func TestBugCondition_GetEnvPathFallback(t *testing.T) {
-	// Save original environment
-	originalEnvPath := os.Getenv("ENV_FILE_PATH")
 	originalCwd, err := os.Getwd()
 	require.NoError(t, err)
 
-	defer func() {
-		// Restore original environment
-		if originalEnvPath != "" {
-			os.Setenv("ENV_FILE_PATH", originalEnvPath)
-		} else {
-			os.Unsetenv("ENV_FILE_PATH")
-		}
-		os.Chdir(originalCwd)
-	}()
+	// CI/CD 修复：使用 t.Setenv 自动恢复，避免环境变量泄漏到后续测试
+	// 用空字符串等同于 unset（GetEnvPath 内部检查 envPath != ""）
+	t.Setenv("ENV_FILE_PATH", "")
+	t.Cleanup(func() { os.Chdir(originalCwd) })
 
 	// Create a temporary directory without .env file
 	tmpDir := t.TempDir()
@@ -49,9 +42,6 @@ func TestBugCondition_GetEnvPathFallback(t *testing.T) {
 	// Change to temporary directory
 	err = os.Chdir(tmpDir)
 	require.NoError(t, err)
-
-	// Ensure ENV_FILE_PATH is not set
-	os.Unsetenv("ENV_FILE_PATH")
 
 	// Verify .env does not exist in current directory
 	cwdEnvPath := filepath.Join(tmpDir, ".env")
@@ -74,20 +64,12 @@ func TestBugCondition_GetEnvPathFallback(t *testing.T) {
 //
 // This test establishes baseline behavior that should be preserved.
 func TestBugCondition_GetEnvPathWithExistingFile(t *testing.T) {
-	// Save original environment
-	originalEnvPath := os.Getenv("ENV_FILE_PATH")
 	originalCwd, err := os.Getwd()
 	require.NoError(t, err)
 
-	defer func() {
-		// Restore original environment
-		if originalEnvPath != "" {
-			os.Setenv("ENV_FILE_PATH", originalEnvPath)
-		} else {
-			os.Unsetenv("ENV_FILE_PATH")
-		}
-		os.Chdir(originalCwd)
-	}()
+	// CI/CD 修复：使用 t.Setenv 自动恢复
+	t.Setenv("ENV_FILE_PATH", "")
+	t.Cleanup(func() { os.Chdir(originalCwd) })
 
 	// Create a temporary directory with .env file
 	tmpDir := t.TempDir()
@@ -100,9 +82,6 @@ func TestBugCondition_GetEnvPathWithExistingFile(t *testing.T) {
 	// Change to temporary directory
 	err = os.Chdir(tmpDir)
 	require.NoError(t, err)
-
-	// Ensure ENV_FILE_PATH is not set
-	os.Unsetenv("ENV_FILE_PATH")
 
 	// Call GetEnvPath
 	result := config.GetEnvPath()
@@ -117,21 +96,9 @@ func TestBugCondition_GetEnvPathWithExistingFile(t *testing.T) {
 //
 // This test establishes baseline behavior that should be preserved.
 func TestBugCondition_GetEnvPathPriority(t *testing.T) {
-	// Save original environment
-	originalEnvPath := os.Getenv("ENV_FILE_PATH")
-
-	defer func() {
-		// Restore original environment
-		if originalEnvPath != "" {
-			os.Setenv("ENV_FILE_PATH", originalEnvPath)
-		} else {
-			os.Unsetenv("ENV_FILE_PATH")
-		}
-	}()
-
-	// Set custom ENV_FILE_PATH
+	// CI/CD 修复：使用 t.Setenv 自动恢复
 	customPath := "/custom/path/.env"
-	os.Setenv("ENV_FILE_PATH", customPath)
+	t.Setenv("ENV_FILE_PATH", customPath)
 
 	// Call GetEnvPath
 	result := config.GetEnvPath()

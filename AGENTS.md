@@ -35,7 +35,7 @@ SSO 服务是一个生产级单点登录（Single Sign-On）微服务，基于 G
 | `docker/Dockerfile` | 多阶段 Docker 构建，基于 `golang:1.26.5-alpine` |
 | `docker/docker-compose.yml` | 开发/部署 Compose，含 postgres、redis、sso 三服务 |
 | `docker/entrypoint.sh` | 容器启动脚本：自动构造 `DATABASE_URL` 并执行 `migrate up` |
-| `migrations/` | 数据库迁移脚本，共 015 个版本（3 位序号命名） |
+| `migrations/` | 数据库迁移脚本，共 018 个版本（3 位序号命名） |
 | `keys/` | RSA 密钥对（脚本生成，Git 忽略） |
 
 ### 2.2 技术栈

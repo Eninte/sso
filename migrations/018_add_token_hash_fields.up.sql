@@ -13,11 +13,16 @@
 --   - 加盐会增加查询复杂度，需要额外存储 salt 字段
 -- ============================================================================
 
+-- 启用 pgcrypto 扩展以使用 digest() 函数计算 SHA-256 哈希
+-- CI/CD 修复：digest() 来自 pgcrypto 扩展，必须先启用才能使用
+-- IF NOT EXISTS 确保多次执行幂等
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 -- 新增 hash 字段（允许 NULL，兼容旧数据）
 ALTER TABLE tokens ADD COLUMN IF NOT EXISTS access_token_hash CHAR(64);
 ALTER TABLE tokens ADD COLUMN IF NOT EXISTS refresh_token_hash CHAR(64);
 
--- 回填现有数据的 hash（使用 PostgreSQL 内置 sha256 函数）
+-- 回填现有数据的 hash（使用 pgcrypto 的 digest 函数）
 -- encode(digest(token, 'sha256'), 'hex') 输出 64 字符 hex 字符串
 UPDATE tokens SET access_token_hash = encode(digest(access_token, 'sha256'), 'hex')
     WHERE access_token IS NOT NULL AND access_token_hash IS NULL;
