@@ -262,7 +262,7 @@ class SSOClient:
         不再接受 client_id/redirect_uri/scope 等字段（consent_token JWT 内部已携带）。
         调用方需先调用 authorize/authorize_with_pkce 获取 consent_token，再传给本方法。
 
-        成功后返回 {code, state}，使用 code 调用 exchange_code_for_token 换取 Access Token。
+        成功后返回 {code, state}，使用 code 调用 exchange_code 换取 Access Token。
         """
         body = {"consent_token": req.consent_token, "state": req.state}
         resp = self._request("POST", "/api/v1/authorize/approve", body, auth=True)

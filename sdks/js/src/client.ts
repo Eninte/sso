@@ -221,7 +221,7 @@ export class SSOClient {
    * 不再接受 client_id/redirect_uri/scope 等字段（consent_token JWT 内部已携带）。
    * 调用方需先调用 authorize/authorizeWithPKCE 获取 consent_token，再传给本方法。
    *
-   * 成功后返回 {code, state}，使用 code 调用 exchangeCodeForToken 换取 Access Token。
+   * 成功后返回 {code, state}，使用 code 调用 exchangeCode 换取 Access Token。
    */
   async approveAuthorization(req: AuthorizeApproveRequest): Promise<AuthorizeResponse> {
     return this.request<AuthorizeResponse>('POST', '/api/v1/authorize/approve', req, true);
