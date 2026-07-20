@@ -193,9 +193,9 @@ func (s *SocialLoginService) cleanupExpiredStates() {
 					return true
 				}
 				// 删除超过5分钟的state
-			if time.Since(info.CreatedAt) > 5*time.Minute {
-				s.stateCache.Delete(key)
-			}
+				if time.Since(info.CreatedAt) > 5*time.Minute {
+					s.stateCache.Delete(key)
+				}
 				return true
 			})
 		case <-s.stopChan:
@@ -356,7 +356,7 @@ func (s *SocialLoginService) HandleCallback(ctx context.Context, provider, code,
 		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventUserLogin), user.ID, map[string]interface{}{
 			"provider":         provider,
 			"provider_user_id": identity.ProviderUserID,
-			"email":             user.Email,
+			"email":            user.Email,
 		})
 	}
 

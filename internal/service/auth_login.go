@@ -49,14 +49,14 @@ func (s *AuthService) validateUserCredentials(ctx context.Context, email, passwo
 			return nil, ErrAccountLocked
 		}
 		// 使用原子操作解锁过期账户，避免竞态条件
-	if unlockErr := s.store.UnlockExpiredAccount(ctx, user.ID); unlockErr != nil {
-		if !apperrors.Is(unlockErr, store.ErrNotFound) {
-			// 阶段 D 审查修复（H5）：store 错误可能含 DSN
-			logger.Warn("解锁过期账户失败", "error", logging.SanitizeDBURL(unlockErr.Error()), "user_id", user.ID)
-		}
+		if unlockErr := s.store.UnlockExpiredAccount(ctx, user.ID); unlockErr != nil {
+			if !apperrors.Is(unlockErr, store.ErrNotFound) {
+				// 阶段 D 审查修复（H5）：store 错误可能含 DSN
+				logger.Warn("解锁过期账户失败", "error", logging.SanitizeDBURL(unlockErr.Error()), "user_id", user.ID)
+			}
 
-		// 即使解锁失败也继续尝试登录（可能是并发解锁）
-	}
+			// 即使解锁失败也继续尝试登录（可能是并发解锁）
+		}
 	}
 
 	// 验证密码
@@ -143,9 +143,9 @@ func (s *AuthService) handleLoginSuccess(ctx context.Context, user *model.User, 
 		defer wg.Done()
 		if auditCtx != nil {
 			auditutil.SafeAuditLog(bgCtx, s.auditSvc, string(model.EventUserLogin), user.ID, map[string]interface{}{
-				"email":       user.Email,
-				"ip_address":  auditCtx.IPAddress,
-				"user_agent":  auditCtx.UserAgent,
+				"email":        user.Email,
+				"ip_address":   auditCtx.IPAddress,
+				"user_agent":   auditCtx.UserAgent,
 				"mfa_required": user.MFAEnabled,
 			})
 		}
@@ -204,13 +204,13 @@ func (s *AuthService) LoginWithAudit(ctx context.Context, req *model.LoginReques
 		if apperrors.Is(err, ErrInvalidCredentials) && user != nil {
 			// validateUserCredentials在密码错误时返回user对象，避免重复查询DB
 			// 安全修复：检查handleLoginFailure的返回值，防止绕过账户锁定
-		if failErr := s.handleLoginFailure(ctx, user, auditCtx); failErr != nil {
-			// 阶段 D 审查修复（H5）：包装错误可能含 DSN
-			logger.Error("处理登录失败时出错", "error", logging.SanitizeDBURL(failErr.Error()), "user_id", user.ID)
-			// 安全修复：数据库错误时返回服务错误，防止绕过账户锁定机制
-			// 不返回ErrInvalidCredentials，因为我们无法确定是否成功记录失败次数
-			return nil, serviceutil.WrapServiceError("记录登录失败", failErr)
-		}
+			if failErr := s.handleLoginFailure(ctx, user, auditCtx); failErr != nil {
+				// 阶段 D 审查修复（H5）：包装错误可能含 DSN
+				logger.Error("处理登录失败时出错", "error", logging.SanitizeDBURL(failErr.Error()), "user_id", user.ID)
+				// 安全修复：数据库错误时返回服务错误，防止绕过账户锁定机制
+				// 不返回ErrInvalidCredentials，因为我们无法确定是否成功记录失败次数
+				return nil, serviceutil.WrapServiceError("记录登录失败", failErr)
+			}
 		}
 		return nil, err
 	}

@@ -164,7 +164,7 @@ func extractGitHubIdentity(identity *ProviderIdentity, userInfo map[string]inter
 //  2. 若找到 → 通过 user_id 加载 user → 检查 user 状态 → 返回 user
 //  3. 若未找到：
 //     a. 校验 provider 返回的 email_verified 必须为 true（Google）
-//        GitHub 默认视为未验证，要求用户走邮箱验证流程
+//     GitHub 默认视为未验证，要求用户走邮箱验证流程
 //     b. 若 email 非空且与本地 user 冲突 → 拒绝自动合并（返回 ErrEmailConflictWithLocal）
 //     c. 创建新 user + social_account（原子事务）
 //
@@ -216,10 +216,10 @@ func (s *SocialLoginService) findOrCreateSocialUser(
 		// 安全设计：provider 未验证 email 时拒绝登录
 		// 防止攻击者用未验证 email 接管账号
 		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventSocialLoginRejected), "", map[string]interface{}{
-			"provider":          provider,
-			"provider_user_id":  identity.ProviderUserID,
-			"email":             identity.Email,
-			"reason":            "provider_email_not_verified",
+			"provider":         provider,
+			"provider_user_id": identity.ProviderUserID,
+			"email":            identity.Email,
+			"reason":           "provider_email_not_verified",
 		})
 		return nil, ErrProviderEmailNotVerified
 	}
@@ -234,10 +234,10 @@ func (s *SocialLoginService) findOrCreateSocialUser(
 			// email 已被本地账号占用 → 拒绝自动合并
 			// 安全设计：要求用户先登录本地账号，再在个人中心绑定社交账号
 			auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventSocialLoginRejected), existingUser.ID, map[string]interface{}{
-				"provider":          provider,
-				"provider_user_id":  identity.ProviderUserID,
-				"email":             identity.Email,
-				"reason":            "email_conflict_with_local",
+				"provider":         provider,
+				"provider_user_id": identity.ProviderUserID,
+				"email":            identity.Email,
+				"reason":           "email_conflict_with_local",
 			})
 			return nil, ErrEmailConflictWithLocal
 		}
@@ -326,9 +326,9 @@ func (s *SocialLoginService) updateSocialAccountIfNeeded(
 	if err := s.store.UpdateSocialAccount(ctx, account); err != nil {
 		// 更新失败不影响登录主流程（已通过身份校验），但记录审计便于追溯
 		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventSocialLoginRejected), account.UserID, map[string]interface{}{
-			"provider":        account.Provider,
+			"provider":         account.Provider,
 			"provider_user_id": account.ProviderUserID,
-			"reason":          "social_account_update_failed",
+			"reason":           "social_account_update_failed",
 		})
 	}
 }

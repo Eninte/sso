@@ -60,7 +60,7 @@ func TestInitHandler_HandleInitPage_Integration(t *testing.T) {
 	store := postgres.New(db)
 
 	auditSvc := &mockAuditService{}
-	h := handler.NewInitHandler(store, nil, nil, auditSvc, "1.0.0", "2024-01-01")
+	h := handler.NewInitHandler(store, nil, nil, auditSvc, "1.0.0", "2024-01-01", true)
 
 	req := httptest.NewRequest("GET", "/init", nil)
 	req.RemoteAddr = "127.0.0.1:12345"
@@ -82,7 +82,7 @@ func TestInitHandler_HandleSystemStatus_Integration(t *testing.T) {
 	store := postgres.New(db)
 
 	auditSvc := &mockAuditService{}
-	h := handler.NewInitHandler(store, nil, nil, auditSvc, "1.0.0", "2024-01-01")
+	h := handler.NewInitHandler(store, nil, nil, auditSvc, "1.0.0", "2024-01-01", true)
 
 	req := httptest.NewRequest("GET", "/api/v1/init/status", nil)
 	req.RemoteAddr = "127.0.0.1:12345"
@@ -113,7 +113,7 @@ func TestInitHandler_HandleCreateAdmin_Integration(t *testing.T) {
 
 	passwordSvc := crypto.NewPasswordService(4) // 使用低成本加快测试
 	auditSvc := &mockAuditService{}
-	h := handler.NewInitHandler(store, passwordSvc, nil, auditSvc, "1.0.0", "2024-01-01")
+	h := handler.NewInitHandler(store, passwordSvc, nil, auditSvc, "1.0.0", "2024-01-01", true)
 
 	requestBody := map[string]string{
 		"email":    "test-init-admin@example.com",
@@ -178,7 +178,7 @@ func TestInitHandler_HandleCreateAdmin_DuplicateEmail_Integration(t *testing.T) 
 	err := store.Create(context.Background(), user)
 	require.NoError(t, err)
 
-	h := handler.NewInitHandler(store, passwordSvc, nil, auditSvc, "1.0.0", "2024-01-01")
+	h := handler.NewInitHandler(store, passwordSvc, nil, auditSvc, "1.0.0", "2024-01-01", true)
 
 	requestBody := map[string]string{
 		"email":    "test-init-duplicate@example.com",
@@ -210,7 +210,7 @@ func TestInitHandler_HandleCreateClient_Integration(t *testing.T) {
 
 	passwordSvc := crypto.NewPasswordService(4)
 	auditSvc := &mockAuditService{}
-	h := handler.NewInitHandler(store, passwordSvc, nil, auditSvc, "1.0.0", "2024-01-01")
+	h := handler.NewInitHandler(store, passwordSvc, nil, auditSvc, "1.0.0", "2024-01-01", true)
 
 	// 先创建管理员（创建客户端需要先有管理员）
 	createAdminBody := map[string]string{
@@ -288,7 +288,7 @@ func TestInitHandler_AdminExists_ReturnsNotFound_Integration(t *testing.T) {
 
 	auditSvc := &mockAuditService{}
 	passwordSvc := crypto.NewPasswordService(4)
-	h := handler.NewInitHandler(store, passwordSvc, nil, auditSvc, "1.0.0", "2024-01-01")
+	h := handler.NewInitHandler(store, passwordSvc, nil, auditSvc, "1.0.0", "2024-01-01", true)
 
 	// 测试 HandleInitPage
 	req := httptest.NewRequest("GET", "/init", nil)

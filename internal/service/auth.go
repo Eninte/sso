@@ -137,19 +137,19 @@ func WithMFA(mfaSvc mfaLoginCodeVerifier, challengeTTL time.Duration) AuthServic
 // AuthService 认证服务
 // 处理用户认证相关的业务逻辑
 type AuthService struct {
-	store            store.Store              // 数据存储
-	passwordSvc      *crypto.PasswordService  // 密码服务
-	jwtSvc           *crypto.JWTService       // JWT服务
-	tokenSvc         tokenPairGenerator       // Token生成服务
-	userSvc          verificationEmailSender  // 用户服务（用于发送验证邮件）
-	maxAttempts      int                      // 最大登录尝试次数
-	lockoutDuration  time.Duration            // 锁定时长
-	metricsSvc       metricIncrementer        // 指标服务（可选）
-	auditSvc         auditutil.AuditService   // 审计服务
-	cache            cache.Cache              // 缓存服务（可选，用于 MFA Challenge 存储）
-	loginRateLimit   loginRateChecker         // 登录频率限制器（可选）
-	mfaSvc           mfaLoginCodeVerifier     // MFA 服务（可选，未设置时启用 MFA 的用户登录失败）
-	mfaChallengeTTL  time.Duration            // MFA Challenge 有效期（默认 5 分钟）
+	store           store.Store             // 数据存储
+	passwordSvc     *crypto.PasswordService // 密码服务
+	jwtSvc          *crypto.JWTService      // JWT服务
+	tokenSvc        tokenPairGenerator      // Token生成服务
+	userSvc         verificationEmailSender // 用户服务（用于发送验证邮件）
+	maxAttempts     int                     // 最大登录尝试次数
+	lockoutDuration time.Duration           // 锁定时长
+	metricsSvc      metricIncrementer       // 指标服务（可选）
+	auditSvc        auditutil.AuditService  // 审计服务
+	cache           cache.Cache             // 缓存服务（可选，用于 MFA Challenge 存储）
+	loginRateLimit  loginRateChecker        // 登录频率限制器（可选）
+	mfaSvc          mfaLoginCodeVerifier    // MFA 服务（可选，未设置时启用 MFA 的用户登录失败）
+	mfaChallengeTTL time.Duration           // MFA Challenge 有效期（默认 5 分钟）
 }
 
 // NewAuthService 创建AuthService实例

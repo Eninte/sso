@@ -23,7 +23,7 @@ import (
 // ============================================================================
 
 var (
-	ErrInvalidScope     = apperrors.ErrInvalidScope
+	ErrInvalidScope    = apperrors.ErrInvalidScope
 	ErrPKCERequired    = apperrors.ErrPKCERequired
 	ErrConsentRequired = apperrors.ErrConsentRequired
 	ErrConsentDenied   = apperrors.ErrConsentDenied

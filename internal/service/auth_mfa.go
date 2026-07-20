@@ -80,9 +80,9 @@ func (s *AuthService) handleMFARequiredLogin(ctx context.Context, user *model.Us
 
 	// 记录审计日志（第一阶段密码验证成功，等待 MFA 二次验证）
 	auditutil.SafeAuditLog(ctx, s.auditSvc, "mfa_challenge_issued", user.ID, map[string]interface{}{
-		"ip_address":  ipAddress,
-		"user_agent":  userAgent,
-		"expires_in":  int(ttl.Seconds()),
+		"ip_address": ipAddress,
+		"user_agent": userAgent,
+		"expires_in": int(ttl.Seconds()),
 	})
 
 	// 返回 Challenge 响应（不包含 access_token / refresh_token）
@@ -147,9 +147,9 @@ func (s *AuthService) VerifyMFALogin(ctx context.Context, req *model.MFAVerifyRe
 	if challenge.IPAddress != ipAddress || challenge.UserAgent != userAgent {
 		_ = s.cache.Delete(ctx, key)
 		auditutil.SafeAuditLog(ctx, s.auditSvc, "mfa_challenge_context_mismatch", challenge.UserID, map[string]interface{}{
-			"expected_ip":  challenge.IPAddress,
-			"actual_ip":    ipAddress,
-			"user_agent":   userAgent,
+			"expected_ip": challenge.IPAddress,
+			"actual_ip":   ipAddress,
+			"user_agent":  userAgent,
 		})
 		return nil, apperrors.ErrMFAChallengeInvalid
 	}

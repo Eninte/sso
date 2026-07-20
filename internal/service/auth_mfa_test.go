@@ -397,8 +397,8 @@ func TestAuthService_VerifyMFALogin_EmptyCode(t *testing.T) {
 
 	_, err := authSvc.VerifyMFALogin(ctx, &model.MFAVerifyRequest{
 		MFAChallenge: "some-challenge",
-		Method:        model.MFAMethodTOTP,
-		Code:          "",
+		Method:       model.MFAMethodTOTP,
+		Code:         "",
 	}, "192.168.1.1", "Mozilla/5.0")
 
 	assert.ErrorIs(t, err, apperrors.ErrBadRequest)

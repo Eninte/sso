@@ -168,7 +168,7 @@ func (s *OAuthService) CreateAuthorizationCode(
 	if err != nil {
 		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventAuthCodeInvalid), userID, map[string]interface{}{
 			"client_id": clientID,
-			"reason":     "invalid_scope",
+			"reason":    "invalid_scope",
 		})
 		return "", err
 	}
@@ -177,7 +177,7 @@ func (s *OAuthService) CreateAuthorizationCode(
 	if err := s.ValidatePKCEChallenge(ctx, client, codeChallenge, codeChallengeMethod); err != nil {
 		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventAuthCodeInvalid), userID, map[string]interface{}{
 			"client_id": clientID,
-			"reason":     "pkce_required",
+			"reason":    "pkce_required",
 		})
 		return "", err
 	}
@@ -256,8 +256,8 @@ func (s *OAuthService) CreateAuthorizationCodeWithConsent(
 	// expectedState 为空时跳过校验（向后兼容老调用方），生产环境应始终传入。
 	if expectedState != "" && claims.State != expectedState {
 		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventAuthCodeInvalid), userID, map[string]interface{}{
-			"client_id":     claims.ClientID,
-			"reason":        "consent_state_mismatch",
+			"client_id":             claims.ClientID,
+			"reason":                "consent_state_mismatch",
 			"expected_state_length": len(expectedState),
 			"actual_state_length":   len(claims.State),
 		})

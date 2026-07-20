@@ -135,8 +135,8 @@ func Load() (*Config, error) {
 
 	cfg := &Config{
 		// 服务器配置
-		ServerHost: getEnv("SERVER_HOST", "0.0.0.0"),
-		ServerPort: getEnv("SERVER_PORT", "9090"),
+		ServerHost:    getEnv("SERVER_HOST", "0.0.0.0"),
+		ServerPort:    getEnv("SERVER_PORT", "9090"),
 		Env:           getEnv("SERVER_ENV", "development"),
 		PublicBaseURL: os.Getenv("PUBLIC_BASE_URL"), // 阶段 4：对外暴露场景的公共 URL（生产必须 HTTPS）
 

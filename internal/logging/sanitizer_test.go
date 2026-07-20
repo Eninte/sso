@@ -251,20 +251,20 @@ func TestSanitizeDBURL(t *testing.T) {
 			expected: "postgres://admin:***@host:5432/db",
 		},
 		{
-			name:     "纯字符串无法解析为URL",
-			dsn:      "some random error message",
+			name: "纯字符串无法解析为URL",
+			dsn:  "some random error message",
 			// 阶段 D 修复（H5）：非 DSN 字符串原样返回，保留错误上下文
 			expected: "some random error message",
 		},
 		{
-			name:     "key=value格式含password",
-			dsn:      "password=secret user=admin",
+			name: "key=value格式含password",
+			dsn:  "password=secret user=admin",
 			// sanitizeKeyValueDSN 识别 password= 子串，仅脱敏值
 			expected: "password=*** user=admin",
 		},
 		{
-			name:     "key=value格式无password",
-			dsn:      "host=localhost user=admin dbname=sso",
+			name: "key=value格式无password",
+			dsn:  "host=localhost user=admin dbname=sso",
 			// 不含 password 字段，原样返回
 			expected: "host=localhost user=admin dbname=sso",
 		},
@@ -434,14 +434,14 @@ func TestLogSecurity_AutoSanitization(t *testing.T) {
 	require.NoError(t, logging.Init(cfg))
 
 	details := map[string]interface{}{
-		"ip":             "192.168.1.1",
-		"reason":         "suspicious activity",
-		"password":       "MySecret123!",
-		"access_token":   "eyJhbGciOiJIUzI1NiJ9.payload.sig",
-		"client_secret":  "oauth-secret-value",
-		"database_url":   "postgres://user:secret@host:5432/db",
-		"token_id":       "tok-abc-123",  // 安全字段，不脱敏
-		"user_id":        "user-456",
+		"ip":            "192.168.1.1",
+		"reason":        "suspicious activity",
+		"password":      "MySecret123!",
+		"access_token":  "eyJhbGciOiJIUzI1NiJ9.payload.sig",
+		"client_secret": "oauth-secret-value",
+		"database_url":  "postgres://user:secret@host:5432/db",
+		"token_id":      "tok-abc-123", // 安全字段，不脱敏
+		"user_id":       "user-456",
 	}
 	logging.LogSecurity("test_event", details)
 
