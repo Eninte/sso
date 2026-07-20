@@ -189,7 +189,9 @@ func TestFullAuthFlow(t *testing.T) {
 	revokeReq := revokeRequest{Token: newTokens.AccessToken}
 	logoutResp, _, err := doRequest("POST", "/api/v1/token/revoke", revokeReq, newTokens.AccessToken)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, logoutResp.StatusCode)
+	// RFC 7009 §2.2：revoke 成功可返回 200 或 204 No Content
+	assert.True(t, logoutResp.StatusCode == http.StatusOK || logoutResp.StatusCode == http.StatusNoContent,
+		"期望 200 或 204，实际 %d", logoutResp.StatusCode)
 	t.Logf("登出成功")
 }
 

@@ -47,6 +47,7 @@ func cleanupTestData(t *testing.T, db *sql.DB) {
 	_, _ = db.ExecContext(ctx, "DELETE FROM reset_tokens WHERE token LIKE 'test-%'")
 	_, _ = db.ExecContext(ctx, "DELETE FROM authorization_codes WHERE code LIKE 'test-%'")
 	_, _ = db.ExecContext(ctx, "DELETE FROM tokens WHERE access_token LIKE 'test-%'")
+	_, _ = db.ExecContext(ctx, "DELETE FROM social_accounts WHERE provider_user_id LIKE 'test-%'")
 	_, _ = db.ExecContext(ctx, "DELETE FROM oauth_clients WHERE client_id LIKE 'test-%'")
 	_, _ = db.ExecContext(ctx, "DELETE FROM users WHERE email LIKE 'test-%@%'")
 }

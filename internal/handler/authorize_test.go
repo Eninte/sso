@@ -171,3 +171,57 @@ func TestAuthorizeHandler_HandleApprove(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 }
+
+// TestAuthorizeHandler_HandleDeny 覆盖 HandleDeny 全部分支
+func TestAuthorizeHandler_HandleDeny(t *testing.T) {
+	h := createTestAuthorizeHandler(t)
+
+	t.Run("未认证返回401", func(t *testing.T) {
+		body := map[string]string{
+			"consent_token": "token-abc",
+			"state":         "1234567890abcdef",
+		}
+		bodyBytes, _ := json.Marshal(body)
+
+		req := httptest.NewRequest("POST", "/authorize/deny", bytes.NewReader(bodyBytes))
+		// 不设置 userID
+		w := httptest.NewRecorder()
+
+		h.HandleDeny(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+
+	t.Run("无效JSON返回400", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/authorize/deny", bytes.NewReader([]byte("invalid json")))
+		req = req.WithContext(createContextWithUserID("user1"))
+		w := httptest.NewRecorder()
+
+		h.HandleDeny(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("合法请求返回403 access_denied", func(t *testing.T) {
+		body := map[string]string{
+			"consent_token": "token-abc",
+			"state":         "1234567890abcdef",
+		}
+		bodyBytes, _ := json.Marshal(body)
+
+		req := httptest.NewRequest("POST", "/authorize/deny", bytes.NewReader(bodyBytes))
+		req = req.WithContext(createContextWithUserID("user1"))
+		w := httptest.NewRecorder()
+
+		h.HandleDeny(w, req)
+
+		assert.Equal(t, http.StatusForbidden, w.Code)
+
+		var resp map[string]string
+		err := json.Unmarshal(w.Body.Bytes(), &resp)
+		assert.NoError(t, err)
+		assert.Equal(t, "access_denied", resp["error"])
+		assert.Equal(t, "1234567890abcdef", resp["state"])
+		assert.NotEmpty(t, resp["error_description"])
+	})
+}

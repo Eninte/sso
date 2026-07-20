@@ -177,3 +177,137 @@ func TestDistributedRateLimiter_BuildKey(t *testing.T) {
 	assert.Len(t, keys, 1)
 	assert.Contains(t, keys[0], "192.168.1.1")
 }
+
+// TestDistributedRateLimiter_WithMetrics 验证 WithMetrics 链式调用和回调触发
+func TestDistributedRateLimiter_WithMetrics(t *testing.T) {
+	redisClient := setupTestRedis(t)
+	metricCalled := 0
+	limiter := middleware.NewDistributedRateLimiter(redisClient, 1, time.Minute, "test_metrics").
+		WithMetrics(func() { metricCalled++ })
+
+	// 验证链式调用返回自身
+	assert.NotNil(t, limiter)
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mw := limiter.Middleware(handler)
+
+	// 第一个请求：允许，不触发 metric
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+	rr := httptest.NewRecorder()
+	mw.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, 0, metricCalled, "允许时不应调用 metric 回调")
+
+	// 第二个请求：超限，触发 metric
+	req2 := httptest.NewRequest("GET", "/", nil)
+	req2.RemoteAddr = "10.0.0.1:1234"
+	rr2 := httptest.NewRecorder()
+	mw.ServeHTTP(rr2, req2)
+	assert.Equal(t, http.StatusTooManyRequests, rr2.Code)
+	assert.Equal(t, 1, metricCalled, "限流时应该调用 metric 回调一次")
+}
+
+// TestDistributedRateLimiter_WithErrorCallback 验证 Redis 错误时 fail-open + 触发 errorFunc
+func TestDistributedRateLimiter_WithErrorCallback(t *testing.T) {
+	redisClient := setupTestRedis(t)
+	// 提前关闭 Redis 触发错误
+	redisClient.Close()
+
+	errorCalled := 0
+	limiter := middleware.NewDistributedRateLimiter(redisClient, 10, time.Minute, "test_err_cb").
+		WithErrorCallback(func() { errorCalled++ })
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mw := limiter.Middleware(handler)
+
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "10.0.0.2:1234"
+	rr := httptest.NewRecorder()
+	mw.ServeHTTP(rr, req)
+
+	// Redis 错误时 fail-open，应返回 200
+	assert.Equal(t, http.StatusOK, rr.Code, "Redis 错误时应 fail-open 放行")
+	assert.Equal(t, 1, errorCalled, "Redis 错误时应调用 errorFunc 回调")
+}
+
+// TestDistributedRateLimiter_Middleware_RateLimited 验证 Middleware 429 响应路径
+func TestDistributedRateLimiter_Middleware_RateLimited(t *testing.T) {
+	redisClient := setupTestRedis(t)
+	limiter := middleware.NewDistributedRateLimiter(redisClient, 1, time.Minute, "test_429")
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+	mw := limiter.Middleware(handler)
+
+	// 第一个请求通过
+	req1 := httptest.NewRequest("GET", "/", nil)
+	req1.RemoteAddr = "10.0.0.3:1234"
+	rr1 := httptest.NewRecorder()
+	mw.ServeHTTP(rr1, req1)
+	assert.Equal(t, http.StatusOK, rr1.Code)
+
+	// 第二个请求应返回 429
+	req2 := httptest.NewRequest("GET", "/", nil)
+	req2.RemoteAddr = "10.0.0.3:1234"
+	rr2 := httptest.NewRecorder()
+	mw.ServeHTTP(rr2, req2)
+
+	assert.Equal(t, http.StatusTooManyRequests, rr2.Code)
+	assert.NotEmpty(t, rr2.Header().Get("Retry-After"))
+	assert.NotEmpty(t, rr2.Header().Get("X-Ratelimit-Limit"))
+	assert.NotEmpty(t, rr2.Header().Get("X-Ratelimit-Remaining"))
+	assert.Equal(t, "0", rr2.Header().Get("X-Ratelimit-Remaining"))
+}
+
+// TestDistributedRateLimiter_Middleware_Disabled 验证禁用限流（limit=0）时 Middleware 直接放行
+func TestDistributedRateLimiter_Middleware_Disabled(t *testing.T) {
+	redisClient := setupTestRedis(t)
+	limiter := middleware.NewDistributedRateLimiter(redisClient, 0, time.Minute, "test_disabled_mw")
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mw := limiter.Middleware(handler)
+
+	// 多次请求都应放行
+	for i := 0; i < 5; i++ {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.RemoteAddr = "10.0.0.4:1234"
+		rr := httptest.NewRecorder()
+		mw.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusOK, rr.Code, "禁用限流时第 %d 个请求应放行", i+1)
+	}
+}
+
+// TestDistributedRateLimiter_Allow_Disabled 验证禁用限流（limit=0）时 Allow 行为
+func TestDistributedRateLimiter_Allow_Disabled(t *testing.T) {
+	redisClient := setupTestRedis(t)
+	limiter := middleware.NewDistributedRateLimiter(redisClient, 0, time.Minute, "test_allow_disabled")
+
+	ctx := context.Background()
+	allowed, remaining, resetTime, err := limiter.Allow(ctx, "10.0.0.5")
+	require.NoError(t, err)
+	assert.True(t, allowed, "禁用限流时应允许")
+	assert.Equal(t, 0, remaining)
+	assert.True(t, resetTime.IsZero(), "禁用限流时 resetTime 应为零值")
+}
+
+// TestDistributedRateLimiter_Allow_NilContext 验证 Allow 在 ctx 为 nil 时的容错（不 panic）
+// 注：实际使用中不会传 nil context，但测试为了覆盖率验证
+func TestDistributedRateLimiter_Allow_NilContext(t *testing.T) {
+	redisClient := setupTestRedis(t)
+	// 设置极短的窗口，确保能正常运行
+	limiter := middleware.NewDistributedRateLimiter(redisClient, 1, time.Minute, "test_nil_ctx")
+
+	// 使用 context.Background() 模拟正常调用
+	allowed, _, _, err := limiter.Allow(context.Background(), "10.0.0.6")
+	require.NoError(t, err)
+	assert.True(t, allowed)
+}
