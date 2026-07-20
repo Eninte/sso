@@ -12,6 +12,7 @@ import (
 	"net/smtp"
 	"time"
 
+	apperrors "github.com/example/sso/internal/errors"
 	"github.com/example/sso/internal/service/email"
 	"github.com/example/sso/internal/util/serviceutil"
 )
@@ -131,8 +132,11 @@ func (s *EmailService) SendEmail(ctx context.Context, to, subject, htmlBody stri
 	}
 
 	if err != nil {
+		// 阶段 4 安全增强：详细错误记录到日志，但向调用方返回通用错误
+		// 避免 SMTP 错误消息（如 "550 Authentication failed for user noreply@example.com"）
+		// 通过 handlerutil.WriteJSONError 暴露到 HTTP 响应，泄露 SMTP 用户名/服务器
 		s.logger.ErrorContext(ctx, "发送邮件失败", "to", to, "error", err)
-		return serviceutil.WrapServiceError("发送邮件", err)
+		return apperrors.ErrEmailSendFailed
 	}
 
 	s.logger.InfoContext(ctx, "邮件发送成功", "to", to, "subject", subject)

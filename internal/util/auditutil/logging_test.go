@@ -487,3 +487,85 @@ func TestLogWithFallback_PanicInLogFunc(t *testing.T) {
 		auditutil.LogWithFallback(mockSvc, logFunc)
 	})
 }
+
+// ============================================================================
+// 阶段 4 安全增强：metadata 脱敏测试
+// ============================================================================
+
+// TestSafeAuditLog_SensitiveFieldsAreSanitized 验证敏感字段在落库前被脱敏
+// 防止 token / password / secret 等通过 audit_logs.details 列明文泄露
+func TestSafeAuditLog_SensitiveFieldsAreSanitized(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	mockSvc := &MockAuditService{}
+
+	metadata := map[string]interface{}{
+		"email":           "user@example.com",
+		"ip_address":      "192.168.1.1",
+		"access_token":    "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature",
+		"refresh_token":   "32bytes-long-refresh-token-value-1234567890",
+		"password":        "SuperSecretPassword123!",
+		"client_id":       "public-client-id",
+		"reason":          "refresh_token_replay",
+		"refresh_token_len": 21,
+	}
+
+	auditutil.SafeAuditLog(ctx, mockSvc, string(model.EventSocialLoginRejected), "user-1", metadata)
+
+	logCalls := mockSvc.GetLogCalls()
+	require.Len(t, logCalls, 1)
+	logEntry := logCalls[0]
+
+	// access_token / refresh_token / password 不应明文出现在 Details
+	assert.NotContains(t, logEntry.Details, "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9")
+	assert.NotContains(t, logEntry.Details, "32bytes-long-refresh-token-value-1234567890")
+	assert.NotContains(t, logEntry.Details, "SuperSecretPassword123!")
+
+	// 非敏感字段仍应保留以保持审计可读性
+	assert.Contains(t, logEntry.Details, "user@example.com")
+	assert.Contains(t, logEntry.Details, "192.168.1.1")
+	assert.Contains(t, logEntry.Details, "public-client-id")
+	assert.Contains(t, logEntry.Details, "refresh_token_replay")
+}
+
+// TestCriticalAuditLog_SensitiveFieldsAreSanitized 验证 CriticalAuditLog 也做脱敏
+func TestCriticalAuditLog_SensitiveFieldsAreSanitized(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	mockSvc := &MockAuditService{}
+
+	metadata := map[string]interface{}{
+		"key_id":      "key-12345",
+		"access_token": "eyJsecret.token.value",
+		"password":    "should-be-redacted",
+	}
+
+	err := auditutil.CriticalAuditLog(ctx, mockSvc, string(model.EventKeyRotated), "", metadata)
+	require.NoError(t, err)
+
+	logCalls := mockSvc.GetLogCalls()
+	require.Len(t, logCalls, 1)
+	logEntry := logCalls[0]
+
+	// 敏感字段被脱敏
+	assert.NotContains(t, logEntry.Details, "eyJsecret.token.value")
+	assert.NotContains(t, logEntry.Details, "should-be-redacted")
+	// 非敏感字段保留
+	assert.Contains(t, logEntry.Details, "key-12345")
+}
+
+// TestSafeAuditLog_NilMetadata_DoesNotPanic 验证 nil metadata 不触发脱敏 panic
+func TestSafeAuditLog_NilMetadata_DoesNotPanic(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	mockSvc := &MockAuditService{}
+
+	assert.NotPanics(t, func() {
+		auditutil.SafeAuditLog(ctx, mockSvc, "test.event", "user-1", nil)
+	})
+
+	logCalls := mockSvc.GetLogCalls()
+	require.Len(t, logCalls, 1)
+	// nil metadata 序列化为 "null"
+	assert.Equal(t, "null", logCalls[0].Details)
+}

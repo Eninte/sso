@@ -26,18 +26,23 @@ import (
 func setupTestEnv(t *testing.T) func() {
 	// 保存原始环境变量
 	origEnv := map[string]string{
-		"DB_PASSWORD":           os.Getenv("DB_PASSWORD"),
-		"JWT_PRIVATE_KEY_PATH":  os.Getenv("JWT_PRIVATE_KEY_PATH"),
-		"JWT_PUBLIC_KEY_PATH":   os.Getenv("JWT_PUBLIC_KEY_PATH"),
-		"SERVER_ENV":            os.Getenv("SERVER_ENV"),
-		"CORS_ALLOWED_ORIGINS":  os.Getenv("CORS_ALLOWED_ORIGINS"),
-		"ADMIN_EMAILS":          os.Getenv("ADMIN_EMAILS"),
-		"BCRYPT_COST":           os.Getenv("BCRYPT_COST"),
-		"LAN_DEPLOYMENT":        os.Getenv("LAN_DEPLOYMENT"),
-		"SKIP_ENV_FILE":         os.Getenv("SKIP_ENV_FILE"),
-		"JWT_ISSUER":            os.Getenv("JWT_ISSUER"),
-		"SMTP_HOST":             os.Getenv("SMTP_HOST"),
-		"MFA_RECOVERY_HMAC_KEY": os.Getenv("MFA_RECOVERY_HMAC_KEY"),
+		"DB_PASSWORD":             os.Getenv("DB_PASSWORD"),
+		"JWT_PRIVATE_KEY_PATH":    os.Getenv("JWT_PRIVATE_KEY_PATH"),
+		"JWT_PUBLIC_KEY_PATH":     os.Getenv("JWT_PUBLIC_KEY_PATH"),
+		"SERVER_ENV":              os.Getenv("SERVER_ENV"),
+		"CORS_ALLOWED_ORIGINS":    os.Getenv("CORS_ALLOWED_ORIGINS"),
+		"ADMIN_EMAILS":            os.Getenv("ADMIN_EMAILS"),
+		"BCRYPT_COST":             os.Getenv("BCRYPT_COST"),
+		"LAN_DEPLOYMENT":          os.Getenv("LAN_DEPLOYMENT"),
+		"SKIP_ENV_FILE":           os.Getenv("SKIP_ENV_FILE"),
+		"JWT_ISSUER":              os.Getenv("JWT_ISSUER"),
+		"SMTP_HOST":               os.Getenv("SMTP_HOST"),
+		"MFA_RECOVERY_HMAC_KEY":   os.Getenv("MFA_RECOVERY_HMAC_KEY"),
+		"PUBLIC_BASE_URL":         os.Getenv("PUBLIC_BASE_URL"),
+		"METRICS_USERNAME":        os.Getenv("METRICS_USERNAME"),
+		"METRICS_PASSWORD":        os.Getenv("METRICS_PASSWORD"),
+		"STRICT_KEY_PERMISSIONS":  os.Getenv("STRICT_KEY_PERMISSIONS"),
+		"REDIS_PASSWORD":          os.Getenv("REDIS_PASSWORD"),
 	}
 
 	// 设置测试环境变量
@@ -48,6 +53,15 @@ func setupTestEnv(t *testing.T) func() {
 	os.Setenv("SMTP_HOST", "smtp.example.com")
 	// 设置 MFA 恢复码 HMAC 密钥（生产环境必需，AGENTS.md 硬约束）
 	os.Setenv("MFA_RECOVERY_HMAC_KEY", "test-hmac-key-for-mfa-recovery-codes")
+	// 阶段 4 安全增强：生产环境校验要求以下变量必填，统一设置默认值
+	// 测试用例可通过 os.Unsetenv 单独清除来测试对应校验分支
+	os.Setenv("PUBLIC_BASE_URL", "https://example.com")
+	os.Setenv("METRICS_USERNAME", "metrics-admin")
+	os.Setenv("METRICS_PASSWORD", "metrics-secret")
+	// REDIS_ENABLE 默认为 true，生产环境要求 REDIS_PASSWORD 必须非空
+	os.Setenv("REDIS_PASSWORD", "test_redis_password")
+	// 测试环境跳过 JWT 私钥文件权限校验（CI 中文件权限不一定是 600）
+	os.Setenv("STRICT_KEY_PERMISSIONS", "false")
 	// 禁止读取磁盘 .env 文件，保证测试环境完全自包含
 	os.Setenv("SKIP_ENV_FILE", "1")
 	// 默认非 LAN 部署模式，确保生产环境安全校验不被旁路；
@@ -156,7 +170,7 @@ func TestValidate_BcryptCostRange(t *testing.T) {
 		{
 			name:    "cost超出范围",
 			cost:    "50",
-			wantErr: false, // 只有警告，不报错
+			wantErr: true, // 阶段 4 安全增强：bcrypt 算法上限为 31，超出拒绝启动（避免运行时 panic）
 			env:     "development",
 		},
 	}
@@ -332,7 +346,8 @@ func TestValidateProductionConfig_MetricsAuth(t *testing.T) {
 			name:            "Metrics都未设置",
 			metricsUsername: "",
 			metricsPassword: "",
-			wantErr:         false,
+			wantErr:         true, // 阶段 4 安全增强：生产环境 METRICS_USERNAME + METRICS_PASSWORD 必须同时设置，避免 /metrics 无认证暴露指标
+			errContains:     "METRICS_USERNAME",
 		},
 	}
 

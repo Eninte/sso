@@ -6,6 +6,18 @@ on:
   pull_request:
     branches: [ main ]
 
+# 阶段 4 安全增强：最小权限原则
+# 默认所有 job 仅授予只读权限，需要写权限的 job（如 docker push）显式声明
+permissions:
+  contents: read
+
+# 阶段 4 安全增强：并发控制
+# 同一分支的多次推送会取消旧的任务，节省 CI 资源
+# PR 上同样新提交取消旧的任务
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Test
@@ -333,6 +345,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: [test, lint, security]
     if: github.ref == 'refs/heads/main'
+    # 阶段 4 安全增强：docker job 需要写权限（推送镜像到 GHCR 时使用 packages: write）
+    # 当前推送到 Docker Hub 使用 username/password secret，但保留 packages: write
+    # 以便未来切换到 GHCR 时无需再次修改权限
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Checkout code

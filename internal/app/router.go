@@ -13,6 +13,7 @@ import (
 	"github.com/example/sso/internal/cache"
 	"github.com/example/sso/internal/config"
 	"github.com/example/sso/internal/handler"
+	"github.com/example/sso/internal/metrics"
 	"github.com/example/sso/internal/middleware"
 	"github.com/example/sso/internal/store"
 )
@@ -60,13 +61,10 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 	} else {
 		rateLimiter = middleware.NewRateLimiter(cfg.RateLimitRequests, cfg.RateLimitWindow)
 	}
-	if rl, ok := rateLimiter.(interface {
-		WithMetrics(metricFunc func()) *middleware.RateLimiter
-	}); ok {
-		rl.WithMetrics(func() {
-			svc.Metrics.Increment("security_rate_limit_total")
-		})
-	}
+	// 阶段 4：注入指标回调
+	// - 限流触发：security_rate_limit_total
+	// - fail-open 放行（Redis 错误）：security_ratelimit_error_total
+	injectRateLimitMetrics(rateLimiter, svc.Metrics)
 
 	router.Use(middleware.SecurityHeaders)
 	router.Use(middleware.RequestID)
@@ -127,6 +125,8 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 		sensitiveLimit = 1
 	}
 	sensitiveLimiter := newEndpointRateLimiter(svc.Cache, sensitiveLimit, 1*time.Minute, "ratelimit:sensitive")
+	// 阶段 4：注入指标回调（同主限流器）
+	injectRateLimitMetrics(sensitiveLimiter, svc.Metrics)
 
 	// 公开端点 (不需要认证)
 	if sensitiveLimiter != nil {
@@ -240,6 +240,39 @@ func newEndpointRateLimiter(cacheSvc cache.Cache, limit int, window time.Duratio
 		return middleware.NewDistributedRateLimiter(rc.Client(), limit, window, keyPrefix)
 	}
 	return middleware.NewRateLimiter(limit, window)
+}
+
+// injectRateLimitMetrics 给限流器注入指标回调
+// 阶段 4 安全增强：
+//   - 本地限流器：注入 WithMetrics（限流触发计数）
+//   - 分布式限流器：注入 WithMetrics（限流触发计数）+ WithErrorCallback（fail-open 错误计数）
+//   - nil 限流器（禁用）：跳过
+//
+// 满足 AGENTS.md 第 8.4 节"禁止忽略错误"规则
+func injectRateLimitMetrics(rl middleware.RateLimitMiddleware, metricsSvc *metrics.Service) {
+	if rl == nil {
+		return
+	}
+	// 本地限流器接口
+	if rl, ok := rl.(interface {
+		WithMetrics(metricFunc func()) *middleware.RateLimiter
+	}); ok {
+		rl.WithMetrics(func() {
+			metricsSvc.Increment("security_rate_limit_total")
+		})
+		return
+	}
+	// 分布式限流器接口
+	if rl, ok := rl.(interface {
+		WithMetrics(metricFunc func()) *middleware.DistributedRateLimiter
+	}); ok {
+		rl.WithMetrics(func() {
+			metricsSvc.Increment("security_rate_limit_total")
+		}).WithErrorCallback(func() {
+			metricsSvc.Increment("security_ratelimit_error_total")
+		})
+		return
+	}
 }
 
 // healthHandler 健康检查处理器

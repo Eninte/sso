@@ -85,6 +85,7 @@ func (s *Service) registerDefaults() {
 
 	// 安全相关
 	s.Register("security_rate_limit_total", "限流触发总数", Counter)
+	s.Register("security_ratelimit_error_total", "限流器错误总数（fail-open 放行）", Counter)
 	s.Register("security_invalid_token_total", "无效 Token 总数", Counter)
 	s.Register("security_password_mismatch_total", "密码不匹配总数", Counter)
 

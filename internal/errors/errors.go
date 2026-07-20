@@ -55,6 +55,7 @@ const (
 	ErrCodeResetTokenExpired       ErrorCode = "RESET_TOKEN_EXPIRED"       // #nosec G101 -- 这是错误码常量，不是凭证
 	ErrCodeResetTokenUsed          ErrorCode = "RESET_TOKEN_USED"          // #nosec G101 -- 这是错误码常量，不是凭证
 	ErrCodeEmailRateLimitExceeded  ErrorCode = "EMAIL_RATE_LIMIT_EXCEEDED" // 邮件发送频率超限
+	ErrCodeEmailSendFailed         ErrorCode = "EMAIL_SEND_FAILED"         // 邮件发送失败（不暴露 SMTP 内部错误详情）
 
 	// OAuth相关错误
 	ErrCodeInvalidClient        ErrorCode = "INVALID_CLIENT"         // 客户端无效
@@ -238,6 +239,8 @@ var (
 	ErrResetTokenExpired       = New(ErrCodeResetTokenExpired, "重置令牌已过期", 400)
 	ErrResetTokenUsed          = New(ErrCodeResetTokenUsed, "重置令牌已被使用", 400)
 	ErrEmailRateLimitExceeded  = New(ErrCodeEmailRateLimitExceeded, "邮件发送过于频繁，请稍后再试", 429)
+	// 阶段 4 安全增强：邮件发送失败统一返回通用错误消息，不暴露 SMTP 内部信息（如服务器名、用户名、错误详情）
+	ErrEmailSendFailed         = New(ErrCodeEmailSendFailed, "邮件发送失败，请稍后重试", 502)
 
 	// OAuth错误
 	ErrInvalidClient        = New(ErrCodeInvalidClient, "无效的客户端", 400)

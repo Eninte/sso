@@ -65,6 +65,8 @@ const (
 	EventUserEnabled   AuditEventType = "admin.user_enabled"   // 管理员启用用户
 	EventUserDeleted   AuditEventType = "admin.user_deleted"   // 管理员删除用户
 	EventSystemCleanup AuditEventType = "admin.system_cleanup" // 管理员清理过期数据
+	// 阶段 4 安全增强：管理员查看审计日志这一动作本身也需要被审计，防止审计日志被静默窃取
+	EventAuditLogsViewed AuditEventType = "admin.audit_logs_viewed" // 管理员查看审计日志
 
 	EventSystemStart AuditEventType = "system.start" // 系统启动
 	EventSystemStop  AuditEventType = "system.stop"  // 系统停止

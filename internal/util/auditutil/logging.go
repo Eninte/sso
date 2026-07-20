@@ -12,6 +12,7 @@ import (
 	"time"
 
 	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/logging"
 	"github.com/example/sso/internal/model"
 )
 
@@ -29,6 +30,10 @@ var criticalEvents = map[string]bool{
 	string(model.EventUserDeleted):     true, // 管理员删除用户
 	string(model.EventUserDisabled):    true, // 管理员禁用用户
 	string(model.EventUserEnabled):     true, // 管理员启用用户
+	// 阶段 4 安全增强：密钥轮换/撤销属于高敏感操作，审计失败应同步返回错误
+	// 防止密钥已轮换但审计日志丢失，无法追踪密钥变更历史
+	string(model.EventKeyRotated):      true, // 密钥轮换
+	string(model.EventKeyRevoked):      true, // 密钥撤销
 }
 
 // IsCriticalEvent 判断事件是否为关键事件
@@ -63,6 +68,25 @@ func isNilAuditService(auditSvc AuditService) bool {
 	}
 	v := reflect.ValueOf(auditSvc)
 	return v.Kind() == reflect.Ptr && v.IsNil()
+}
+
+// sanitizeMetadata 对审计日志 metadata 进行脱敏
+// 在 JSON 序列化前调用，确保 token、password、secret 等敏感字段不会
+// 被写入 audit_logs.details 列导致明文泄露
+//
+// 阶段 4 安全增强：审计日志的 Details 字段以 JSON 字符串形式落库，
+// 历史上调用方可能在 metadata 中传入 access_token / refresh_token / 密码等敏感字段，
+// 若不脱敏将形成持久化的敏感信息泄露。这里复用 logging.SanitizeValue
+// 按 key 名进行统一脱敏，与日志输出的脱敏策略保持一致。
+func sanitizeMetadata(metadata map[string]interface{}) map[string]interface{} {
+	if len(metadata) == 0 {
+		return metadata
+	}
+	sanitized := make(map[string]interface{}, len(metadata))
+	for k, v := range metadata {
+		sanitized[k] = logging.SanitizeValue(k, v)
+	}
+	return sanitized
 }
 
 // LogWithFallback 使用回退处理的审计日志记录
@@ -134,25 +158,29 @@ func SafeAuditLog(ctx context.Context, auditSvc AuditService, event, userID stri
 
 	// 使用LogWithFallback确保审计失败不影响主流程
 	LogWithFallback(auditSvc, func() error {
+		// 阶段 4 安全增强：在序列化前对 metadata 脱敏
+		// 防止 token / password / secret 等敏感字段进入 audit_logs.details 列
+		sanitized := sanitizeMetadata(metadata)
+
 		// 构建审计日志对象
-		detailsJSON, _ := json.Marshal(metadata)
+		detailsJSON, _ := json.Marshal(sanitized)
 
 		// 从metadata中提取IP地址、用户代理等字段
 		ipAddress := ""
 		userAgent := ""
 		clientID := ""
 		success := true
-		if metadata != nil {
-			if ip, ok := metadata["ip_address"].(string); ok {
+		if sanitized != nil {
+			if ip, ok := sanitized["ip_address"].(string); ok {
 				ipAddress = ip
 			}
-			if ua, ok := metadata["user_agent"].(string); ok {
+			if ua, ok := sanitized["user_agent"].(string); ok {
 				userAgent = ua
 			}
-			if cid, ok := metadata["client_id"].(string); ok {
+			if cid, ok := sanitized["client_id"].(string); ok {
 				clientID = cid
 			}
-			if s, ok := metadata["success"].(bool); ok {
+			if s, ok := sanitized["success"].(bool); ok {
 				success = s
 			}
 		}
@@ -221,24 +249,26 @@ func CriticalAuditLog(ctx context.Context, auditSvc AuditService, event, userID 
 	}
 
 	// 构建审计日志对象
-	detailsJSON, _ := json.Marshal(metadata)
+	// 阶段 4 安全增强：在序列化前对 metadata 脱敏，防止敏感字段持久化到 audit_logs.details
+	sanitized := sanitizeMetadata(metadata)
+	detailsJSON, _ := json.Marshal(sanitized)
 
 	// 从metadata中提取IP地址、用户代理等字段
 	ipAddress := ""
 	userAgent := ""
 	clientID := ""
 	success := true
-	if metadata != nil {
-		if ip, ok := metadata["ip_address"].(string); ok {
+	if sanitized != nil {
+		if ip, ok := sanitized["ip_address"].(string); ok {
 			ipAddress = ip
 		}
-		if ua, ok := metadata["user_agent"].(string); ok {
+		if ua, ok := sanitized["user_agent"].(string); ok {
 			userAgent = ua
 		}
-		if cid, ok := metadata["client_id"].(string); ok {
+		if cid, ok := sanitized["client_id"].(string); ok {
 			clientID = cid
 		}
-		if s, ok := metadata["success"].(bool); ok {
+		if s, ok := sanitized["success"].(bool); ok {
 			success = s
 		}
 	}

@@ -29,9 +29,14 @@ var (
 // 包含所有服务运行所需的配置项
 type Config struct {
 	// 服务器配置
-	ServerHost string // 服务器监听地址
-	ServerPort string // 服务器监听端口
-	Env        string // 运行环境 (development/production)
+	ServerHost    string // 服务器监听地址
+	ServerPort    string // 服务器监听端口
+	Env           string // 运行环境 (development/production)
+	PublicBaseURL string // 公共基础URL（用于邮件链接等对外暴露场景，必须 HTTPS）
+
+	// 阶段 4 配置项：用于对外暴露场景
+	// 若为空，回退到 BaseURL()（开发环境友好）
+	// 生产环境必须设置为 https:// 开头
 
 	// 数据库配置
 	DBHost     string // 数据库主机
@@ -132,7 +137,8 @@ func Load() (*Config, error) {
 		// 服务器配置
 		ServerHost: getEnv("SERVER_HOST", "0.0.0.0"),
 		ServerPort: getEnv("SERVER_PORT", "9090"),
-		Env:        getEnv("SERVER_ENV", "development"),
+		Env:           getEnv("SERVER_ENV", "development"),
+		PublicBaseURL: os.Getenv("PUBLIC_BASE_URL"), // 阶段 4：对外暴露场景的公共 URL（生产必须 HTTPS）
 
 		// 数据库配置
 		DBHost:     getEnv("DB_HOST", "localhost"),
@@ -242,12 +248,13 @@ func validateDatabaseConfig(c *Config) error {
 	}
 
 	// 生产环境建议启用数据库SSL（LAN部署时允许disable）
-	if c.Env == "production" && c.DBSSLMode == "disable" {
+	// 阶段 4 安全增强：拒绝 prefer（若服务端不支持 SSL 会降级为明文，存在 MITM 风险）
+	if c.Env == "production" && (c.DBSSLMode == "disable" || c.DBSSLMode == "prefer" || c.DBSSLMode == "allow") {
 		if c.LANDeployment {
-			slog.Warn("生产环境数据库未启用SSL（LAN部署模式）", "ssl_mode", c.DBSSLMode)
+			slog.Warn("生产环境数据库未启用强制SSL（LAN部署模式）", "ssl_mode", c.DBSSLMode)
 		} else {
-			slog.Error("生产环境数据库必须启用SSL", "ssl_mode", c.DBSSLMode)
-			return fmt.Errorf("DB_SSL_MODE cannot be 'disable' in production, please set to 'require' or higher")
+			slog.Error("生产环境数据库必须启用强制SSL", "ssl_mode", c.DBSSLMode)
+			return fmt.Errorf("DB_SSL_MODE must be 'require' or higher in production (current: %s)", c.DBSSLMode)
 		}
 	}
 
@@ -292,8 +299,13 @@ func validateJWTConfig(c *Config) error {
 // validateSecurityConfig 验证安全配置：bcrypt cost、限流、登录保护
 func validateSecurityConfig(c *Config) error {
 	// 验证bcrypt cost范围
-	if c.BcryptCost < 4 || c.BcryptCost > 31 {
-		slog.Warn("bcrypt cost 超出推荐范围 (4-31)", "cost", c.BcryptCost)
+	// 阶段 4 安全增强：bcrypt 算法上限为 31，超出会导致 bcrypt 调用 panic，拒绝启动
+	if c.BcryptCost > 31 {
+		slog.Error("bcrypt cost 超出算法上限 (4-31)，拒绝启动", "cost", c.BcryptCost)
+		return fmt.Errorf("BCRYPT_COST must be <= 31 (bcrypt algorithm limit), current value: %d", c.BcryptCost)
+	}
+	if c.BcryptCost < 4 {
+		slog.Warn("bcrypt cost 低于推荐下限 (4)", "cost", c.BcryptCost)
 	}
 
 	// 生产环境必须使用足够强的bcrypt cost
@@ -377,9 +389,54 @@ func validateProductionConfig(c *Config) error {
 	}
 
 	// 检查Metrics认证配置
-	if c.MetricsUsername != "" && c.MetricsPassword == "" {
-		slog.Error("生产环境配置了METRICS_USERNAME但未设置METRICS_PASSWORD")
-		return fmt.Errorf("METRICS_PASSWORD must be set when METRICS_USERNAME is configured in production")
+	// 阶段 4 安全增强：生产环境必须同时设置 METRICS_USERNAME 和 METRICS_PASSWORD
+	// 否则 /metrics 端点完全无认证，暴露 Prometheus 指标
+	if c.MetricsUsername == "" || c.MetricsPassword == "" {
+		if lanMode {
+			slog.Warn("生产环境未配置 METRICS 认证（LAN部署模式）")
+		} else {
+			slog.Error("生产环境必须配置 METRICS_USERNAME 和 METRICS_PASSWORD")
+			return fmt.Errorf("METRICS_USERNAME and METRICS_PASSWORD must both be set in production")
+		}
+	}
+
+	// 阶段 4 安全增强：Redis 启用时强制密码非空
+	if c.RedisEnable && c.RedisPassword == "" {
+		if lanMode {
+			slog.Warn("生产环境启用 Redis 但未设置 REDIS_PASSWORD（LAN部署模式）")
+		} else {
+			slog.Error("生产环境启用 Redis 时必须设置 REDIS_PASSWORD")
+			return fmt.Errorf("REDIS_PASSWORD must be set when REDIS_ENABLE=true in production")
+		}
+	}
+
+	// 阶段 4 安全增强：PUBLIC_BASE_URL 必须设置且为 HTTPS
+	// 防止邮件链接中 token 在明文 HTTP 传输中被窃取
+	if c.PublicBaseURL == "" {
+		if lanMode {
+			slog.Warn("生产环境未设置 PUBLIC_BASE_URL（LAN部署模式），邮件链接将使用 BaseURL()")
+		} else {
+			slog.Error("生产环境必须设置 PUBLIC_BASE_URL")
+			return fmt.Errorf("PUBLIC_BASE_URL must be set in production")
+		}
+	} else if !strings.HasPrefix(c.PublicBaseURL, "https://") {
+		if lanMode {
+			slog.Warn("生产环境 PUBLIC_BASE_URL 非 HTTPS scheme（LAN部署模式）", "public_base_url", c.PublicBaseURL)
+		} else {
+			slog.Error("生产环境 PUBLIC_BASE_URL 必须为 HTTPS scheme", "public_base_url", c.PublicBaseURL)
+			return fmt.Errorf("PUBLIC_BASE_URL must start with 'https://' in production (current: %s)", c.PublicBaseURL)
+		}
+	}
+
+	// 阶段 4 安全增强：JWT 私钥文件权限校验
+	// 私钥必须仅所有者可读写（chmod 600），否则拒绝启动
+	if err := validateJWTPrivateKeyPermissions(c); err != nil {
+		if lanMode {
+			slog.Warn("生产环境 JWT 私钥权限校验失败（LAN部署模式）", "error", err)
+		} else {
+			slog.Error("生产环境 JWT 私钥权限校验失败", "error", err)
+			return err
+		}
 	}
 
 	// 检查MFA恢复码HMAC密钥（生产环境强制要求）
@@ -400,6 +457,43 @@ func validateProductionConfig(c *Config) error {
 			"init_listen_addr", c.InitListenAddr)
 	}
 
+	return nil
+}
+
+// validateJWTPrivateKeyPermissions 校验 JWT 私钥文件权限
+// 阶段 4 安全增强：私钥文件必须仅所有者可读写（mode & 0077 == 0）
+// 容器环境或 STRICT_KEY_PERMISSIONS=false 时跳过校验（与 keyloader.go 行为一致）
+func validateJWTPrivateKeyPermissions(c *Config) error {
+	// STRICT_KEY_PERMISSIONS=false 时跳过（与 keyloader.go 行为一致）
+	if os.Getenv("STRICT_KEY_PERMISSIONS") == "false" {
+		return nil
+	}
+
+	// 容器环境跳过（Kubernetes Secret 挂载默认权限 0644）
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return nil
+	}
+
+	// 解析私钥路径（支持相对路径）
+	keyPath := c.JWTPrivateKeyPath
+	if !filepath.IsAbs(keyPath) {
+		// 相对路径基于当前工作目录解析
+		absPath, err := filepath.Abs(keyPath)
+		if err != nil {
+			return fmt.Errorf("resolve JWT private key path failed: %w", err)
+		}
+		keyPath = absPath
+	}
+
+	info, err := os.Stat(keyPath)
+	if err != nil {
+		// 文件不存在不在此处报错（keyloader 会在加载时校验）
+		return nil
+	}
+	mode := info.Mode().Perm()
+	if mode&0077 != 0 {
+		return fmt.Errorf("JWT private key file permissions too open (mode=%o), require chmod 600: %s", mode, keyPath)
+	}
 	return nil
 }
 
@@ -469,6 +563,16 @@ func (c *Config) RedisURL() string {
 // BaseURL 构建服务基础URL
 func (c *Config) BaseURL() string {
 	return "http://" + c.ServerHost + ":" + c.ServerPort
+}
+
+// PublicBaseURLOrFallback 返回对外暴露场景的公共 URL
+// 阶段 4：优先使用 PUBLIC_BASE_URL，未设置时回退到 BaseURL()
+// 生产环境校验在 validateProductionConfig 中强制要求 HTTPS scheme
+func (c *Config) PublicBaseURLOrFallback() string {
+	if c.PublicBaseURL != "" {
+		return c.PublicBaseURL
+	}
+	return c.BaseURL()
 }
 
 // IsDevelopment 判断是否为开发环境

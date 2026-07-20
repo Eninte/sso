@@ -5,6 +5,7 @@ package middleware
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"strconv"
@@ -52,6 +53,8 @@ type DistributedRateLimiter struct {
 	limit       int           // 每个时间窗口的请求数
 	window      time.Duration // 时间窗口
 	keyPrefix   string        // Redis键前缀
+	metricFunc  func()        // 限流触发回调（用于指标计数）
+	errorFunc   func()        // 阶段 4：fail-open 错误回调（用于指标计数）
 }
 
 // NewDistributedRateLimiter 创建分布式限流器
@@ -68,6 +71,20 @@ func NewDistributedRateLimiter(redisClient *redis.Client, limit int, window time
 	}
 }
 
+// WithMetrics 设置限流触发回调（与本地限流器接口一致）
+// 当请求被限流时调用此函数
+func (drl *DistributedRateLimiter) WithMetrics(metricFunc func()) *DistributedRateLimiter {
+	drl.metricFunc = metricFunc
+	return drl
+}
+
+// WithErrorCallback 设置 fail-open 时的错误回调（用于指标计数）
+// 阶段 4 安全增强：fail-open 时必须记录日志和指标，禁止忽略错误（AGENTS.md 8.4）
+func (drl *DistributedRateLimiter) WithErrorCallback(fn func()) *DistributedRateLimiter {
+	drl.errorFunc = fn
+	return drl
+}
+
 // Middleware 分布式限流中间件
 // 检查客户端请求频率，超过限制返回429
 func (drl *DistributedRateLimiter) Middleware(next http.Handler) http.Handler {
@@ -78,7 +95,15 @@ func (drl *DistributedRateLimiter) Middleware(next http.Handler) http.Handler {
 		// 检查是否超过限制
 		allowed, remaining, resetTime, err := drl.Allow(r.Context(), clientIP)
 		if err != nil {
-			// Redis错误时，默认允许请求（fail-open）
+			// 阶段 4 安全增强：fail-open 时必须记录日志和指标
+			// 满足 AGENTS.md 第 8.4 节"禁止忽略错误"规则
+			slog.Error("限流 Redis 错误，fail-open 放行",
+				"error", err,
+				"client_ip", clientIP,
+				"key_prefix", drl.keyPrefix)
+			if drl.errorFunc != nil {
+				drl.errorFunc()
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -90,6 +115,10 @@ func (drl *DistributedRateLimiter) Middleware(next http.Handler) http.Handler {
 
 		if !allowed {
 			w.Header().Set("Retry-After", strconv.Itoa(int(drl.window.Seconds())))
+			// 阶段 4：限流触发时记录指标
+			if drl.metricFunc != nil {
+				drl.metricFunc()
+			}
 			writeError(w, http.StatusTooManyRequests, "请求过于频繁，请稍后再试")
 			return
 		}
@@ -131,6 +160,7 @@ func (drl *DistributedRateLimiter) Allow(ctx context.Context, clientIP string) (
 	).Result()
 	if err != nil {
 		// Redis错误时fail-open，允许请求通过
+		// 错误日志和指标在 Middleware 中处理，避免 Allow 函数被外部调用时重复记录
 		return true, 0, time.Time{}, err
 	}
 

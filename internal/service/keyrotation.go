@@ -81,10 +81,18 @@ func (s *KeyRotationService) RotateKey(ctx context.Context) (*model.KeyVersion, 
 		}
 	}
 
-	// 使用统一的审计日志工具记录密钥轮换事件
-	auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventKeyRotated), "", map[string]interface{}{
+	// 阶段 4 安全增强：密钥轮换属于高敏感操作，使用 CriticalAuditLog 同步记录
+	// 失败时返回错误供调用方决策（虽然密钥已生效无法回滚，但应明确告知调用方审计缺失）
+	if err := auditutil.CriticalAuditLog(ctx, s.auditSvc, string(model.EventKeyRotated), "", map[string]interface{}{
 		"key_id": newKeyVersion.ID,
-	})
+	}); err != nil {
+		// 密钥已生效无法回滚，但记录审计失败错误，便于运维追溯
+		slog.Error("密钥轮换审计日志记录失败（密钥已生效，无法回滚）",
+			"error", err,
+			"key_id", newKeyVersion.ID,
+		)
+		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "密钥轮换审计日志记录失败", 500, err)
+	}
 
 	slog.Info("key rotation completed",
 		"new_key_id", newKeyVersion.ID,
@@ -113,10 +121,17 @@ func (s *KeyRotationService) CleanupExpiredKeys(ctx context.Context) (int, error
 			cleanedCount++
 			slog.Info("revoked expired key", "key_id", key.ID)
 
-			// 使用统一的审计日志工具记录密钥撤销事件
-			auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventKeyRevoked), "", map[string]interface{}{
+			// 阶段 4 安全增强：密钥撤销使用 CriticalAuditLog 同步记录
+			// 失败时返回错误，调用方可决定是否继续清理后续密钥
+			if err := auditutil.CriticalAuditLog(ctx, s.auditSvc, string(model.EventKeyRevoked), "", map[string]interface{}{
 				"key_id": key.ID,
-			})
+			}); err != nil {
+				slog.Error("密钥撤销审计日志记录失败",
+					"error", err,
+					"key_id", key.ID,
+				)
+				return cleanedCount, apperrors.Wrap(apperrors.ErrCodeInternal, "密钥撤销审计日志记录失败", 500, err)
+			}
 		}
 	}
 
@@ -139,10 +154,17 @@ func (s *KeyRotationService) RevokeKey(ctx context.Context, keyID string) error 
 
 	s.jwtSvc.RemoveKey(keyID)
 
-	// 使用统一的审计日志工具记录密钥撤销事件
-	auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventKeyRevoked), "", map[string]interface{}{
+	// 阶段 4 安全增强：密钥撤销使用 CriticalAuditLog 同步记录
+	// 失败时返回错误供调用方决策
+	if err := auditutil.CriticalAuditLog(ctx, s.auditSvc, string(model.EventKeyRevoked), "", map[string]interface{}{
 		"key_id": keyID,
-	})
+	}); err != nil {
+		slog.Error("密钥撤销审计日志记录失败",
+			"error", err,
+			"key_id", keyID,
+		)
+		return apperrors.Wrap(apperrors.ErrCodeInternal, "密钥撤销审计日志记录失败", 500, err)
+	}
 
 	slog.Info("key revoked", "key_id", keyID)
 

@@ -270,7 +270,24 @@ func (s *AdminService) DeleteUser(ctx context.Context, userID string) error {
 
 // GetAuditLogs 获取审计日志
 func (s *AdminService) GetAuditLogs(ctx context.Context, offset, limit int, eventType string) ([]*model.AuditLog, int, error) {
-	return s.store.ListAuditLogs(ctx, "", eventType, offset, limit)
+	logs, total, err := s.store.ListAuditLogs(ctx, "", eventType, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// 阶段 4 安全增强：管理员查看审计日志这一动作本身也需要被审计
+	// 防止审计日志被静默窃取（如管理员账号被盗后批量下载审计日志）
+	// 失败不影响主流程，使用 SafeAuditLog
+	if s.auditSvc != nil {
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventAuditLogsViewed), "", map[string]interface{}{
+			"ip_address": clientIPFromContext(ctx),
+			"event_type": eventType,
+			"page_size":  limit,
+			"offset":     offset,
+		})
+	}
+
+	return logs, total, nil
 }
 
 // ============================================================================
