@@ -369,16 +369,79 @@ func TestOAuthService_ExchangeAuthorizationCode(t *testing.T) {
 // ============================================================================
 
 func TestOAuthService_RevokeToken(t *testing.T) {
-	oauthSvc, _ := createTestOAuthService(t)
+	oauthSvc, storeInst := createTestOAuthService(t)
 	ctx := context.Background()
 
-	t.Run("撤销不存在的Token返回错误", func(t *testing.T) {
+	// 阶段 2.4：RevokeToken 行为对齐 Postgres
+	//   - 不存在的 token：不报错（UPDATE 0 行也返回 nil）
+	//   - 已撤销的 token：不报错（不覆盖原撤销时间，幂等）
+	//   - 成功撤销：清缓存 + 记审计
+	t.Run("撤销不存在的Token不报错（幂等）", func(t *testing.T) {
 		err := oauthSvc.RevokeToken(ctx, "nonexistent-token")
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
-	t.Run("撤销空Token返回错误", func(t *testing.T) {
+	t.Run("撤销空Token不报错（幂等）", func(t *testing.T) {
 		err := oauthSvc.RevokeToken(ctx, "")
+		assert.NoError(t, err)
+	})
+
+	t.Run("成功撤销已存在的Token", func(t *testing.T) {
+		// 准备一个有效 token
+		token := &model.Token{
+			ID:          "token-test-id",
+			AccessToken: "valid-access-token",
+			RefreshToken: "valid-refresh-token",
+			UserID:      "user-test",
+			ExpiresAt:   time.Now().Add(time.Hour),
+			CreatedAt:   time.Now(),
+		}
+		require.NoError(t, storeInst.StoreToken(ctx, token))
+
+		err := oauthSvc.RevokeToken(ctx, "valid-access-token")
+		assert.NoError(t, err)
+
+		// 验证 token 已被撤销
+		revoked, err := storeInst.GetTokenByAccessToken(ctx, "valid-access-token")
+		require.NoError(t, err)
+		assert.NotNil(t, revoked.RevokedAt)
+	})
+
+	t.Run("重复撤销不覆盖原撤销时间", func(t *testing.T) {
+		token := &model.Token{
+			ID:          "token-duplicate-id",
+			AccessToken: "dup-access-token",
+			RefreshToken: "dup-refresh-token",
+			UserID:      "user-dup",
+			ExpiresAt:   time.Now().Add(time.Hour),
+			CreatedAt:   time.Now(),
+		}
+		require.NoError(t, storeInst.StoreToken(ctx, token))
+
+		// 第一次撤销
+		require.NoError(t, oauthSvc.RevokeToken(ctx, "dup-access-token"))
+		first, _ := storeInst.GetTokenByAccessToken(ctx, "dup-access-token")
+		require.NotNil(t, first.RevokedAt)
+		firstRevokedAt := *first.RevokedAt
+
+		// 等待一毫秒确保时间戳不同
+		time.Sleep(time.Millisecond)
+
+		// 第二次撤销
+		require.NoError(t, oauthSvc.RevokeToken(ctx, "dup-access-token"))
+		second, _ := storeInst.GetTokenByAccessToken(ctx, "dup-access-token")
+		require.NotNil(t, second.RevokedAt)
+
+		// 阶段 2.4：验证撤销时间未被覆盖
+		assert.Equal(t, firstRevokedAt, *second.RevokedAt,
+			"重复撤销不应覆盖首次撤销时间戳")
+	})
+
+	t.Run("撤销失败返回错误", func(t *testing.T) {
+		storeInst.RevokeTokenErr = assert.AnError
+		defer func() { storeInst.RevokeTokenErr = nil }()
+
+		err := oauthSvc.RevokeToken(ctx, "any-token")
 		assert.Error(t, err)
 	})
 }

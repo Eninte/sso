@@ -629,8 +629,11 @@ func TestAuthService_LogoutWithAudit(t *testing.T) {
 			IPAddress: "192.168.1.1",
 		}
 		err := authSvc.LogoutWithAudit(ctx, "invalid-token", auditCtx)
-		// 应该返回错误（token无效）
-		assert.Error(t, err)
+		// 阶段 2.4：撤销端点幂等设计（RFC 7009）
+		// - JWT 无效不阻止撤销流程，避免泄露 token 有效性
+		// - store.RevokeToken 对不存在的 token 不报错（与 Postgres 行为对齐）
+		// 因此整体返回 nil，符合 OAuth2 token revocation 端点规范
+		assert.NoError(t, err)
 	})
 }
 
@@ -1543,10 +1546,13 @@ func TestAuthService_RevokeTokenWithRetry_ContextCancellation(t *testing.T) {
 
 // TestAuthService_RevokeTokenWithRetry_TokenNotFound 测试Token不存在的场景
 // 验证: 需求 1.1, 1.6, 1.7
+//
+// 阶段 2.4：根据 RFC 7009 §2.2 幂等设计，撤销不存在的 token 不报错
+// （UPDATE 0 行也返回 nil，与 Postgres 行为对齐）
 func TestAuthService_RevokeTokenWithRetry_TokenNotFound(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("Token不存在时返回错误", func(t *testing.T) {
+	t.Run("Token不存在时不报错（RFC 7009 幂等）", func(t *testing.T) {
 		storeInst := mock.New()
 		mockCache := NewMockCache()
 
@@ -1569,8 +1575,7 @@ func TestAuthService_RevokeTokenWithRetry_TokenNotFound(t *testing.T) {
 		// 执行撤销（Token不存在）
 		err = authSvc.Logout(ctx, "nonexistent-token")
 
-		// 验证返回错误
-		require.Error(t, err)
-		assert.NotContains(t, err.Error(), "登出失败")
+		// 阶段 2.4：撤销不存在的 token 不报错（RFC 7009 幂等设计）
+		assert.NoError(t, err)
 	})
 }

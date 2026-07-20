@@ -487,10 +487,23 @@ func (s *OAuthService) logAuthCodeInvalid(ctx context.Context, userID, clientID,
 }
 
 // RevokeToken 撤销Token
+//
+// 阶段 2.4：统一撤销路径
+//   - 调用 store.RevokeToken 撤销
+//   - 同步清 token 缓存，确保撤销立即生效（与 AuthService.LogoutWithAudit 行为一致）
+//   - 记录审计日志
+//   - 不带重试（OAuth 撤销失败由调用方决定是否重试，避免掩盖 DB 异常）
 func (s *OAuthService) RevokeToken(ctx context.Context, token string) error {
-	err := s.store.RevokeToken(ctx, token)
-	if err != nil {
+	if err := s.store.RevokeToken(ctx, token); err != nil {
 		return serviceutil.WrapServiceError("撤销Token", err)
+	}
+
+	// 阶段 2.4：同步清 token 缓存
+	if s.cache != nil {
+		cacheKey := cache.TokenKey(token)
+		if err := s.cache.Delete(ctx, cacheKey); err != nil {
+			slog.Warn("撤销Token时清除缓存失败", "error", err)
+		}
 	}
 
 	// 使用统一的审计日志工具记录Token撤销事件

@@ -238,8 +238,13 @@ func (s *Store) RotateRefreshToken(ctx context.Context, oldRefreshToken string, 
 }
 
 // RevokeToken 撤销Token
+//
+// 阶段 2.4：添加 WHERE revoked_at IS NULL 条件
+//   - 避免覆盖首次撤销时间戳（审计友好）
+//   - token 不存在或已撤销时不报错（与 Mock 实现对齐）
+//   - 调用方需通过 AuthMiddleware 缓存失效感知撤销生效
 func (s *Store) RevokeToken(ctx context.Context, accessToken string) error {
-	query := `UPDATE tokens SET revoked_at = $2 WHERE access_token = $1`
+	query := `UPDATE tokens SET revoked_at = $2 WHERE access_token = $1 AND revoked_at IS NULL`
 	_, err := s.db.ExecContext(ctx, query, accessToken, time.Now())
 	return err
 }

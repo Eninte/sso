@@ -90,6 +90,14 @@ func (s *AuthService) handleLoginFailure(ctx context.Context, user *model.User, 
 			})
 		}
 		logger.Warn("账户因多次登录失败被锁定", "user_id", user.ID, "attempts", attempts)
+
+		// 阶段 2.4：账户锁定时撤销所有 token，防止攻击者已获取的 token 继续使用
+		// 失败不影响主流程（锁定已生效），仅记录警告日志
+		if err := s.store.RevokeAllUserTokens(ctx, user.ID); err != nil {
+			logger.Warn("账户锁定时撤销用户Token失败", "error", err, "user_id", user.ID)
+		}
+		// 同步清 token 缓存，确保撤销立即生效
+		s.invalidateUserTokenCache(ctx, user.ID)
 	}
 
 	// 记录登录失败指标

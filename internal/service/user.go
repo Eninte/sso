@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/example/sso/internal/cache"
 	"github.com/example/sso/internal/common"
 	"github.com/example/sso/internal/crypto"
 	apperrors "github.com/example/sso/internal/errors"
@@ -53,6 +54,7 @@ type UserService struct {
 	baseURL        string
 	auditSvc       *AuditService
 	emailRateLimit *EmailRateLimiter
+	cache          cache.Cache // 阶段 2.4：用于在密码变更时清 token 缓存
 }
 
 func NewUserService(
@@ -74,6 +76,13 @@ func NewUserService(
 // WithEmailRateLimit 设置邮件限流器
 func (s *UserService) WithEmailRateLimit(rateLimiter *EmailRateLimiter) *UserService {
 	s.emailRateLimit = rateLimiter
+	return s
+}
+
+// WithCache 设置缓存服务（阶段 2.4）
+// 用于在密码变更时清 token 缓存，确保撤销立即生效
+func (s *UserService) WithCache(cacheSvc cache.Cache) *UserService {
+	s.cache = cacheSvc
 	return s
 }
 
@@ -297,6 +306,8 @@ func (s *UserService) ResetPasswordWithAudit(ctx context.Context, userID, token,
 	if err := s.store.RevokeAllUserTokens(ctx, userID); err != nil {
 		logger.Warn("撤销用户Token失败", "error", err, "user_id", userID)
 	}
+	// 阶段 2.4：统一清 token 缓存，确保撤销立即生效
+	serviceutil.InvalidateUserTokenCache(ctx, s.cache, userID)
 
 	// 使用统一的审计日志工具记录密码重置事件
 	auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventPasswordReset), userID, map[string]interface{}{
@@ -344,6 +355,15 @@ func (s *UserService) ChangePasswordWithAudit(ctx context.Context, userID, oldPa
 	if err := s.store.Update(ctx, user); err != nil {
 		return serviceutil.WrapServiceError("更新用户", err)
 	}
+
+	// 阶段 2.4：修改密码后撤销所有 token，强制用户重新登录
+	// 与 ResetPasswordWithAudit 行为一致，防止旧密码泄露后 access_token 仍可用
+	// 失败不影响主流程（密码已更新成功），仅记录警告日志
+	if err := s.store.RevokeAllUserTokens(ctx, userID); err != nil {
+		slog.Warn("修改密码后撤销用户Token失败", "error", err, "user_id", userID)
+	}
+	// 同步清 token 缓存，确保撤销立即生效
+	serviceutil.InvalidateUserTokenCache(ctx, s.cache, userID)
 
 	// 使用统一的审计日志工具记录密码修改成功事件
 	auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventPasswordChanged), userID, map[string]interface{}{

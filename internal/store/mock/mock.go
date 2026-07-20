@@ -535,6 +535,11 @@ func (m *Store) GetTokenByAccessToken(ctx context.Context, accessToken string) (
 }
 
 // RevokeToken 撤销Token
+//
+// 阶段 2.4：与 Postgres 行为对齐
+//   - token 不存在时不报错（Postgres UPDATE 0 行也返回 nil）
+//   - 已撤销时不覆盖原撤销时间（与 SQL WHERE revoked_at IS NULL 一致）
+//   - 仅当 RevokeTokenErr 注入时返回注入错误
 func (m *Store) RevokeToken(ctx context.Context, accessToken string) error {
 	if m.RevokeTokenErr != nil {
 		return m.RevokeTokenErr
@@ -545,7 +550,13 @@ func (m *Store) RevokeToken(ctx context.Context, accessToken string) error {
 
 	token, ok := m.tokens[accessToken]
 	if !ok {
-		return store.ErrNotFound
+		// 与 Postgres 行为对齐：token 不存在时不报错
+		return nil
+	}
+
+	// 仅在未撤销时设置撤销时间，避免覆盖首次撤销时间戳
+	if token.RevokedAt != nil {
+		return nil
 	}
 
 	now := time.Now()

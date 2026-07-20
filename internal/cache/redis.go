@@ -70,6 +70,18 @@ func TokenKey(accessToken string) string {
 	return TokenCachePrefix + accessToken
 }
 
+// UserTokenKey 生成用户维度 token 缓存键前缀
+//
+// 阶段 2.4：用于按 user_id 维度批量清理 token 缓存
+// 替代旧的 DeletePattern("token:*")，避免影响其他用户
+//
+// 使用方式：
+//
+//	cache.DeletePattern(ctx, cache.UserTokenKey(userID) + "*")
+func UserTokenKey(userID string) string {
+	return TokenCachePrefix + "user:" + userID + ":"
+}
+
 // UserIDKey 生成用户ID缓存键
 func UserIDKey(userID string) string {
 	return UserCachePrefix + userID

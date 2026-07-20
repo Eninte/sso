@@ -147,6 +147,8 @@ func initServices(cfg *config.Config, version, buildTime string) (*Services, *sq
 
 	// ==== 初始化业务服务（带缓存） ====
 	userSvc := service.NewUserService(store, passwordSvc, emailSvc, cfg.BaseURL())
+	// 阶段 2.4：注入 cache 用于 ChangePassword/ResetPassword 时清 token 缓存
+	userSvc.WithCache(cacheSvc)
 	// 仅在限流启用时配置邮件限流器（RATE_LIMIT_REQUESTS <= 0 表示禁用所有限流）
 	if cfg.RateLimitRequests > 0 {
 		userSvc.WithEmailRateLimit(service.NewEmailRateLimiter(cacheSvc))

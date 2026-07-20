@@ -83,6 +83,9 @@ func (s *AuthService) handleRefreshTokenReplay(ctx context.Context, userID, refr
 		return serviceutil.WrapServiceError("撤销全部Token", err)
 	}
 
+	// 阶段 2.4：同步清缓存，避免 15 分钟内被撤销 token 仍可使用
+	s.invalidateUserTokenCache(ctx, userID)
+
 	return apperrors.ErrTokenRotated
 }
 
@@ -260,6 +263,14 @@ func (s *AuthService) RefreshTokenWithClientID(ctx context.Context, refreshToken
 // 登出功能
 // ============================================================================
 
+// invalidateUserTokenCache 失效该用户所有 token 的缓存
+//
+// 阶段 2.4：委托到 serviceutil.InvalidateUserTokenCache 统一实现
+// 详见 serviceutil 包文档
+func (s *AuthService) invalidateUserTokenCache(ctx context.Context, userID string) {
+	serviceutil.InvalidateUserTokenCache(ctx, s.cache, userID)
+}
+
 // LogoutWithAudit 用户登出（带审计日志）
 func (s *AuthService) LogoutWithAudit(ctx context.Context, accessToken string, auditCtx *AuditContext) error {
 	logger := logging.WithContext(ctx)
@@ -300,12 +311,8 @@ func (s *AuthService) LogoutAllWithAudit(ctx context.Context, userID string, aud
 		return serviceutil.WrapServiceError("登出所有设备", err)
 	}
 
-	// 清除该用户相关的缓存（失败不影响主流程）
-	if s.cache != nil {
-		if err := s.cache.DeletePattern(ctx, cache.TokenCachePrefix+"*"); err != nil {
-			logger.Warn("清除用户Token缓存失败", "error", err, "user_id", userID)
-		}
-	}
+	// 阶段 2.4：统一调用 invalidateUserTokenCache 清理缓存
+	s.invalidateUserTokenCache(ctx, userID)
 
 	s.incrementMetric("auth_logout_all_total")
 	if auditCtx != nil {

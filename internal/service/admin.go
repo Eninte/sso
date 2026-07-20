@@ -180,6 +180,9 @@ func (s *AdminService) DisableUser(ctx context.Context, userID string) error {
 		slog.Warn("撤销用户Token失败", "error", err, "user_id", userID)
 	}
 
+	// 阶段 2.4：统一清 token 缓存（撤销后立即生效，避免 15 分钟延迟窗口）
+	serviceutil.InvalidateUserTokenCache(ctx, s.cache, userID)
+
 	// 失效缓存，确保用户状态变更立即生效
 	if s.cache != nil {
 		cacheKey := cache.UserIDKey(userID)
@@ -243,6 +246,9 @@ func (s *AdminService) DeleteUser(ctx context.Context, userID string) error {
 	if err := s.store.Delete(ctx, userID); err != nil {
 		return serviceutil.WrapServiceError("删除用户", err)
 	}
+
+	// 阶段 2.4：统一清 token 缓存（与 DisableUser 行为一致）
+	serviceutil.InvalidateUserTokenCache(ctx, s.cache, userID)
 
 	// 失效缓存，确保删除后立即返回404
 	if s.cache != nil {
