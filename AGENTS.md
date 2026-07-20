@@ -318,6 +318,7 @@ Model 结构体必须有 JSON 标签，使用 `omitempty` 处理可选字段。
 - 每个测试独立创建 mock，禁止共享全局状态
 - 精确断言：`assert.Equal(t, http.StatusBadRequest, code)`，避免 `assert.True(t, code >= 400)`
 - **禁止用 `t.Skip()` 逃避未实现功能**；唯一允许的 skip 是真实 DB/Redis 环境未配置时
+- **Mock 禁止原地修改共享对象**：`internal/store/mock` 的 map 存的是 `*model.*` 共享指针，getter 返回同一指针。写方法（如 `RotateRefreshToken`）不得原地修改已存入的对象——必须先浅拷贝、修改副本、再替换 map 中的指针（拷贝-替换），否则调用方锁外读取会与原地写产生数据竞争（CI `-race` 会检出）。此语义也与真实 DB 行更新一致：已取出的 struct 不应随后续写入而变化
 
 ### 7.6 Lint 配置
 

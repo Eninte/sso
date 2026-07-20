@@ -40,6 +40,9 @@
 
 ### Fixed
 
+- **修复 mock `RotateRefreshToken` 原地写数据竞争**（CI `-race` 检出）：mock 的 map 存 `*model.Token` 共享指针且 getter 返回同一指针，原地修改 `oldToken` 与 service 层锁外读取 `tokenRecord.RevokedAt` 产生竞争；改为拷贝-替换，语义与真实 DB 行更新一致。防范规范已写入 `AGENTS.md` §7.5
+- 修复 `internal/config` 两个测试在 Windows 下因 `t.Cleanup(os.Chdir)` 注册早于 `t.TempDir()` 导致的临时目录清理失败（cleanup LIFO 顺序问题）
+- 修复 `Makefile test-coverage-full` 调用不存在的 `go tool cover -merge`：新增 `scripts/merge_coverage.go` 实现 coverprofile 块级并集合并
 - 修复服务器启动失败时 goroutine 中调用 `os.Exit(1)` 导致 `db.Close()` / `cacheSvc.Close()` 不执行的问题，改用 error channel 通知主 goroutine
 - 修复 `ForgotPassword` 所有错误分支返回 `nil` 导致生产环境无法排查数据库故障、token 生成失败等问题，添加 `slog` 日志
 - 修复 `gracefulShutdown` 未调用 `auditSvc.Close()` 导致 worker goroutine 丢失未写入审计日志的问题
