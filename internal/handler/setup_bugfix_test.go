@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -249,9 +250,12 @@ func TestPreservation_ValidTokenAllowsOperations(t *testing.T) {
 	assert.FileExists(t, envPath, ".env file should be created")
 
 	// Verify file permissions
-	info, err := os.Stat(envPath)
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0600), info.Mode().Perm(), ".env should have 0600 permissions")
+	// 阶段 D 预存问题修复：Windows 不支持 Unix 权限位，跳过断言
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(envPath)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0600), info.Mode().Perm(), ".env should have 0600 permissions")
+	}
 }
 
 // ============================================================================
@@ -326,9 +330,12 @@ func TestPreservation_ConfigSaveCreatesEnvFile(t *testing.T) {
 
 	// Expected: .env file created with 0600 permissions
 	assert.FileExists(t, envPath)
-	info, err := os.Stat(envPath)
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0600), info.Mode().Perm(), ".env should have 0600 permissions")
+	// 阶段 D 预存问题修复：Windows 不支持 Unix 权限位，跳过断言
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(envPath)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0600), info.Mode().Perm(), ".env should have 0600 permissions")
+	}
 }
 
 // TestPreservation_ConfigSaveInvalidatesToken tests that config save

@@ -134,11 +134,17 @@ func ValidateKeyPath(path string) error {
 		return fmt.Errorf("path cannot be empty")
 	}
 
-	cleanPath := filepath.Clean(path)
-
-	if !filepath.IsAbs(cleanPath) {
+	// 阶段 D 预存问题修复：跨平台绝对路径检测
+	// filepath.IsAbs 在 Windows 上对 "/app/keys" 返回 false（不识别为绝对路径），
+	// filepath.Clean 在 Windows 上还会将 "/app/keys" 转换为 "\app\keys"（丢失前导 /）。
+	// 但生产部署目标是 Linux 容器，白名单默认值与测试用例均使用 Unix 路径。
+	// 在 Clean 之前先检测原始路径是否以 / 开头（Unix 绝对路径），保证跨平台一致性。
+	isAbs := filepath.IsAbs(path) || strings.HasPrefix(path, "/")
+	if !isAbs {
 		return fmt.Errorf("absolute path is required")
 	}
+
+	cleanPath := filepath.Clean(path)
 
 	// 检查路径是否包含危险字符或模式
 	if strings.Contains(cleanPath, "..") {
@@ -176,8 +182,10 @@ func ValidateKeyPath(path string) error {
 		// dir 检查覆盖「白名单目录内的文件」场景（含符号链接解析后的真实路径）
 		// 添加路径分隔符检查防止前缀匹配绕过
 		// 例如: /app/keys 不应匹配 /app/keys_malicious
+		// 同时检查正斜杠和反斜杠分隔符以兼容 Windows 平台测试
 		if cleanPath == allowedDir || dir == allowedDir ||
-			strings.HasPrefix(dir, allowedDir+string(filepath.Separator)) {
+			strings.HasPrefix(dir, allowedDir+string(filepath.Separator)) ||
+			strings.HasPrefix(dir, allowedDir+"/") {
 			return nil
 		}
 	}
@@ -190,7 +198,13 @@ func ValidateKeyPath(path string) error {
 // 默认值：/app/keys, /keys, /etc/sso/keys, 当前工作目录/keys
 func getKeyPathWhitelist() []string {
 	// 默认允许的目录
-	defaultDirs := []string{"/app/keys", "/keys", "/etc/sso/keys"}
+	// 阶段 D 预存问题修复：对默认值也做 filepath.Clean，
+	// 保证与 ValidateKeyPath 中的 cleanPath 比较时路径分隔符一致
+	defaultDirs := []string{
+		filepath.Clean("/app/keys"),
+		filepath.Clean("/keys"),
+		filepath.Clean("/etc/sso/keys"),
+	}
 
 	// 添加当前工作目录的keys子目录（配置向导友好）
 	if cwd, err := os.Getwd(); err == nil {
@@ -209,7 +223,10 @@ func getKeyPathWhitelist() []string {
 	result := make([]string, 0, len(dirs))
 	for _, dir := range dirs {
 		dir = strings.TrimSpace(dir)
-		if dir != "" && filepath.IsAbs(dir) {
+		// 阶段 D 预存问题修复：跨平台绝对路径检测
+		// filepath.IsAbs 在 Windows 上对 "/custom/keys" 返回 false，
+		// 但白名单值与生产部署目标都是 Unix 路径，需识别为绝对路径
+		if dir != "" && (filepath.IsAbs(dir) || strings.HasPrefix(dir, "/")) {
 			result = append(result, filepath.Clean(dir))
 		}
 	}

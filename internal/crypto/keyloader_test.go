@@ -238,6 +238,7 @@ func TestLoadPublicKeyFromFile_InvalidKey(t *testing.T) {
 // ============================================================================
 
 func TestLoadPrivateKeyFromFile_PermissionTooOpen(t *testing.T) {
+	skipOnWindowsOrContainer(t)
 	t.Setenv("STRICT_KEY_PERMISSIONS", "true")
 	tmpDir := t.TempDir()
 
@@ -262,6 +263,7 @@ func TestLoadPrivateKeyFromFile_PermissionTooOpen(t *testing.T) {
 }
 
 func TestLoadPublicKeyFromFile_PermissionTooOpen(t *testing.T) {
+	skipOnWindowsOrContainer(t)
 	t.Setenv("STRICT_KEY_PERMISSIONS", "true")
 	tmpDir := t.TempDir()
 

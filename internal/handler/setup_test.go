@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -68,6 +69,8 @@ func TestValidateKeyPath(t *testing.T) {
 // ============================================================================
 
 func TestGetKeyPathWhitelist(t *testing.T) {
+	// 阶段 D 预存问题修复：filepath.Clean 在 Windows 上将 / 转为 \，
+	// 测试期望值需用 filepath.Clean 规范化以跨平台一致
 	t.Run("使用默认白名单", func(t *testing.T) {
 		// 清除环境变量
 		os.Unsetenv("KEY_PATH_WHITELIST")
@@ -76,9 +79,9 @@ func TestGetKeyPathWhitelist(t *testing.T) {
 
 		// 默认包含3个固定路径 + 当前工作目录/keys
 		assert.GreaterOrEqual(t, len(whitelist), 3)
-		assert.Contains(t, whitelist, "/app/keys")
-		assert.Contains(t, whitelist, "/keys")
-		assert.Contains(t, whitelist, "/etc/sso/keys")
+		assert.Contains(t, whitelist, filepath.Clean("/app/keys"))
+		assert.Contains(t, whitelist, filepath.Clean("/keys"))
+		assert.Contains(t, whitelist, filepath.Clean("/etc/sso/keys"))
 	})
 
 	t.Run("自定义单个路径", func(t *testing.T) {
@@ -88,7 +91,7 @@ func TestGetKeyPathWhitelist(t *testing.T) {
 		whitelist := getKeyPathWhitelist()
 
 		assert.Len(t, whitelist, 1)
-		assert.Contains(t, whitelist, "/custom/keys")
+		assert.Contains(t, whitelist, filepath.Clean("/custom/keys"))
 	})
 
 	t.Run("自定义多个路径", func(t *testing.T) {
@@ -98,9 +101,9 @@ func TestGetKeyPathWhitelist(t *testing.T) {
 		whitelist := getKeyPathWhitelist()
 
 		assert.Len(t, whitelist, 3)
-		assert.Contains(t, whitelist, "/custom/keys")
-		assert.Contains(t, whitelist, "/opt/sso/keys")
-		assert.Contains(t, whitelist, "/var/lib/sso")
+		assert.Contains(t, whitelist, filepath.Clean("/custom/keys"))
+		assert.Contains(t, whitelist, filepath.Clean("/opt/sso/keys"))
+		assert.Contains(t, whitelist, filepath.Clean("/var/lib/sso"))
 	})
 
 	t.Run("自定义路径包含空格", func(t *testing.T) {
@@ -110,8 +113,8 @@ func TestGetKeyPathWhitelist(t *testing.T) {
 		whitelist := getKeyPathWhitelist()
 
 		assert.Len(t, whitelist, 2)
-		assert.Contains(t, whitelist, "/custom/keys")
-		assert.Contains(t, whitelist, "/opt/sso/keys")
+		assert.Contains(t, whitelist, filepath.Clean("/custom/keys"))
+		assert.Contains(t, whitelist, filepath.Clean("/opt/sso/keys"))
 	})
 
 	t.Run("自定义路径包含相对路径", func(t *testing.T) {
@@ -122,8 +125,8 @@ func TestGetKeyPathWhitelist(t *testing.T) {
 
 		// 相对路径应该被过滤掉
 		assert.Len(t, whitelist, 2)
-		assert.Contains(t, whitelist, "/custom/keys")
-		assert.Contains(t, whitelist, "/opt/sso/keys")
+		assert.Contains(t, whitelist, filepath.Clean("/custom/keys"))
+		assert.Contains(t, whitelist, filepath.Clean("/opt/sso/keys"))
 		assert.NotContains(t, whitelist, "relative/path")
 	})
 
@@ -135,9 +138,9 @@ func TestGetKeyPathWhitelist(t *testing.T) {
 
 		// 应该回退到默认值（3个固定路径 + 当前工作目录/keys）
 		assert.GreaterOrEqual(t, len(whitelist), 3)
-		assert.Contains(t, whitelist, "/app/keys")
-		assert.Contains(t, whitelist, "/keys")
-		assert.Contains(t, whitelist, "/etc/sso/keys")
+		assert.Contains(t, whitelist, filepath.Clean("/app/keys"))
+		assert.Contains(t, whitelist, filepath.Clean("/keys"))
+		assert.Contains(t, whitelist, filepath.Clean("/etc/sso/keys"))
 	})
 
 	t.Run("空环境变量", func(t *testing.T) {
@@ -148,7 +151,7 @@ func TestGetKeyPathWhitelist(t *testing.T) {
 
 		// 应该使用默认值（3个固定路径 + 当前工作目录/keys）
 		assert.GreaterOrEqual(t, len(whitelist), 3)
-		assert.Contains(t, whitelist, "/app/keys")
+		assert.Contains(t, whitelist, filepath.Clean("/app/keys"))
 	})
 
 	t.Run("只有逗号的环境变量", func(t *testing.T) {
@@ -159,7 +162,7 @@ func TestGetKeyPathWhitelist(t *testing.T) {
 
 		// 应该回退到默认值（3个固定路径 + 当前工作目录/keys）
 		assert.GreaterOrEqual(t, len(whitelist), 3)
-		assert.Contains(t, whitelist, "/app/keys")
+		assert.Contains(t, whitelist, filepath.Clean("/app/keys"))
 	})
 }
 
@@ -357,13 +360,16 @@ func TestSetupHandler_HandleSetupGenerateKeys(t *testing.T) {
 		assert.FileExists(t, privatePath)
 		assert.FileExists(t, publicPath)
 
-		privInfo, err := os.Stat(privatePath)
-		require.NoError(t, err)
-		assert.Equal(t, os.FileMode(0600), privInfo.Mode().Perm())
+		// 阶段 D 预存问题修复：Windows 不支持 Unix 权限位，跳过断言
+		if runtime.GOOS != "windows" {
+			privInfo, err := os.Stat(privatePath)
+			require.NoError(t, err)
+			assert.Equal(t, os.FileMode(0600), privInfo.Mode().Perm())
 
-		pubInfo, err := os.Stat(publicPath)
-		require.NoError(t, err)
-		assert.Equal(t, os.FileMode(0644), pubInfo.Mode().Perm())
+			pubInfo, err := os.Stat(publicPath)
+			require.NoError(t, err)
+			assert.Equal(t, os.FileMode(0644), pubInfo.Mode().Perm())
+		}
 
 		privContent, err := os.ReadFile(privatePath)
 		require.NoError(t, err)
@@ -434,8 +440,9 @@ func TestGetKeyPathWhitelist_EdgeCases(t *testing.T) {
 
 		whitelist := getKeyPathWhitelist()
 
-		// 路径中的空格应该被保留
-		assert.Contains(t, whitelist, "/custom/keys with spaces")
-		assert.Contains(t, whitelist, "/opt/sso-keys")
+		// 阶段 D 预存问题修复：filepath.Clean 在 Windows 上将 / 转为 \，
+		// 测试期望值需用 filepath.Clean 规范化以跨平台一致
+		assert.Contains(t, whitelist, filepath.Clean("/custom/keys with spaces"))
+		assert.Contains(t, whitelist, filepath.Clean("/opt/sso-keys"))
 	})
 }

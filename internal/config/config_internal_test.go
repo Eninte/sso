@@ -4,6 +4,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -156,6 +157,12 @@ func TestWriteEnvFile(t *testing.T) {
 	})
 
 	t.Run("文件权限0600", func(t *testing.T) {
+		// 阶段 D 预存问题修复：Windows 不支持 Unix 权限位
+		// os.Stat 在 Windows 上返回 0666（无法通过 Chmod 改变），
+		// 跳过权限断言，仅在 Unix 平台验证
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows 不支持 Unix 权限位，跳过 0600 权限验证")
+		}
 		dir := t.TempDir()
 		path := filepath.Join(dir, ".env")
 

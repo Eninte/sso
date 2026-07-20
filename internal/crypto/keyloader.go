@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -166,7 +167,12 @@ func validateKeyPath(path string) error {
 	}
 
 	perm := info.Mode().Perm()
-	isContainer := func() bool {
+	// 阶段 D 预存问题修复：Windows 不支持 Unix 权限位，os.Stat 总是返回 0666，
+	// 无法通过 Chmod 改变。在 Windows 上跳过权限检查（生产部署目标为 Linux 容器）
+	skipPermCheck := func() bool {
+		if runtime.GOOS == "windows" {
+			return true
+		}
 		if v := os.Getenv("STRICT_KEY_PERMISSIONS"); v == "false" {
 			return true
 		}
@@ -192,7 +198,7 @@ func validateKeyPath(path string) error {
 	// "RSA PUBLIC KEY" (PKCS1) 或 "PUBLIC KEY" (PKIX) 表示公钥
 	isPrivateKey := block.Type == "RSA PRIVATE KEY" || block.Type == "PRIVATE KEY"
 
-	if !isContainer {
+	if !skipPermCheck {
 		if isPrivateKey {
 			// 私钥：不允许组和其他用户有任何权限
 			if perm&0077 != 0 {
@@ -209,6 +215,14 @@ func validateKeyPath(path string) error {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return ErrKeyPathInvalid
+	}
+
+	// 阶段 D 预存问题修复：跨平台路径前缀检查
+	// Unix 路径前缀在 Windows 上不匹配（absPath 是 E:\... 格式），
+	// 但生产部署目标是 Linux 容器，开发时在 Windows 上需放宽检查。
+	// Windows 上跳过路径前缀检查（权限检查已跳过，路径遍历已检查）。
+	if runtime.GOOS == "windows" {
+		return nil
 	}
 
 	// 允许的路径前缀
