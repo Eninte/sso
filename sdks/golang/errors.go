@@ -47,12 +47,12 @@ const (
 	ErrCodeTokenRotated ErrorCode = "TOKEN_ROTATED"
 
 	// OAuth Scope / PKCE / Consent（阶段 2.2）
-	ErrCodeInvalidScope     ErrorCode = "INVALID_SCOPE"     // scope 超出客户端允许或白名单
-	ErrCodePKCERequired     ErrorCode = "PKCE_REQUIRED"     // 公共客户端必须使用 PKCE（S256）
-	ErrCodeConsentRequired  ErrorCode = "CONSENT_REQUIRED"  // 需要用户同意授权
-	ErrCodeConsentDenied    ErrorCode = "CONSENT_DENIED"    // 用户拒绝授权
-	ErrCodeConsentInvalid   ErrorCode = "CONSENT_INVALID"   // consent_token 无效或已过期
-	ErrCodeClientMismatch   ErrorCode = "CLIENT_MISMATCH"   // refresh_token 客户端归属不一致
+	ErrCodeInvalidScope    ErrorCode = "INVALID_SCOPE"    // scope 超出客户端允许或白名单
+	ErrCodePKCERequired    ErrorCode = "PKCE_REQUIRED"    // 公共客户端必须使用 PKCE（S256）
+	ErrCodeConsentRequired ErrorCode = "CONSENT_REQUIRED" // 需要用户同意授权
+	ErrCodeConsentDenied   ErrorCode = "CONSENT_DENIED"   // 用户拒绝授权
+	ErrCodeConsentInvalid  ErrorCode = "CONSENT_INVALID"  // consent_token 无效或已过期
+	ErrCodeClientMismatch  ErrorCode = "CLIENT_MISMATCH"  // refresh_token 客户端归属不一致
 
 	// MFA 两阶段登录（阶段 2.x）
 	ErrCodeMFAChallengeInvalid   ErrorCode = "MFA_CHALLENGE_INVALID"   // Challenge 无效或已被使用
@@ -70,9 +70,9 @@ const (
 
 	// Social Login 安全增强（阶段 2.3 新增）
 	ErrCodeProviderEmailNotVerified ErrorCode = "PROVIDER_EMAIL_NOT_VERIFIED" // provider 返回 email 未验证
-	ErrCodeSocialAccountConflict    ErrorCode = "SOCIAL_ACCOUNT_CONFLICT"    // 社交账号已绑定到其他用户
-	ErrCodeEmailConflictWithLocal   ErrorCode = "EMAIL_CONFLICT_WITH_LOCAL"  // email 与本地账号冲突，需手动绑定
-	ErrCodeProviderUserIDMissing    ErrorCode = "PROVIDER_USER_ID_MISSING"   // provider 未返回 user_id
+	ErrCodeSocialAccountConflict    ErrorCode = "SOCIAL_ACCOUNT_CONFLICT"     // 社交账号已绑定到其他用户
+	ErrCodeEmailConflictWithLocal   ErrorCode = "EMAIL_CONFLICT_WITH_LOCAL"   // email 与本地账号冲突，需手动绑定
+	ErrCodeProviderUserIDMissing    ErrorCode = "PROVIDER_USER_ID_MISSING"    // provider 未返回 user_id
 
 	// 邮件（阶段 4.3）
 	// 服务端 SMTP 错误统一返回此通用错误码，不暴露 SMTP 内部信息
@@ -200,7 +200,7 @@ func (e *Error) IsTooManyMFAAttempts() bool {
 // 阶段 B 审查修复：补入 ErrCodeMissingAuthCode。该错误码虽属于基础校验类，
 // 但发生在社交登录回调路径上，调用方通常会按社交登录错误统一处理。
 func (e *Error) IsSocialLoginError() bool {
-	switch e.Code {
+	switch e.Code { //nolint:exhaustive // 仅判断社交登录相关错误码，其他错误码走 default 分支
 	case ErrCodeProviderNotSupported,
 		ErrCodeOAuthCodeExchangeFailed,
 		ErrCodeSocialLoginFailed,
@@ -212,8 +212,9 @@ func (e *Error) IsSocialLoginError() bool {
 		ErrCodeProviderUserIDMissing,
 		ErrCodeMissingAuthCode:
 		return true
+	default:
+		return false
 	}
-	return false
 }
 
 // IsEmailSendFailed 邮件发送失败

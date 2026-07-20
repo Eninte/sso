@@ -263,7 +263,7 @@ func TestAuthService_RefreshToken_ExpiryCheck(t *testing.T) {
 
 	t.Run("RefreshExpiresAt为nil-回退到ExpiresAt未过期-成功", func(t *testing.T) {
 		authSvc, storeInst, _ := createRotationTestAuthService(t)
-		// 旧数据兼容：RefreshExpiresAt 为 nil，回退到 ExpiresAt
+		// 旧数据兼容：RefreshExpiresAt 为 nil，回退到 ExpiresAt 字段
 		// ExpiresAt 设为 access TTL（15 分钟），refresh 回退到 expires_at 也未过期
 		futureExpires := time.Now().Add(10 * time.Minute)
 		storeInst.AddToken(&model.Token{
@@ -292,8 +292,8 @@ func TestAuthService_RefreshToken_ExpiryCheck(t *testing.T) {
 
 	t.Run("RefreshExpiresAt为nil-回退到ExpiresAt已过期-返回ErrInvalidToken", func(t *testing.T) {
 		authSvc, storeInst, _ := createRotationTestAuthService(t)
-		// 旧数据兼容：RefreshExpiresAt 为 nil，回退到 ExpiresAt
-		// ExpiresAt 也已过期
+		// 旧数据兼容：RefreshExpiresAt 为 nil，回退到 ExpiresAt 字段
+		// ExpiresAt 字段也已过期
 		expiredExpires := time.Now().Add(-1 * time.Hour)
 		storeInst.AddToken(&model.Token{
 			ID:           "token-legacy-2",

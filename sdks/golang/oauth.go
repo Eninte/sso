@@ -2,6 +2,7 @@ package sdk
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 )
@@ -84,7 +85,8 @@ func (c *Client) DenyAuthorization(ctx context.Context, req AuthorizeDenyRequest
 	}
 
 	// 尝试从错误响应体解析 DenyResponse
-	if ssoErr, ok := err.(*Error); ok && ssoErr.HTTPStatus == http.StatusForbidden {
+	var ssoErr *Error
+	if errors.As(err, &ssoErr) && ssoErr.HTTPStatus == http.StatusForbidden {
 		denyResp, parseErr := unmarshalJSON[AuthorizeDenyResponse]([]byte(ssoErr.RawBody))
 		if parseErr == nil {
 			return denyResp, nil

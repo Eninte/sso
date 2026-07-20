@@ -538,13 +538,14 @@ func (c *RedisCache) Delete(ctx context.Context, key string) error {
 // 兼容 Redis 2.6+（Lua 脚本支持）。
 //
 // 返回：
-//   - *stateInfo：仅用于 oauth:state: 前缀的 key，反序列化为 stateInfo
+//   - *StateInfoShim：仅用于 oauth:state: 前缀的 key，反序列化后的状态信息
 //   - error：key 不存在时返回 ErrCacheMiss
 //
-// 注意：此方法仅用于特定结构（stateInfo）的原子操作。
+// 注意：此方法仅用于特定结构（StateInfoShim）的原子操作。
 // 如需通用原子 GetAndDelete，应抽象为泛型方法或返回原始 bytes。
 // 此处为最小侵入实现，避免破坏 cache.Cache 接口契约。
-func (c *RedisCache) GetAndDelete(ctx context.Context, key string) (*stateInfoShim, error) {
+// 类型导出以满足 revive unexported-return 规则。
+func (c *RedisCache) GetAndDelete(ctx context.Context, key string) (*StateInfoShim, error) {
 	// 使用 Lua 脚本：原子 GET + DEL
 	// 若 key 不存在返回 nil；否则返回 value 并删除
 	const script = `
@@ -573,18 +574,19 @@ func (c *RedisCache) GetAndDelete(ctx context.Context, key string) (*stateInfoSh
 		return nil, fmt.Errorf("unexpected lua result type: %T", result)
 	}
 
-	var info stateInfoShim
+	var info StateInfoShim
 	if err := json.Unmarshal([]byte(data), &info); err != nil {
 		return nil, fmt.Errorf("反序列化 stateInfo 失败: %w", err)
 	}
 	return &info, nil
 }
 
-// stateInfoShim 用于 GetAndDelete 反序列化的临时结构
+// StateInfoShim 用于 GetAndDelete 反序列化的临时结构
 //
 // 为避免 cache 包循环依赖 service 包，此处使用 shim 类型复制 stateInfo 字段。
 // service.stateInfo 通过 json.Marshal/Unmarshal 与 shim 互转。
-type stateInfoShim struct {
+// 类型导出以满足 revive unexported-return 规则。
+type StateInfoShim struct {
 	Provider    string    `json:"provider"`
 	RedirectURI string    `json:"redirect_uri"`
 	CreatedAt   time.Time `json:"created_at"`

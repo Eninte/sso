@@ -257,7 +257,7 @@ func (s *OAuthService) VerifyConsentToken(ctx context.Context, consentToken stri
 		return pub, nil
 	}, jwt.WithIssuer("sso-consent"), jwt.WithExpirationRequired())
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrConsentInvalid, err)
+		return nil, fmt.Errorf("%w: %w", ErrConsentInvalid, err)
 	}
 
 	if claims.ClientID == "" || claims.UserID == "" || claims.RedirectURI == "" {

@@ -19,19 +19,19 @@ import (
 //   - user_id 外键关联 users.id，删除用户时级联删除
 //
 // 流程：
-//   1. 用户首次社交登录时，系统创建 user（如不存在）+ 创建 social_account
-//   2. 后续社交登录通过 (provider, provider_user_id) 查找 social_account
-//   3. 通过 social_account.user_id 关联到本系统用户
+//  1. 用户首次社交登录时，系统创建 user（如不存在）+ 创建 social_account
+//  2. 后续社交登录通过 (provider, provider_user_id) 查找 social_account
+//  3. 通过 social_account.user_id 关联到本系统用户
 type SocialAccount struct {
-	ID                string            `json:"id" db:"id"`
-	Provider          string            `json:"provider" db:"provider"`
-	ProviderUserID    string            `json:"provider_user_id" db:"provider_user_id"`
-	UserID            string            `json:"user_id" db:"user_id"`
-	ProviderEmail     string            `json:"provider_email,omitempty" db:"provider_email"`
-	EmailVerified     bool              `json:"email_verified" db:"email_verified"`
-	ProviderMetadata  map[string]string `json:"provider_metadata,omitempty" db:"provider_metadata"`
-	CreatedAt         time.Time         `json:"created_at" db:"created_at"`
-	UpdatedAt         time.Time         `json:"updated_at" db:"updated_at"`
+	ID               string            `json:"id" db:"id"`
+	Provider         string            `json:"provider" db:"provider"`
+	ProviderUserID   string            `json:"provider_user_id" db:"provider_user_id"`
+	UserID           string            `json:"user_id" db:"user_id"`
+	ProviderEmail    string            `json:"provider_email,omitempty" db:"provider_email"`
+	EmailVerified    bool              `json:"email_verified" db:"email_verified"`
+	ProviderMetadata map[string]string `json:"provider_metadata,omitempty" db:"provider_metadata"`
+	CreatedAt        time.Time         `json:"created_at" db:"created_at"`
+	UpdatedAt        time.Time         `json:"updated_at" db:"updated_at"`
 }
 
 // 支持的社交登录提供商常量

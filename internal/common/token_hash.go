@@ -22,8 +22,9 @@ import (
 // 输出: 64 字符 hex 编码字符串
 //
 // 用法：
-//   hash := common.HashToken(accessToken)
-//   db.Query("SELECT ... WHERE access_token_hash = $1", hash)
+//
+//	hash := common.HashToken(accessToken)
+//	db.Query("SELECT ... WHERE access_token_hash = $1", hash)
 //
 // 安全性：
 //   - SHA-256 抗碰撞

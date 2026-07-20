@@ -83,6 +83,13 @@ func createMFAHandlerTestSetup(t *testing.T, mfaSecret string) (
 	return loginHandler, store, mfaSvc, authSvc, user
 }
 
+// newMFAHandlerOnly 仅返回 LoginHandler，用于不需要 store/mfaSvc/authSvc/user 的测试。
+// 辅助函数内部允许 4 个 blank identifier，因为这是封装 createMFAHandlerTestSetup 的合理用法。
+func newMFAHandlerOnly(t *testing.T, mfaSecret string) *handler.LoginHandler {
+	h, _, _, _, _ := createMFAHandlerTestSetup(t, mfaSecret) //nolint:dogsled // 测试辅助：仅返回主对象
+	return h
+}
+
 // performMFAFirstStageLogin 执行第一阶段登录，返回 mfa_challenge 令牌
 func performMFAFirstStageLogin(t *testing.T, h *handler.LoginHandler, email, password, ip, ua string) string {
 	t.Helper()
@@ -145,7 +152,7 @@ func TestLoginHandler_HandleVerifyMFALogin_TOTP_Success(t *testing.T) {
 // ============================================================================
 
 func TestLoginHandler_HandleVerifyMFALogin_EmptyChallenge(t *testing.T) {
-	h, _, _, _, _ := createMFAHandlerTestSetup(t, "JBSWY3DPEHPK3PXP")
+	h := newMFAHandlerOnly(t, "JBSWY3DPEHPK3PXP")
 
 	body := bytes.NewReader([]byte(`{"mfa_challenge":"","method":"totp","code":"123456"}`))
 	req := httptest.NewRequest("POST", "/api/v1/login/mfa/verify", body)
@@ -158,7 +165,7 @@ func TestLoginHandler_HandleVerifyMFALogin_EmptyChallenge(t *testing.T) {
 }
 
 func TestLoginHandler_HandleVerifyMFALogin_EmptyCode(t *testing.T) {
-	h, _, _, _, _ := createMFAHandlerTestSetup(t, "JBSWY3DPEHPK3PXP")
+	h := newMFAHandlerOnly(t, "JBSWY3DPEHPK3PXP")
 
 	body := bytes.NewReader([]byte(`{"mfa_challenge":"some-token","method":"totp","code":""}`))
 	req := httptest.NewRequest("POST", "/api/v1/login/mfa/verify", body)
@@ -171,7 +178,7 @@ func TestLoginHandler_HandleVerifyMFALogin_EmptyCode(t *testing.T) {
 }
 
 func TestLoginHandler_HandleVerifyMFALogin_InvalidMethod(t *testing.T) {
-	h, _, _, _, _ := createMFAHandlerTestSetup(t, "JBSWY3DPEHPK3PXP")
+	h := newMFAHandlerOnly(t, "JBSWY3DPEHPK3PXP")
 
 	body := bytes.NewReader([]byte(`{"mfa_challenge":"some-token","method":"invalid","code":"123456"}`))
 	req := httptest.NewRequest("POST", "/api/v1/login/mfa/verify", body)
@@ -184,7 +191,7 @@ func TestLoginHandler_HandleVerifyMFALogin_InvalidMethod(t *testing.T) {
 }
 
 func TestLoginHandler_HandleVerifyMFALogin_MalformedJSON(t *testing.T) {
-	h, _, _, _, _ := createMFAHandlerTestSetup(t, "JBSWY3DPEHPK3PXP")
+	h := newMFAHandlerOnly(t, "JBSWY3DPEHPK3PXP")
 
 	body := bytes.NewReader([]byte(`{invalid json}`))
 	req := httptest.NewRequest("POST", "/api/v1/login/mfa/verify", body)
@@ -201,7 +208,7 @@ func TestLoginHandler_HandleVerifyMFALogin_MalformedJSON(t *testing.T) {
 // ============================================================================
 
 func TestLoginHandler_HandleVerifyMFALogin_ChallengeNotFound(t *testing.T) {
-	h, _, _, _, _ := createMFAHandlerTestSetup(t, "JBSWY3DPEHPK3PXP")
+	h := newMFAHandlerOnly(t, "JBSWY3DPEHPK3PXP")
 
 	body := bytes.NewReader([]byte(`{"mfa_challenge":"nonexistent-token","method":"totp","code":"123456"}`))
 	req := httptest.NewRequest("POST", "/api/v1/login/mfa/verify", body)
@@ -216,7 +223,7 @@ func TestLoginHandler_HandleVerifyMFALogin_ChallengeNotFound(t *testing.T) {
 }
 
 func TestLoginHandler_HandleVerifyMFALogin_IPMismatch(t *testing.T) {
-	h, _, _, _, _ := createMFAHandlerTestSetup(t, "JBSWY3DPEHPK3PXP")
+	h := newMFAHandlerOnly(t, "JBSWY3DPEHPK3PXP")
 
 	// 第一阶段：从 192.168.1.1 登录
 	challenge := performMFAFirstStageLogin(t, h, "mfa-handler@example.com", "Password123!", "192.168.1.1", "Mozilla/5.0")
@@ -235,7 +242,7 @@ func TestLoginHandler_HandleVerifyMFALogin_IPMismatch(t *testing.T) {
 }
 
 func TestLoginHandler_HandleVerifyMFALogin_InvalidTOTP(t *testing.T) {
-	h, _, _, _, _ := createMFAHandlerTestSetup(t, "JBSWY3DPEHPK3PXP")
+	h := newMFAHandlerOnly(t, "JBSWY3DPEHPK3PXP")
 
 	challenge := performMFAFirstStageLogin(t, h, "mfa-handler@example.com", "Password123!", "192.168.1.1", "Mozilla/5.0")
 
@@ -256,7 +263,7 @@ func TestLoginHandler_HandleVerifyMFALogin_InvalidTOTP(t *testing.T) {
 // ============================================================================
 
 func TestLoginHandler_Handle_MFAUserResponseShape(t *testing.T) {
-	h, _, _, _, _ := createMFAHandlerTestSetup(t, "JBSWY3DPEHPK3PXP")
+	h := newMFAHandlerOnly(t, "JBSWY3DPEHPK3PXP")
 
 	body := bytes.NewReader([]byte(`{"email":"mfa-handler@example.com","password":"Password123!"}`))
 	req := httptest.NewRequest("POST", "/api/v1/login", body)

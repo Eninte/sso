@@ -28,16 +28,16 @@ type MFAStatusResponse struct {
 //   - 一次性：验证成功或失败次数超限后立即删除
 //   - 尝试次数：默认最多 5 次，防止暴力枚举 TOTP 或恢复码
 type MFAChallenge struct {
-	UserID    string    `json:"user_id"`              // 关联用户 ID
-	Email     string    `json:"email"`                // 冗余字段，签发 Token 时避免再查一次
-	Role      string    `json:"role"`                 // 冗余字段
-	Scopes    []string  `json:"scopes,omitempty"`     // 申请的 scopes（透传到 Token 签发）
-	ClientID  *string   `json:"client_id,omitempty"`  // OAuth client ID（透传，可空）
-	IPAddress string    `json:"ip_address"`           // 绑定客户端 IP
-	UserAgent string    `json:"user_agent"`           // 绑定客户端 UA
-	Attempts  int       `json:"attempts"`             // 已尝试次数
-	CreatedAt time.Time `json:"created_at"`            // 创建时间
-	ExpiresAt time.Time `json:"expires_at"`            // 过期时间
+	UserID    string    `json:"user_id"`             // 关联用户 ID
+	Email     string    `json:"email"`               // 冗余字段，签发 Token 时避免再查一次
+	Role      string    `json:"role"`                // 冗余字段
+	Scopes    []string  `json:"scopes,omitempty"`    // 申请的 scopes（透传到 Token 签发）
+	ClientID  *string   `json:"client_id,omitempty"` // OAuth client ID（透传，可空）
+	IPAddress string    `json:"ip_address"`          // 绑定客户端 IP
+	UserAgent string    `json:"user_agent"`          // 绑定客户端 UA
+	Attempts  int       `json:"attempts"`            // 已尝试次数
+	CreatedAt time.Time `json:"created_at"`          // 创建时间
+	ExpiresAt time.Time `json:"expires_at"`          // 过期时间
 }
 
 // MFAVerifyRequest MFA 两阶段登录第二阶段请求
@@ -50,8 +50,8 @@ type MFAVerifyRequest struct {
 
 // MFA 验证方法常量
 const (
-	MFAMethodTOTP          = "totp"
-	MFAMethodRecoveryCode  = "recovery_code"
+	MFAMethodTOTP         = "totp"
+	MFAMethodRecoveryCode = "recovery_code"
 )
 
 // MaxMFALoginAttempts MFA 验证最大尝试次数

@@ -32,8 +32,8 @@ var criticalEvents = map[string]bool{
 	string(model.EventUserEnabled):     true, // 管理员启用用户
 	// 阶段 4 安全增强：密钥轮换/撤销属于高敏感操作，审计失败应同步返回错误
 	// 防止密钥已轮换但审计日志丢失，无法追踪密钥变更历史
-	string(model.EventKeyRotated):      true, // 密钥轮换
-	string(model.EventKeyRevoked):      true, // 密钥撤销
+	string(model.EventKeyRotated): true, // 密钥轮换
+	string(model.EventKeyRevoked): true, // 密钥撤销
 }
 
 // IsCriticalEvent 判断事件是否为关键事件

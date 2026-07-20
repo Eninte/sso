@@ -61,8 +61,8 @@ type LoginResponse struct {
 	// 而是返回 mfa_required=true 和一次性 mfa_challenge 令牌
 	// 客户端在第二阶段 POST /api/v1/login/mfa/verify 提交 challenge + code 换取 Token
 	MFARequired  bool     `json:"mfa_required,omitempty"`
-	MFAChallenge string   `json:"mfa_challenge,omitempty"`           // 一次性高熵随机令牌，仅生成时返回
-	MFAMethods   []string `json:"mfa_methods,omitempty"`              // 可用的 MFA 验证方法，如 ["totp","recovery_code"]
+	MFAChallenge string   `json:"mfa_challenge,omitempty"` // 一次性高熵随机令牌，仅生成时返回
+	MFAMethods   []string `json:"mfa_methods,omitempty"`   // 可用的 MFA 验证方法，如 ["totp","recovery_code"]
 }
 
 // ============================================================================

@@ -348,115 +348,165 @@ func validateProductionConfig(c *Config) error {
 
 	lanMode := c.LANDeployment
 
-	// 检查CORS配置不包含localhost
-	if strings.Contains(strings.ToLower(c.CORSAllowedOrigins), "localhost") {
-		if lanMode {
-			slog.Warn("生产环境CORS配置包含localhost（LAN部署模式）", "cors_origins", c.CORSAllowedOrigins)
-		} else {
-			slog.Error("生产环境CORS配置不能包含localhost", "cors_origins", c.CORSAllowedOrigins)
-			return fmt.Errorf("CORS_ALLOWED_ORIGINS cannot contain 'localhost' in production")
-		}
+	// 依次执行各项生产环境检查
+	checks := []func(*Config, bool) error{
+		validateProdBypassCORS,
+		validateProdDefaultCORS,
+		validateProdJWTIssuer,
+		validateProdSMTPHost,
+		validateProdMetricsAuth,
+		validateProdRedisPassword,
+		validateProdPublicBaseURL,
+		validateProdJWTKeyPermissions,
+		validateProdMFARecoveryKey,
+		validateProdInitEnabled,
 	}
-
-	// 检查默认CORS配置
-	if c.CORSAllowedOrigins == "http://localhost:3000" {
-		if lanMode {
-			slog.Warn("生产环境使用默认CORS配置（LAN部署模式）")
-		} else {
-			slog.Error("生产环境不能使用默认CORS配置")
-			return fmt.Errorf("CORS_ALLOWED_ORIGINS must be set in production")
-		}
-	}
-
-	// 检查JWT Issuer配置
-	if c.JWTIssuer == "sso" {
-		if lanMode {
-			slog.Warn("生产环境使用默认JWT Issuer（LAN部署模式）")
-		} else {
-			slog.Error("生产环境不能使用默认JWT Issuer")
-			return fmt.Errorf("JWT_ISSUER must be set in production, cannot use default value 'sso'")
-		}
-	}
-
-	// 检查SMTP配置
-	if c.SMTPHost == "localhost" {
-		if lanMode {
-			slog.Warn("生产环境使用localhost作为SMTP服务器（LAN部署模式）")
-		} else {
-			slog.Error("生产环境不能使用localhost作为SMTP服务器")
-			return fmt.Errorf("SMTP_HOST must be set in production, cannot be 'localhost'")
-		}
-	}
-
-	// 检查Metrics认证配置
-	// 阶段 4 安全增强：生产环境必须同时设置 METRICS_USERNAME 和 METRICS_PASSWORD
-	// 否则 /metrics 端点完全无认证，暴露 Prometheus 指标
-	if c.MetricsUsername == "" || c.MetricsPassword == "" {
-		if lanMode {
-			slog.Warn("生产环境未配置 METRICS 认证（LAN部署模式）")
-		} else {
-			slog.Error("生产环境必须配置 METRICS_USERNAME 和 METRICS_PASSWORD")
-			return fmt.Errorf("METRICS_USERNAME and METRICS_PASSWORD must both be set in production")
-		}
-	}
-
-	// 阶段 4 安全增强：Redis 启用时强制密码非空
-	if c.RedisEnable && c.RedisPassword == "" {
-		if lanMode {
-			slog.Warn("生产环境启用 Redis 但未设置 REDIS_PASSWORD（LAN部署模式）")
-		} else {
-			slog.Error("生产环境启用 Redis 时必须设置 REDIS_PASSWORD")
-			return fmt.Errorf("REDIS_PASSWORD must be set when REDIS_ENABLE=true in production")
-		}
-	}
-
-	// 阶段 4 安全增强：PUBLIC_BASE_URL 必须设置且为 HTTPS
-	// 防止邮件链接中 token 在明文 HTTP 传输中被窃取
-	if c.PublicBaseURL == "" {
-		if lanMode {
-			slog.Warn("生产环境未设置 PUBLIC_BASE_URL（LAN部署模式），邮件链接将使用 BaseURL()")
-		} else {
-			slog.Error("生产环境必须设置 PUBLIC_BASE_URL")
-			return fmt.Errorf("PUBLIC_BASE_URL must be set in production")
-		}
-	} else if !strings.HasPrefix(c.PublicBaseURL, "https://") {
-		if lanMode {
-			slog.Warn("生产环境 PUBLIC_BASE_URL 非 HTTPS scheme（LAN部署模式）", "public_base_url", c.PublicBaseURL)
-		} else {
-			slog.Error("生产环境 PUBLIC_BASE_URL 必须为 HTTPS scheme", "public_base_url", c.PublicBaseURL)
-			return fmt.Errorf("PUBLIC_BASE_URL must start with 'https://' in production (current: %s)", c.PublicBaseURL)
-		}
-	}
-
-	// 阶段 4 安全增强：JWT 私钥文件权限校验
-	// 私钥必须仅所有者可读写（chmod 600），否则拒绝启动
-	if err := validateJWTPrivateKeyPermissions(c); err != nil {
-		if lanMode {
-			slog.Warn("生产环境 JWT 私钥权限校验失败（LAN部署模式）", "error", err)
-		} else {
-			slog.Error("生产环境 JWT 私钥权限校验失败", "error", err)
+	for _, check := range checks {
+		if err := check(c, lanMode); err != nil {
 			return err
 		}
 	}
 
-	// 检查MFA恢复码HMAC密钥（生产环境强制要求）
-	// 防止攻击者通过数据库泄露推导恢复码，AGENTS.md 硬约束
-	if c.MFARecoveryHMACKey == "" {
-		if lanMode {
-			slog.Warn("生产环境未设置MFA_RECOVERY_HMAC_KEY（LAN部署模式）")
-		} else {
-			slog.Error("生产环境必须设置MFA_RECOVERY_HMAC_KEY")
-			return fmt.Errorf("MFA_RECOVERY_HMAC_KEY must be set in production")
-		}
-	}
+	return nil
+}
 
-	// 检查初始化面板配置：生产环境推荐初始化完成后关闭 INIT_ENABLED
-	// 不强制拒绝（允许重复初始化），但发出告警
+// validateProdBypassCORS 检查 CORS 配置不包含 localhost
+func validateProdBypassCORS(c *Config, lanMode bool) error {
+	if !strings.Contains(strings.ToLower(c.CORSAllowedOrigins), "localhost") {
+		return nil
+	}
+	if lanMode {
+		slog.Warn("生产环境CORS配置包含localhost（LAN部署模式）", "cors_origins", c.CORSAllowedOrigins)
+		return nil
+	}
+	slog.Error("生产环境CORS配置不能包含localhost", "cors_origins", c.CORSAllowedOrigins)
+	return fmt.Errorf("CORS_ALLOWED_ORIGINS cannot contain 'localhost' in production")
+}
+
+// validateProdDefaultCORS 检查默认 CORS 配置
+func validateProdDefaultCORS(c *Config, lanMode bool) error {
+	if c.CORSAllowedOrigins != "http://localhost:3000" {
+		return nil
+	}
+	if lanMode {
+		slog.Warn("生产环境使用默认CORS配置（LAN部署模式）")
+		return nil
+	}
+	slog.Error("生产环境不能使用默认CORS配置")
+	return fmt.Errorf("CORS_ALLOWED_ORIGINS must be set in production")
+}
+
+// validateProdJWTIssuer 检查 JWT Issuer 配置
+func validateProdJWTIssuer(c *Config, lanMode bool) error {
+	if c.JWTIssuer != "sso" {
+		return nil
+	}
+	if lanMode {
+		slog.Warn("生产环境使用默认JWT Issuer（LAN部署模式）")
+		return nil
+	}
+	slog.Error("生产环境不能使用默认JWT Issuer")
+	return fmt.Errorf("JWT_ISSUER must be set in production, cannot use default value 'sso'")
+}
+
+// validateProdSMTPHost 检查 SMTP 配置
+func validateProdSMTPHost(c *Config, lanMode bool) error {
+	if c.SMTPHost != "localhost" {
+		return nil
+	}
+	if lanMode {
+		slog.Warn("生产环境使用localhost作为SMTP服务器（LAN部署模式）")
+		return nil
+	}
+	slog.Error("生产环境不能使用localhost作为SMTP服务器")
+	return fmt.Errorf("SMTP_HOST must be set in production, cannot be 'localhost'")
+}
+
+// validateProdMetricsAuth 检查 Metrics 认证配置
+// 阶段 4 安全增强：生产环境必须同时设置 METRICS_USERNAME 和 METRICS_PASSWORD
+// 否则 /metrics 端点完全无认证，暴露 Prometheus 指标
+func validateProdMetricsAuth(c *Config, lanMode bool) error {
+	if c.MetricsUsername != "" && c.MetricsPassword != "" {
+		return nil
+	}
+	if lanMode {
+		slog.Warn("生产环境未配置 METRICS 认证（LAN部署模式）")
+		return nil
+	}
+	slog.Error("生产环境必须配置 METRICS_USERNAME 和 METRICS_PASSWORD")
+	return fmt.Errorf("METRICS_USERNAME and METRICS_PASSWORD must both be set in production")
+}
+
+// validateProdRedisPassword 阶段 4 安全增强：Redis 启用时强制密码非空
+func validateProdRedisPassword(c *Config, lanMode bool) error {
+	if !c.RedisEnable || c.RedisPassword != "" {
+		return nil
+	}
+	if lanMode {
+		slog.Warn("生产环境启用 Redis 但未设置 REDIS_PASSWORD（LAN部署模式）")
+		return nil
+	}
+	slog.Error("生产环境启用 Redis 时必须设置 REDIS_PASSWORD")
+	return fmt.Errorf("REDIS_PASSWORD must be set when REDIS_ENABLE=true in production")
+}
+
+// validateProdPublicBaseURL 阶段 4 安全增强：PUBLIC_BASE_URL 必须设置且为 HTTPS
+// 防止邮件链接中 token 在明文 HTTP 传输中被窃取
+func validateProdPublicBaseURL(c *Config, lanMode bool) error {
+	if c.PublicBaseURL == "" {
+		if lanMode {
+			slog.Warn("生产环境未设置 PUBLIC_BASE_URL（LAN部署模式），邮件链接将使用 BaseURL()")
+			return nil
+		}
+		slog.Error("生产环境必须设置 PUBLIC_BASE_URL")
+		return fmt.Errorf("PUBLIC_BASE_URL must be set in production")
+	}
+	if !strings.HasPrefix(c.PublicBaseURL, "https://") {
+		if lanMode {
+			slog.Warn("生产环境 PUBLIC_BASE_URL 非 HTTPS scheme（LAN部署模式）", "public_base_url", c.PublicBaseURL)
+			return nil
+		}
+		slog.Error("生产环境 PUBLIC_BASE_URL 必须为 HTTPS scheme", "public_base_url", c.PublicBaseURL)
+		return fmt.Errorf("PUBLIC_BASE_URL must start with 'https://' in production (current: %s)", c.PublicBaseURL)
+	}
+	return nil
+}
+
+// validateProdJWTKeyPermissions 阶段 4 安全增强：JWT 私钥文件权限校验
+// 私钥必须仅所有者可读写（chmod 600），否则拒绝启动
+func validateProdJWTKeyPermissions(c *Config, lanMode bool) error {
+	if err := validateJWTPrivateKeyPermissions(c); err != nil {
+		if lanMode {
+			slog.Warn("生产环境 JWT 私钥权限校验失败（LAN部署模式）", "error", err)
+			return nil
+		}
+		slog.Error("生产环境 JWT 私钥权限校验失败", "error", err)
+		return err
+	}
+	return nil
+}
+
+// validateProdMFARecoveryKey 检查 MFA 恢复码 HMAC 密钥（生产环境强制要求）
+// 防止攻击者通过数据库泄露推导恢复码，AGENTS.md 硬约束
+func validateProdMFARecoveryKey(c *Config, lanMode bool) error {
+	if c.MFARecoveryHMACKey != "" {
+		return nil
+	}
+	if lanMode {
+		slog.Warn("生产环境未设置MFA_RECOVERY_HMAC_KEY（LAN部署模式）")
+		return nil
+	}
+	slog.Error("生产环境必须设置MFA_RECOVERY_HMAC_KEY")
+	return fmt.Errorf("MFA_RECOVERY_HMAC_KEY must be set in production")
+}
+
+// validateProdInitEnabled 检查初始化面板配置：生产环境推荐初始化完成后关闭 INIT_ENABLED
+// 不强制拒绝（允许重复初始化），但发出告警
+func validateProdInitEnabled(c *Config, lanMode bool) error {
 	if c.InitEnabled && !lanMode {
 		slog.Warn("生产环境启用 INIT_ENABLED，建议初始化完成后设置为 false 永久关闭",
 			"init_listen_addr", c.InitListenAddr)
 	}
-
 	return nil
 }
 
@@ -488,6 +538,7 @@ func validateJWTPrivateKeyPermissions(c *Config) error {
 	info, err := os.Stat(keyPath)
 	if err != nil {
 		// 文件不存在不在此处报错（keyloader 会在加载时校验）
+		//nolint:nilerr // 故意吞掉 stat 错误，由 keyloader 统一处理
 		return nil
 	}
 	mode := info.Mode().Perm()

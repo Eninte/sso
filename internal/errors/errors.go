@@ -30,7 +30,7 @@ const (
 	ErrCodeAccountDisabled    ErrorCode = "ACCOUNT_DISABLED"    // 账户禁用
 	ErrCodeInvalidToken       ErrorCode = "INVALID_TOKEN"       // Token无效
 	ErrCodeTokenExpired       ErrorCode = "TOKEN_EXPIRED"       // Token过期
-	ErrCodeTokenRotated       ErrorCode = "TOKEN_ROTATED"        // Refresh Token 已被轮换（重放检测）
+	ErrCodeTokenRotated       ErrorCode = "TOKEN_ROTATED"       // Refresh Token 已被轮换（重放检测）
 
 	// 用户相关错误
 	ErrCodeEmailExists         ErrorCode = "EMAIL_EXISTS"          // 邮箱已存在
@@ -67,12 +67,12 @@ const (
 	ErrCodeInvalidCodeVerifier  ErrorCode = "INVALID_CODE_VERIFIER"  // PKCE验证器无效
 	ErrCodeInvalidPKCEChallenge ErrorCode = "INVALID_PKCE_CHALLENGE" // PKCE挑战码无效
 	// 阶段 2.2 新增：Scope/PKCE/Consent 相关错误
-	ErrCodeInvalidScope     ErrorCode = "INVALID_SCOPE"      // 请求的 scope 超出客户端允许或白名单
-	ErrCodePKCERequired    ErrorCode = "PKCE_REQUIRED"      // 公共客户端必须使用 PKCE
-	ErrCodeConsentRequired ErrorCode = "CONSENT_REQUIRED"   // 需要用户同意授权
-	ErrCodeConsentDenied   ErrorCode = "CONSENT_DENIED"     // 用户拒绝授权
-	ErrCodeConsentInvalid  ErrorCode = "CONSENT_INVALID"     // consent_token 无效或已过期
-	ErrCodeClientMismatch  ErrorCode = "CLIENT_MISMATCH"     // refresh_token 客户端归属不一致
+	ErrCodeInvalidScope    ErrorCode = "INVALID_SCOPE"    // 请求的 scope 超出客户端允许或白名单
+	ErrCodePKCERequired    ErrorCode = "PKCE_REQUIRED"    // 公共客户端必须使用 PKCE
+	ErrCodeConsentRequired ErrorCode = "CONSENT_REQUIRED" // 需要用户同意授权
+	ErrCodeConsentDenied   ErrorCode = "CONSENT_DENIED"   // 用户拒绝授权
+	ErrCodeConsentInvalid  ErrorCode = "CONSENT_INVALID"  // consent_token 无效或已过期
+	ErrCodeClientMismatch  ErrorCode = "CLIENT_MISMATCH"  // refresh_token 客户端归属不一致
 
 	// MFA相关错误
 	ErrCodeMFAAlreadyEnabled      ErrorCode = "MFA_ALREADY_ENABLED"      // MFA已启用
@@ -99,9 +99,9 @@ const (
 	ErrCodeOAuthStateExpired       ErrorCode = "OAUTH_STATE_EXPIRED"        // OAuth状态已过期
 	// 阶段 2.3 新增
 	ErrCodeProviderEmailNotVerified ErrorCode = "PROVIDER_EMAIL_NOT_VERIFIED" // 提供商返回的 email 未验证
-	ErrCodeSocialAccountConflict    ErrorCode = "SOCIAL_ACCOUNT_CONFLICT"    // 社交账号已绑定到其他用户
-	ErrCodeEmailConflictWithLocal   ErrorCode = "EMAIL_CONFLICT_WITH_LOCAL"  // provider 返回 email 与本地账号冲突，需手动绑定
-	ErrCodeProviderUserIDMissing    ErrorCode = "PROVIDER_USER_ID_MISSING"   // provider 未返回 user_id
+	ErrCodeSocialAccountConflict    ErrorCode = "SOCIAL_ACCOUNT_CONFLICT"     // 社交账号已绑定到其他用户
+	ErrCodeEmailConflictWithLocal   ErrorCode = "EMAIL_CONFLICT_WITH_LOCAL"   // provider 返回 email 与本地账号冲突，需手动绑定
+	ErrCodeProviderUserIDMissing    ErrorCode = "PROVIDER_USER_ID_MISSING"    // provider 未返回 user_id
 
 	// 密钥相关错误
 	ErrCodeKeyNotFound    ErrorCode = "KEY_NOT_FOUND"    // 密钥未找到
@@ -240,7 +240,7 @@ var (
 	ErrResetTokenUsed          = New(ErrCodeResetTokenUsed, "重置令牌已被使用", 400)
 	ErrEmailRateLimitExceeded  = New(ErrCodeEmailRateLimitExceeded, "邮件发送过于频繁，请稍后再试", 429)
 	// 阶段 4 安全增强：邮件发送失败统一返回通用错误消息，不暴露 SMTP 内部信息（如服务器名、用户名、错误详情）
-	ErrEmailSendFailed         = New(ErrCodeEmailSendFailed, "邮件发送失败，请稍后重试", 502)
+	ErrEmailSendFailed = New(ErrCodeEmailSendFailed, "邮件发送失败，请稍后重试", 502)
 
 	// OAuth错误
 	ErrInvalidClient        = New(ErrCodeInvalidClient, "无效的客户端", 400)
@@ -252,7 +252,7 @@ var (
 	ErrInvalidCodeVerifier  = New(ErrCodeInvalidCodeVerifier, "无效的PKCE验证器", 400)
 	ErrInvalidPKCEChallenge = New(ErrCodeInvalidPKCEChallenge, "无效的PKCE挑战码", 400)
 	// 阶段 2.2 新增
-	ErrInvalidScope     = New(ErrCodeInvalidScope, "请求的scope超出允许范围", 400)
+	ErrInvalidScope    = New(ErrCodeInvalidScope, "请求的scope超出允许范围", 400)
 	ErrPKCERequired    = New(ErrCodePKCERequired, "公共客户端必须使用PKCE且采用S256方法", 400)
 	ErrConsentRequired = New(ErrCodeConsentRequired, "需要用户同意授权", 400)
 	ErrConsentDenied   = New(ErrCodeConsentDenied, "用户拒绝授权", 403)
@@ -286,9 +286,9 @@ var (
 
 	// 阶段 2.3 新增：社交登录安全增强错误
 	ErrProviderEmailNotVerified = New(ErrCodeProviderEmailNotVerified, "提供商返回的email未验证，拒绝登录", 403)
-	ErrSocialAccountConflict   = New(ErrCodeSocialAccountConflict, "社交账号已绑定到其他用户", 409)
-	ErrEmailConflictWithLocal  = New(ErrCodeEmailConflictWithLocal, "email与本地账号冲突，请先登录本地账号后再绑定社交账号", 409)
-	ErrProviderUserIDMissing   = New(ErrCodeProviderUserIDMissing, "provider未返回user_id", 400)
+	ErrSocialAccountConflict    = New(ErrCodeSocialAccountConflict, "社交账号已绑定到其他用户", 409)
+	ErrEmailConflictWithLocal   = New(ErrCodeEmailConflictWithLocal, "email与本地账号冲突，请先登录本地账号后再绑定社交账号", 409)
+	ErrProviderUserIDMissing    = New(ErrCodeProviderUserIDMissing, "provider未返回user_id", 400)
 
 	// 密钥错误
 	ErrKeyNotFound    = New(ErrCodeKeyNotFound, "密钥未找到", 500)

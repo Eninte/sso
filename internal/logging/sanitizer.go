@@ -152,7 +152,7 @@ func sanitizeURLDSN(dsn string) (string, bool) {
 	return schemePrefix + username + ":***@" + rest, true
 }
 
-// sanitizeKeyValueDSN 处理 key=value key=value 形式的 DSN
+// sanitizeKeyValueDSN 处理 "key=value key=value" 形式的 DSN
 // 仅替换 password=xxx 中的 xxx，保留其他字段
 // 返回 (sanitized, true) 表示已识别处理；返回 (_, false) 表示非此格式
 func sanitizeKeyValueDSN(dsn string) (string, bool) {

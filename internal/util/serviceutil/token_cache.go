@@ -16,12 +16,12 @@ import (
 //   - 解决 AuthService/AdminService/UserService 之间循环依赖问题
 //     （这些 service 都需要清 token 缓存但不能互相调用）
 //   - 所有需要立即让该用户所有 token 失效的路径都应调用：
-//     - AuthService.LogoutAllWithAudit（登出所有设备）
-//     - AuthService.handleRefreshTokenReplay（refresh token 重放攻击）
-//     - UserService.ChangePasswordWithAudit（修改密码后强制重新登录）
-//     - UserService.ResetPasswordWithAudit（密码重置）
-//     - AdminService.DisableUser/DeleteUser
-//     - IncrementLoginAttempts 触发账户锁定时
+//   - AuthService.LogoutAllWithAudit（登出所有设备）
+//   - AuthService.handleRefreshTokenReplay（refresh token 重放攻击）
+//   - UserService.ChangePasswordWithAudit（修改密码后强制重新登录）
+//   - UserService.ResetPasswordWithAudit（密码重置）
+//   - AdminService.DisableUser/DeleteUser
+//   - IncrementLoginAttempts 触发账户锁定时
 //
 // 实现说明：
 //   - 当前使用 DeletePattern("token:*") 清除全部 token 缓存

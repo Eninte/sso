@@ -103,6 +103,13 @@ func extractMFAChallenge(t *testing.T, resp *model.LoginResponse) string {
 	return resp.MFAChallenge
 }
 
+// newAuthSvcOnly 仅返回 AuthService，用于不需要 store/mfaSvc/cache 的测试。
+// 辅助函数内部允许 3 个 blank identifier，因为这是封装 createMFAAuthService 的合理用法。
+func newAuthSvcOnly(t *testing.T) *service.AuthService {
+	authSvc, _, _, _ := createMFAAuthService(t) //nolint:dogsled // 测试辅助：仅返回主对象
+	return authSvc
+}
+
 // ============================================================================
 // 第一阶段：handleMFARequiredLogin
 // ============================================================================
@@ -218,7 +225,7 @@ func TestAuthService_VerifyMFALogin_TOTP_Success(t *testing.T) {
 // ============================================================================
 
 func TestAuthService_VerifyMFALogin_ChallengeNotFound(t *testing.T) {
-	authSvc, _, _, _ := createMFAAuthService(t)
+	authSvc := newAuthSvcOnly(t)
 	ctx := context.Background()
 
 	// 直接调用 VerifyMFALogin 而不先走第一阶段
@@ -260,8 +267,7 @@ func TestAuthService_VerifyMFALogin_InvalidTOTP_IncrementAttempts(t *testing.T) 
 
 	// Challenge 应仍然有效（未超尝试次数），可继续尝试
 	// 使用有效 TOTP 再次验证（应可成功，证明 challenge 未被删除）
-	mfaSvc, _, _, _ := createMFAAuthService(t) // 不使用，仅占位避免编译错误
-	_ = mfaSvc
+	_ = newAuthSvcOnly(t) // 占位验证：新实例可正常装配
 }
 
 func TestAuthService_VerifyMFALogin_IPMismatch_DeletesChallenge(t *testing.T) {
@@ -373,7 +379,7 @@ func TestAuthService_VerifyMFALogin_ChallengeOneTime_UseAfterSuccess(t *testing.
 // ============================================================================
 
 func TestAuthService_VerifyMFALogin_EmptyChallenge(t *testing.T) {
-	authSvc, _, _, _ := createMFAAuthService(t)
+	authSvc := newAuthSvcOnly(t)
 	ctx := context.Background()
 
 	_, err := authSvc.VerifyMFALogin(ctx, &model.MFAVerifyRequest{
@@ -386,7 +392,7 @@ func TestAuthService_VerifyMFALogin_EmptyChallenge(t *testing.T) {
 }
 
 func TestAuthService_VerifyMFALogin_EmptyCode(t *testing.T) {
-	authSvc, _, _, _ := createMFAAuthService(t)
+	authSvc := newAuthSvcOnly(t)
 	ctx := context.Background()
 
 	_, err := authSvc.VerifyMFALogin(ctx, &model.MFAVerifyRequest{
@@ -399,7 +405,7 @@ func TestAuthService_VerifyMFALogin_EmptyCode(t *testing.T) {
 }
 
 func TestAuthService_VerifyMFALogin_InvalidMethod(t *testing.T) {
-	authSvc, _, _, _ := createMFAAuthService(t)
+	authSvc := newAuthSvcOnly(t)
 	ctx := context.Background()
 
 	_, err := authSvc.VerifyMFALogin(ctx, &model.MFAVerifyRequest{

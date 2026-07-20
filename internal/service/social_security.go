@@ -64,74 +64,9 @@ func ExtractProviderIdentity(provider string, userInfo map[string]interface{}) (
 
 	switch provider {
 	case model.ProviderGoogle:
-		// Google userinfo 标准返回字段：sub, email, email_verified, name, picture
-		if sub, ok := userInfo["sub"].(string); ok {
-			identity.ProviderUserID = sub
-		} else if id, ok := userInfo["id"].(string); ok {
-			// 部分 Google API 返回 id 而非 sub
-			identity.ProviderUserID = id
-		}
-
-		if email, ok := userInfo["email"].(string); ok {
-			identity.Email = email
-		}
-
-		// Google 返回 email_verified 是 bool 或 string
-		switch v := userInfo["email_verified"].(type) {
-		case bool:
-			identity.EmailVerified = v
-		case string:
-			identity.EmailVerified = v == "true" || v == "True"
-		}
-
-		if name, ok := userInfo["name"].(string); ok {
-			identity.DisplayName = name
-			identity.Metadata["display_name"] = name
-		}
-		if picture, ok := userInfo["picture"].(string); ok {
-			identity.Metadata["avatar_url"] = picture
-		}
-
+		extractGoogleIdentity(identity, userInfo)
 	case model.ProviderGitHub:
-		// GitHub /user 返回：id（数字）, login, name, email, avatar_url
-		// id 是 GitHub 用户唯一标识（数字），login 是用户名
-		// email 字段在用户未公开 email 时为空字符串
-		if id, ok := userInfo["id"]; ok {
-			// GitHub id 可能是 float64（JSON 数字）或 int
-			switch v := id.(type) {
-			case float64:
-				identity.ProviderUserID = fmt.Sprintf("%.0f", v)
-			case int:
-				identity.ProviderUserID = fmt.Sprintf("%d", v)
-			case int64:
-				identity.ProviderUserID = fmt.Sprintf("%d", v)
-			case string:
-				identity.ProviderUserID = v
-			}
-		}
-
-		if email, ok := userInfo["email"].(string); ok && email != "" {
-			identity.Email = email
-			// GitHub /user 接口不返回 email_verified 字段
-			// 安全设计：默认为未验证（fail-secure），由 HandleCallback 调用
-			// enrichGitHubIdentity 通过 /user/emails API 补全真实 verified 状态
-			// 阶段 D 审查修复（H2）：原实现硬编码 false 会导致已验证 GitHub 用户无法登录
-			identity.EmailVerified = false
-		}
-
-		if login, ok := userInfo["login"].(string); ok {
-			identity.Metadata["login"] = login
-			if identity.DisplayName == "" {
-				identity.DisplayName = login
-			}
-		}
-		if name, ok := userInfo["name"].(string); ok && name != "" {
-			identity.DisplayName = name
-			identity.Metadata["display_name"] = name
-		}
-		if avatarURL, ok := userInfo["avatar_url"].(string); ok {
-			identity.Metadata["avatar_url"] = avatarURL
-		}
+		extractGitHubIdentity(identity, userInfo)
 	}
 
 	// 必须有 provider_user_id
@@ -140,6 +75,82 @@ func ExtractProviderIdentity(provider string, userInfo map[string]interface{}) (
 	}
 
 	return identity, nil
+}
+
+// extractGoogleIdentity 从 Google userinfo 提取身份信息
+//
+// Google userinfo 标准返回字段：sub, email, email_verified, name, picture
+func extractGoogleIdentity(identity *ProviderIdentity, userInfo map[string]interface{}) {
+	if sub, ok := userInfo["sub"].(string); ok {
+		identity.ProviderUserID = sub
+	} else if id, ok := userInfo["id"].(string); ok {
+		// 部分 Google API 返回 id 而非 sub
+		identity.ProviderUserID = id
+	}
+
+	if email, ok := userInfo["email"].(string); ok {
+		identity.Email = email
+	}
+
+	// Google 返回 email_verified 是 bool 或 string
+	switch v := userInfo["email_verified"].(type) {
+	case bool:
+		identity.EmailVerified = v
+	case string:
+		identity.EmailVerified = v == "true" || v == "True"
+	}
+
+	if name, ok := userInfo["name"].(string); ok {
+		identity.DisplayName = name
+		identity.Metadata["display_name"] = name
+	}
+	if picture, ok := userInfo["picture"].(string); ok {
+		identity.Metadata["avatar_url"] = picture
+	}
+}
+
+// extractGitHubIdentity 从 GitHub /user 提取身份信息
+//
+// GitHub /user 返回：id（数字）, login, name, email, avatar_url
+// id 是 GitHub 用户唯一标识（数字），login 是用户名
+// email 字段在用户未公开 email 时为空字符串
+func extractGitHubIdentity(identity *ProviderIdentity, userInfo map[string]interface{}) {
+	if id, ok := userInfo["id"]; ok {
+		// GitHub id 可能是 float64（JSON 数字）或 int
+		switch v := id.(type) {
+		case float64:
+			identity.ProviderUserID = fmt.Sprintf("%.0f", v)
+		case int:
+			identity.ProviderUserID = fmt.Sprintf("%d", v)
+		case int64:
+			identity.ProviderUserID = fmt.Sprintf("%d", v)
+		case string:
+			identity.ProviderUserID = v
+		}
+	}
+
+	if email, ok := userInfo["email"].(string); ok && email != "" {
+		identity.Email = email
+		// GitHub /user 接口不返回 email_verified 字段
+		// 安全设计：默认为未验证（fail-secure），由 HandleCallback 调用
+		// enrichGitHubIdentity 通过 /user/emails API 补全真实 verified 状态
+		// 阶段 D 审查修复（H2）：原实现硬编码 false 会导致已验证 GitHub 用户无法登录
+		identity.EmailVerified = false
+	}
+
+	if login, ok := userInfo["login"].(string); ok {
+		identity.Metadata["login"] = login
+		if identity.DisplayName == "" {
+			identity.DisplayName = login
+		}
+	}
+	if name, ok := userInfo["name"].(string); ok && name != "" {
+		identity.DisplayName = name
+		identity.Metadata["display_name"] = name
+	}
+	if avatarURL, ok := userInfo["avatar_url"].(string); ok {
+		identity.Metadata["avatar_url"] = avatarURL
+	}
 }
 
 // ============================================================================

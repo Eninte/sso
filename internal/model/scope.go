@@ -15,9 +15,9 @@ package model
 //
 // 本项目支持的白名单：
 const (
-	ScopeOpenID     = "openid"
-	ScopeProfile    = "profile"
-	ScopeEmail      = "email"
+	ScopeOpenID        = "openid"
+	ScopeProfile       = "profile"
+	ScopeEmail         = "email"
 	ScopeOfflineAccess = "offline_access" // 允许 refresh_token（RFC 6749 §3.3）
 )
 

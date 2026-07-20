@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/example/sso/internal/handler"
 	"github.com/example/sso/internal/middleware"
@@ -52,7 +53,16 @@ func main() {
 	fmt.Printf("Scalar JS: http://%s/api-docs/scalar.js\n", listenAddr)
 	fmt.Printf("\n按 Ctrl+C 退出\n\n")
 
-	if err := http.ListenAndServe(listenAddr, mux); err != nil {
+	// 使用 http.Server 显式设置超时，满足 gosec G114
+	server := &http.Server{
+		Addr:              listenAddr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("启动失败: %v", err)
 	}
 }

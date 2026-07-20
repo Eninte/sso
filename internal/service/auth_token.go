@@ -4,6 +4,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/example/sso/internal/cache"
@@ -68,12 +69,15 @@ func (s *AuthService) handleRefreshTokenReplay(ctx context.Context, userID, refr
 	if auditCtx != nil {
 		ipAddress = auditCtx.IPAddress
 	}
-	auditutil.CriticalAuditLog(ctx, s.auditSvc, string(model.EventSuspiciousActivity), userID, map[string]interface{}{
-		"reason":           "refresh_token_replay",
-		"client_id":        "",
-		"ip_address":       ipAddress,
+	if err := auditutil.CriticalAuditLog(ctx, s.auditSvc, string(model.EventSuspiciousActivity), userID, map[string]interface{}{
+		"reason":            "refresh_token_replay",
+		"client_id":         "",
+		"ip_address":        ipAddress,
 		"refresh_token_len": len(refreshToken),
-	})
+	}); err != nil {
+		// CriticalAuditLog 失败时回退 stderr，不影响主流程
+		slog.WarnContext(ctx, "refresh_token_replay 审计日志写入失败", "user_id", userID, "error", err)
+	}
 
 	// 撤销该用户的全部 token（失败也返回错误，但优先记录日志）
 	// 阶段 D 审查修复（M6 fail-secure）：即使 RevokeAllUserTokens 失败也必须清缓存
