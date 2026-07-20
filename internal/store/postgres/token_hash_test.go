@@ -262,3 +262,113 @@ func TestStore_TokenHash_LegacyDataFallback(t *testing.T) {
 	assert.Equal(t, tokenID, retrieved2.ID)
 	assert.Equal(t, refreshToken, retrieved2.RefreshToken)
 }
+
+// TestStore_TokenHash_RevokeByLegacyFallback 验证 RevokeToken 在 hash 为 NULL 时回退到明文查询
+// 阶段 D 修复（H6）：覆盖 RevokeToken 的回退 UPDATE 路径
+func TestStore_TokenHash_RevokeByLegacyFallback(t *testing.T) {
+	store, db := setupTestStore(t)
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
+	ctx := context.Background()
+
+	user := newTestUser("hash-revoke-legacy@example.com")
+	require.NoError(t, store.Create(ctx, user))
+
+	uniqueClientID := "test-hash-revoke-legacy-" + uuid.New().String()[:8]
+	testClient := &model.Client{
+		ID:           uuid.New().String(),
+		ClientID:     uniqueClientID,
+		ClientSecret: "secret",
+		Name:         "Hash Revoke Legacy Client",
+		RedirectURIs: []string{"http://localhost"},
+		GrantTypes:   []string{"authorization_code"},
+		Scopes:       []string{"openid"},
+		CreatedAt:    time.Now(),
+	}
+	require.NoError(t, store.CreateClient(ctx, testClient))
+
+	// 直接插入一行 hash 字段为 NULL 的记录，模拟旧数据
+	accessToken := "test-legacy-revoke-access-" + uuid.New().String()
+	tokenID := uuid.New().String()
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO tokens (id, access_token, refresh_token, user_id, client_id, scopes, expires_at, created_at, access_token_hash, refresh_token_hash)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, NULL)
+	`,
+		tokenID, accessToken, "test-legacy-revoke-refresh-"+uuid.New().String(),
+		user.ID, uniqueClientID, []string{"openid"},
+		time.Now().Add(1*time.Hour), time.Now(),
+	)
+	require.NoError(t, err)
+
+	// 通过 access_token 撤销（hash 为 NULL 应回退到明文 UPDATE）
+	require.NoError(t, store.RevokeToken(ctx, accessToken))
+
+	// 验证 revoked_at 已设置
+	retrieved, err := store.GetTokenByAccessToken(ctx, accessToken)
+	require.NoError(t, err)
+	require.NotNil(t, retrieved.RevokedAt, "revoked_at 必须已设置")
+}
+
+// TestStore_TokenHash_RotateByLegacyFallback 验证 RotateRefreshToken 在 hash 为 NULL 时回退到明文查询
+// 阶段 D 修复（H6）：覆盖 RotateRefreshToken 的回退 UPDATE 命中路径
+func TestStore_TokenHash_RotateByLegacyFallback(t *testing.T) {
+	store, db := setupTestStore(t)
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
+	ctx := context.Background()
+
+	user := newTestUser("hash-rotate-legacy@example.com")
+	require.NoError(t, store.Create(ctx, user))
+
+	uniqueClientID := "test-hash-rotate-legacy-" + uuid.New().String()[:8]
+	testClient := &model.Client{
+		ID:           uuid.New().String(),
+		ClientID:     uniqueClientID,
+		ClientSecret: "secret",
+		Name:         "Hash Rotate Legacy Client",
+		RedirectURIs: []string{"http://localhost"},
+		GrantTypes:   []string{"authorization_code"},
+		Scopes:       []string{"openid"},
+		CreatedAt:    time.Now(),
+	}
+	require.NoError(t, store.CreateClient(ctx, testClient))
+
+	// 直接插入一行 hash 字段为 NULL 的记录，模拟旧数据
+	oldRefresh := "test-legacy-rotate-refresh-" + uuid.New().String()
+	oldTokenID := uuid.New().String()
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO tokens (id, access_token, refresh_token, user_id, client_id, scopes, expires_at, created_at, access_token_hash, refresh_token_hash)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, NULL)
+	`,
+		oldTokenID, "test-legacy-rotate-access-"+uuid.New().String(), oldRefresh,
+		user.ID, uniqueClientID, []string{"openid"},
+		time.Now().Add(1*time.Hour), time.Now(),
+	)
+	require.NoError(t, err)
+
+	// 构造新 token
+	newToken := &model.Token{
+		ID:           uuid.New().String(),
+		AccessToken:  "test-legacy-rotate-new-access-" + uuid.New().String(),
+		RefreshToken: "test-legacy-rotate-new-refresh-" + uuid.New().String(),
+		UserID:       user.ID,
+		ClientID:     ptrTo(uniqueClientID),
+		Scopes:       []string{"openid"},
+		ExpiresAt:    time.Now().Add(1 * time.Hour),
+		CreatedAt:    time.Now(),
+	}
+
+	// 轮换（hash 为 NULL 应回退到明文 UPDATE 命中）
+	require.NoError(t, store.RotateRefreshToken(ctx, oldRefresh, newToken))
+
+	// 验证旧 token 已标记轮换
+	oldRetrieved, err := store.GetTokenByRefreshToken(ctx, oldRefresh)
+	require.NoError(t, err)
+	require.NotNil(t, oldRetrieved.RotatedAt, "rotated_at 必须已设置")
+	require.NotNil(t, oldRetrieved.RevokedAt, "revoked_at 必须已设置")
+	assert.Equal(t, newToken.ID, *oldRetrieved.ReplacedByTokenID)
+}
