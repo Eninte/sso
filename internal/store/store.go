@@ -25,6 +25,8 @@ var (
 	// ErrTokenRotated Refresh Token 已被轮换（rotated_at 非空）又再次出现
 	// 重新导出，避免 store 包用户直接依赖 apperrors
 	ErrTokenRotated = apperrors.ErrTokenRotated
+	// 阶段 2.3：社交账号相关错误
+	ErrSocialAccountConflict = apperrors.ErrSocialAccountConflict
 )
 
 // ============================================================================
@@ -38,6 +40,7 @@ type Store interface {
 	AuditLogStore
 	KeyStore
 	MFARecoveryCodeStore
+	SocialAccountStore
 	Close() error
 	Ping(ctx context.Context) error
 }
@@ -145,7 +148,7 @@ type KeyStore interface {
 type MFARecoveryCodeStore interface {
 	StoreMFARecoveryCodes(ctx context.Context, userID string, codeHashes []string) error
 	GetUnusedMFARecoveryCodes(ctx context.Context, userID string) ([]string, error)
-	VerifyAndUseMFARecoveryCode(ctx context.Context, userID, codeHash string) (bool, error)
+	VerifyAndUseMFARecoveryCode(ctx context.Context, userID string, codeHash string) (bool, error)
 	DeleteUsedMFARecoveryCodes(ctx context.Context, userID string) error
 	DeleteAllMFARecoveryCodes(ctx context.Context, userID string) error
 
@@ -153,6 +156,38 @@ type MFARecoveryCodeStore interface {
 	// 必须在单个事务中执行 Update(user) + DeleteAllMFARecoveryCodes，
 	// 防止出现"用户MFA已禁用但恢复码残留"的不一致状态
 	DisableMFAAndClearRecoveryCodes(ctx context.Context, user *model.User) error
+}
+
+// ============================================================================
+// SocialAccountStore 社交账号身份存储接口（阶段 2.3）
+// ============================================================================
+
+type SocialAccountStore interface {
+	// CreateSocialAccount 创建社交账号绑定记录
+	// 唯一约束：(provider, provider_user_id) 与 (user_id, provider)
+	// 冲突时返回 ErrSocialAccountConflict
+	CreateSocialAccount(ctx context.Context, account *model.SocialAccount) error
+
+	// GetSocialAccount 通过 (provider, provider_user_id) 查找社交账号
+	// 用于社交登录回调时查找已绑定的用户
+	// 不存在返回 ErrNotFound
+	GetSocialAccount(ctx context.Context, provider, providerUserID string) (*model.SocialAccount, error)
+
+	// ListSocialAccountsByUserID 列出用户绑定的所有社交账号
+	// 用于用户在个人中心查看/解绑社交账号
+	ListSocialAccountsByUserID(ctx context.Context, userID string) ([]*model.SocialAccount, error)
+
+	// DeleteSocialAccount 解绑社交账号
+	// 用于用户主动解绑
+	DeleteSocialAccount(ctx context.Context, provider, providerUserID string) error
+
+	// CreateSocialAccountAtomic 原子地创建用户 + 社交账号绑定
+	// 必须在单个事务中执行：
+	//   1. INSERT users
+	//   2. INSERT social_accounts
+	// 防止"用户已创建但社交账号未绑定"或"社交账号已绑定但用户不存在"的不一致状态
+	// 若 (provider, provider_user_id) 已存在则返回 ErrSocialAccountConflict
+	CreateSocialAccountAtomic(ctx context.Context, user *model.User, account *model.SocialAccount) error
 }
 
 // ============================================================================

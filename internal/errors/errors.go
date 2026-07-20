@@ -96,6 +96,11 @@ const (
 	ErrCodeSocialLoginFailed       ErrorCode = "SOCIAL_LOGIN_FAILED"        // 社交登录失败
 	ErrCodeOAuthStateInvalid       ErrorCode = "OAUTH_STATE_INVALID"        // OAuth状态无效
 	ErrCodeOAuthStateExpired       ErrorCode = "OAUTH_STATE_EXPIRED"        // OAuth状态已过期
+	// 阶段 2.3 新增
+	ErrCodeProviderEmailNotVerified ErrorCode = "PROVIDER_EMAIL_NOT_VERIFIED" // 提供商返回的 email 未验证
+	ErrCodeSocialAccountConflict    ErrorCode = "SOCIAL_ACCOUNT_CONFLICT"    // 社交账号已绑定到其他用户
+	ErrCodeEmailConflictWithLocal   ErrorCode = "EMAIL_CONFLICT_WITH_LOCAL"  // provider 返回 email 与本地账号冲突，需手动绑定
+	ErrCodeProviderUserIDMissing    ErrorCode = "PROVIDER_USER_ID_MISSING"   // provider 未返回 user_id
 
 	// 密钥相关错误
 	ErrCodeKeyNotFound    ErrorCode = "KEY_NOT_FOUND"    // 密钥未找到
@@ -275,6 +280,12 @@ var (
 	ErrSocialLoginFailed       = New(ErrCodeSocialLoginFailed, "社交登录失败", 400)
 	ErrOAuthStateInvalid       = New(ErrCodeOAuthStateInvalid, "OAuth状态无效", 400)
 	ErrOAuthStateExpired       = New(ErrCodeOAuthStateExpired, "OAuth状态已过期，请重新发起登录", 400)
+
+	// 阶段 2.3 新增：社交登录安全增强错误
+	ErrProviderEmailNotVerified = New(ErrCodeProviderEmailNotVerified, "提供商返回的email未验证，拒绝登录", 403)
+	ErrSocialAccountConflict   = New(ErrCodeSocialAccountConflict, "社交账号已绑定到其他用户", 409)
+	ErrEmailConflictWithLocal  = New(ErrCodeEmailConflictWithLocal, "email与本地账号冲突，请先登录本地账号后再绑定社交账号", 409)
+	ErrProviderUserIDMissing   = New(ErrCodeProviderUserIDMissing, "provider未返回user_id", 400)
 
 	// 密钥错误
 	ErrKeyNotFound    = New(ErrCodeKeyNotFound, "密钥未找到", 500)

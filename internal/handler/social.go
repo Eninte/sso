@@ -1,12 +1,15 @@
 // Package handler 第三方登录处理器
-// 处理OAuth2第三方登录
+// 处理OAuth2第三方登录（阶段 2.2 改造：mux.Vars + 统一错误处理）
 package handler
 
 import (
 	"net/http"
 
+	"github.com/gorilla/mux"
+
 	apperrors "github.com/example/sso/internal/errors"
 	"github.com/example/sso/internal/service"
+	"github.com/example/sso/internal/util/handlerutil"
 )
 
 // ============================================================================
@@ -25,29 +28,28 @@ func NewSocialLoginHandler(socialSvc service.SocialLoginServiceInterface) *Socia
 
 // HandleLogin 处理第三方登录请求
 // GET /auth/{provider}
+//
+// 阶段 2.3 改造：使用 mux.Vars 解析 provider（替代脆弱的字符串切片）
 func (h *SocialLoginHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
-	// 1. 获取提供商名称
-	provider := r.URL.Query().Get("provider")
+	// 1. 从路径变量获取 provider
+	vars := mux.Vars(r)
+	provider := vars["provider"]
 	if provider == "" {
-		// 从URL路径获取
-		// /auth/google -> google
-		path := r.URL.Path
-		if len(path) > 7 { // /auth/ = 7 chars
-			provider = path[7:]
-		}
+		handlerutil.WriteValidationError(w, "provider", getMessage(r, apperrors.ErrCodeUnsupportedLoginMethod))
+		return
 	}
 
-	// 2. 获取状态参数
+	// 2. 获取状态参数（客户端可选传入，未传则由 service 生成）
 	state := r.URL.Query().Get("state")
 
 	// 3. 获取授权URL（redirectURI由服务端固定，不接受客户端传入）
 	authURL, err := h.socialSvc.GetAuthorizationURL(provider, state)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeUnsupportedLoginMethod))
+		handlerutil.WriteJSONError(w, err)
 		return
 	}
 
-	// 5. 重定向到授权URL
+	// 4. 重定向到授权URL
 	// authURL 由服务层从预配置的 OAuth 提供商端点构造，
 	// provider 已在 GetAuthorizationURL 内白名单验证，非用户可控的开放重定向
 	http.Redirect(w, r, authURL, http.StatusTemporaryRedirect) // nosec G710
@@ -55,44 +57,45 @@ func (h *SocialLoginHandler) HandleLogin(w http.ResponseWriter, r *http.Request)
 
 // HandleCallback 处理OAuth回调
 // GET /auth/{provider}/callback
+//
+// 阶段 2.3 改造：
+//   - 使用 mux.Vars 解析 provider
+//   - 使用 handlerutil.WriteJSONError 统一错误响应
+//   - 区分错误类型返回合适的 HTTP 状态码
 func (h *SocialLoginHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
-	// 1. 获取提供商名称
-	provider := r.URL.Query().Get("provider")
+	// 1. 从路径变量获取 provider
+	vars := mux.Vars(r)
+	provider := vars["provider"]
 	if provider == "" {
-		path := r.URL.Path
-		// /auth/google/callback -> google
-		if len(path) > 17 { // /auth/ + /callback = 17 chars
-			provider = path[7 : len(path)-9]
-		}
+		handlerutil.WriteValidationError(w, "provider", getMessage(r, apperrors.ErrCodeUnsupportedLoginMethod))
+		return
 	}
 
 	// 2. 获取授权码
 	code := r.URL.Query().Get("code")
 	if code == "" {
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeMissingAuthCode))
+		handlerutil.WriteValidationError(w, "code", getMessage(r, apperrors.ErrCodeMissingAuthCode))
 		return
 	}
 
 	// 3. 获取state参数（用于CSRF防护）
 	state := r.URL.Query().Get("state")
 	if state == "" {
-		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeOAuthStateInvalid))
+		handlerutil.WriteValidationError(w, "state", getMessage(r, apperrors.ErrCodeOAuthStateInvalid))
 		return
 	}
 
 	// 4. 处理回调（验证state，redirectURI从state缓存中获取防止开放重定向）
 	token, err := h.socialSvc.HandleCallback(r.Context(), provider, code, state)
 	if err != nil {
-		// 根据错误类型返回相应的错误码
-		if apperrors.Is(err, apperrors.ErrOAuthStateInvalid) {
-			writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeOAuthStateInvalid))
-			return
-		}
-		writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeSocialLoginFailed))
+		// 阶段 2.3：使用 handlerutil.WriteJSONError 统一错误响应
+		// 错误已带 HTTP 状态码（apperrors.New 指定）
+		handlerutil.WriteJSONError(w, err)
 		return
 	}
 
-	// 6. 返回Token
+	// 5. 返回Token
+	// 注：当前 token 通过 JSON 返回，后续阶段会改造为 HttpOnly Cookie
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"access_token":  token.AccessToken,
 		"refresh_token": token.RefreshToken,

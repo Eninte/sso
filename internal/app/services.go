@@ -181,6 +181,8 @@ func initServices(cfg *config.Config, version, buildTime string) (*Services, *sq
 	// ==== 初始化第三方登录服务 ====
 	socialSvc := service.NewSocialLoginService(store, jwtSvc, cfg.BaseURL(), cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GitHubClientID, cfg.GitHubClientSecret)
 	socialSvc.SetAuditService(auditSvc)
+	// 阶段 2.3：注入 cache 用于 state 的 Redis 存储（支持多实例部署）
+	socialSvc.SetCache(cacheSvc)
 	if cfg.GoogleClientID != "" && cfg.GoogleClientSecret != "" {
 		slog.Info("Google第三方登录已启用")
 	}

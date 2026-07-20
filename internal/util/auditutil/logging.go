@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"reflect"
 	"time"
 
 	apperrors "github.com/example/sso/internal/errors"
@@ -52,6 +53,18 @@ type SyncAuditLogger interface {
 	LogSync(ctx context.Context, log *model.AuditLog) error
 }
 
+// isNilAuditService 检查 auditSvc 是否为 nil
+// 处理 Go 接口 nil 陷阱：当 *AuditService 类型 nil 指针赋值给 AuditService 接口时，
+// 接口本身不为 nil（包含 type=*AuditService, value=nil），导致 == nil 检查失败。
+// 使用 reflect 检查底层值是否为 nil。
+func isNilAuditService(auditSvc AuditService) bool {
+	if auditSvc == nil {
+		return true
+	}
+	v := reflect.ValueOf(auditSvc)
+	return v.Kind() == reflect.Ptr && v.IsNil()
+}
+
 // LogWithFallback 使用回退处理的审计日志记录
 // 当审计日志记录失败时，自动回退到stderr
 //
@@ -59,11 +72,11 @@ type SyncAuditLogger interface {
 // 错误会被记录到stderr，但不会返回给调用者。
 //
 // 参数:
-//   - auditSvc: 审计服务实例（可以为nil）
+//   - auditSvc: 审计服务实例（可以为nil，包括底层为 nil 指针的接口）
 //   - logFunc: 执行审计日志记录的函数，返回error
 //
 // 行为:
-//   - 如果auditSvc为nil，直接返回（审计日志是可选的）
+//   - 如果auditSvc为nil（或底层指针为nil），直接返回（审计日志是可选的）
 //   - 如果logFunc执行成功，返回
 //   - 如果logFunc返回错误，记录到stderr并继续（不影响主流程）
 //
@@ -74,7 +87,7 @@ type SyncAuditLogger interface {
 //	})
 func LogWithFallback(auditSvc AuditService, logFunc func() error) {
 	// 审计服务为nil时，直接返回（审计日志是可选的）
-	if auditSvc == nil {
+	if isNilAuditService(auditSvc) {
 		return
 	}
 
@@ -114,8 +127,8 @@ func LogWithFallback(auditSvc AuditService, logFunc func() error) {
 //	    "ip_address": ipAddress,
 //	})
 func SafeAuditLog(ctx context.Context, auditSvc AuditService, event, userID string, metadata map[string]interface{}) {
-	// 审计服务为nil时，直接返回（审计日志是可选的）
-	if auditSvc == nil {
+	// 审计服务为nil时（包括底层 nil 指针的接口），直接返回（审计日志是可选的）
+	if isNilAuditService(auditSvc) {
 		return
 	}
 
@@ -202,8 +215,8 @@ func SafeAuditLog(ctx context.Context, auditSvc AuditService, event, userID stri
 //	    return err
 //	}
 func CriticalAuditLog(ctx context.Context, auditSvc AuditService, event, userID string, metadata map[string]interface{}) error {
-	// 关键操作必须有审计服务
-	if auditSvc == nil {
+	// 关键操作必须有审计服务（包括底层 nil 指针的接口）
+	if isNilAuditService(auditSvc) {
 		return apperrors.New(apperrors.ErrCodeInternal, "audit service required for critical operations", 500)
 	}
 

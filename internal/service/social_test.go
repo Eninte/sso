@@ -186,9 +186,12 @@ func TestSocialLoginService_HandleCallback_FullFlow(t *testing.T) {
 			"access_token": "mock-google-token",
 			"token_type":   "bearer",
 		}
+		// 阶段 2.3：必须返回 sub（ProviderUserID）和 email_verified=true
 		userInfoResp := map[string]interface{}{
-			"email": "newuser@gmail.com",
-			"name":  "New User",
+			"sub":            "google-user-123",
+			"email":          "newuser@gmail.com",
+			"email_verified": true,
+			"name":           "New User",
 		}
 
 		// 创建mock服务器
@@ -240,16 +243,24 @@ func TestSocialLoginService_HandleCallback_FullFlow(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "newuser@gmail.com", user.Email)
 		assert.True(t, user.EmailVerified)
+
+		// 阶段 2.3：验证 social_account 已创建
+		account, err := storeInst.GetSocialAccount(context.Background(), "google", "google-user-123")
+		require.NoError(t, err)
+		assert.Equal(t, user.ID, account.UserID)
+		assert.Equal(t, "google", account.Provider)
+		assert.Equal(t, "google-user-123", account.ProviderUserID)
+		assert.True(t, account.EmailVerified)
 	})
 
-	t.Run("Google回调-用户已存在", func(t *testing.T) {
+	t.Run("Google回调-社交账号已存在-复用用户", func(t *testing.T) {
 		storeInst := mock.New()
 		jwtSvc := createTestJWTService()
 
-		// 预先创建用户
+		// 阶段 2.3：预先创建用户 + social_account（模拟用户已绑定 Google 账号）
 		hashedPw, _ := crypto.NewPasswordService(4).HashPassword("Pass123!")
 		storeInst.AddUser(&model.User{
-			ID:            "existing-id",
+			ID:            "existing-user-id",
 			Email:         "existing@gmail.com",
 			PasswordHash:  hashedPw,
 			EmailVerified: true,
@@ -257,9 +268,23 @@ func TestSocialLoginService_HandleCallback_FullFlow(t *testing.T) {
 			CreatedAt:     time.Now(),
 			UpdatedAt:     time.Now(),
 		})
+		storeInst.AddSocialAccount(&model.SocialAccount{
+			ID:             "sa-1",
+			Provider:       "google",
+			ProviderUserID: "google-user-123",
+			UserID:         "existing-user-id",
+			ProviderEmail:  "existing@gmail.com",
+			EmailVerified:  true,
+			CreatedAt:      time.Now(),
+			UpdatedAt:      time.Now(),
+		})
 
 		tokenResp := map[string]interface{}{"access_token": "tok"}
-		userInfoResp := map[string]interface{}{"email": "existing@gmail.com"}
+		userInfoResp := map[string]interface{}{
+			"sub":            "google-user-123",
+			"email":          "existing@gmail.com",
+			"email_verified": true,
+		}
 
 		mux := http.NewServeMux()
 		mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
@@ -280,7 +305,6 @@ func TestSocialLoginService_HandleCallback_FullFlow(t *testing.T) {
 
 		svc := service.NewSocialLoginServiceWithProviders(storeInst, jwtSvc, providers, http.DefaultClient)
 
-		// 先获取授权URL以生成state
 		authURL, err := svc.GetAuthorizationURL("google", "")
 		require.NoError(t, err)
 		parsedURL, _ := url.Parse(authURL)
@@ -291,14 +315,116 @@ func TestSocialLoginService_HandleCallback_FullFlow(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.NotEmpty(t, resp.AccessToken)
+
+		// 阶段 2.3：验证不会重复创建用户
+		users, _, _ := storeInst.ListUsers(context.Background(), 0, 100)
+		assert.Len(t, users, 1)
 	})
 
-	t.Run("GitHub回调-无email使用login", func(t *testing.T) {
+	t.Run("阶段2.3-拒绝provider_email未验证", func(t *testing.T) {
+		storeInst := mock.New()
+		jwtSvc := createTestJWTService()
+
+		tokenResp := map[string]interface{}{"access_token": "tok"}
+		// Google 返回 email_verified=false
+		userInfoResp := map[string]interface{}{
+			"sub":            "google-unverified-id",
+			"email":          "unverified@gmail.com",
+			"email_verified": false,
+		}
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(tokenResp)
+		})
+		mux.HandleFunc("/userinfo", func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(userInfoResp)
+		})
+		server := httptest.NewServer(mux)
+		defer server.Close()
+
+		providers := map[string]*service.OAuthProvider{
+			"google": {
+				Name: "google", ClientID: "g-id", ClientSecret: "g-secret",
+				TokenURL: server.URL + "/token", UserInfoURL: server.URL + "/userinfo",
+			},
+		}
+
+		svc := service.NewSocialLoginServiceWithProviders(storeInst, jwtSvc, providers, http.DefaultClient)
+
+		authURL, _ := svc.GetAuthorizationURL("google", "")
+		parsedURL, _ := url.Parse(authURL)
+		state := parsedURL.Query().Get("state")
+
+		_, err := svc.HandleCallback(context.Background(), "google", "code", state)
+
+		// 阶段 2.3：未验证 email 应被拒绝
+		require.Error(t, err)
+		assert.ErrorIs(t, err, service.ErrProviderEmailNotVerified)
+	})
+
+	t.Run("阶段2.3-拒绝email与本地账号冲突", func(t *testing.T) {
+		storeInst := mock.New()
+		jwtSvc := createTestJWTService()
+
+		// 预先创建本地账号（无 social_account 绑定）
+		hashedPw, _ := crypto.NewPasswordService(4).HashPassword("Pass123!")
+		storeInst.AddUser(&model.User{
+			ID:            "local-user-id",
+			Email:         "local@gmail.com",
+			PasswordHash:  hashedPw,
+			EmailVerified: true,
+			Status:        model.UserStatusActive,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
+		})
+
+		tokenResp := map[string]interface{}{"access_token": "tok"}
+		// Google 返回与本地账号相同的 email，但 ProviderUserID 不同（应拒绝合并）
+		userInfoResp := map[string]interface{}{
+			"sub":            "attacker-google-id",
+			"email":          "local@gmail.com",
+			"email_verified": true,
+		}
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(tokenResp)
+		})
+		mux.HandleFunc("/userinfo", func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(userInfoResp)
+		})
+		server := httptest.NewServer(mux)
+		defer server.Close()
+
+		providers := map[string]*service.OAuthProvider{
+			"google": {
+				Name: "google", ClientID: "g-id", ClientSecret: "g-secret",
+				TokenURL: server.URL + "/token", UserInfoURL: server.URL + "/userinfo",
+			},
+		}
+
+		svc := service.NewSocialLoginServiceWithProviders(storeInst, jwtSvc, providers, http.DefaultClient)
+
+		authURL, _ := svc.GetAuthorizationURL("google", "")
+		parsedURL, _ := url.Parse(authURL)
+		state := parsedURL.Query().Get("state")
+
+		_, err := svc.HandleCallback(context.Background(), "google", "code", state)
+
+		// 阶段 2.3：email 冲突应拒绝自动合并，返回 ErrEmailConflictWithLocal
+		require.Error(t, err)
+		assert.ErrorIs(t, err, service.ErrEmailConflictWithLocal)
+	})
+
+	t.Run("GitHub回调-无email-拒绝合成email", func(t *testing.T) {
 		storeInst := mock.New()
 		jwtSvc := createTestJWTService()
 
 		tokenResp := map[string]interface{}{"access_token": "gh-token"}
+		// GitHub 风格：有 id 但无 email
 		userInfoResp := map[string]interface{}{
+			"id":    float64(12345),
 			"login": "ghuser",
 			"name":  "GitHub User",
 		}
@@ -322,22 +448,19 @@ func TestSocialLoginService_HandleCallback_FullFlow(t *testing.T) {
 
 		svc := service.NewSocialLoginServiceWithProviders(storeInst, jwtSvc, providers, http.DefaultClient)
 
-		// 先获取授权URL以生成state
-		authURL, err := svc.GetAuthorizationURL("github", "")
-		require.NoError(t, err)
+		authURL, _ := svc.GetAuthorizationURL("github", "")
 		parsedURL, _ := url.Parse(authURL)
 		state := parsedURL.Query().Get("state")
-		require.NotEmpty(t, state)
 
-		resp, err := svc.HandleCallback(context.Background(), "github", "code", state)
+		_, err := svc.HandleCallback(context.Background(), "github", "code", state)
 
-		require.NoError(t, err)
-		assert.NotEmpty(t, resp.AccessToken)
+		// 阶段 2.3：GitHub 无 email 时视为未验证，应拒绝
+		require.Error(t, err)
+		assert.ErrorIs(t, err, service.ErrProviderEmailNotVerified)
 
-		// 验证GitHub用户使用login@github.com作为email
-		user, err := storeInst.GetByEmail(context.Background(), "ghuser@github.com")
-		require.NoError(t, err)
-		assert.Equal(t, "ghuser@github.com", user.Email)
+		// 验证不会合成 login@github.com 创建用户
+		users, _, _ := storeInst.ListUsers(context.Background(), 0, 100)
+		assert.Len(t, users, 0)
 	})
 
 	t.Run("token交换失败", func(t *testing.T) {
@@ -375,13 +498,17 @@ func TestSocialLoginService_HandleCallback_FullFlow(t *testing.T) {
 		assert.ErrorIs(t, err, service.ErrOAuthCodeInvalid)
 	})
 
-	t.Run("用户信息获取失败-无email", func(t *testing.T) {
+	t.Run("阶段2.3-无provider_user_id-拒绝", func(t *testing.T) {
 		storeInst := mock.New()
 		jwtSvc := createTestJWTService()
 
 		tokenResp := map[string]interface{}{"access_token": "tok"}
-		// GitHub风格：无email且无login
-		userInfoResp := map[string]interface{}{"name": "No Email User"}
+		// 仅返回 name，没有 sub/id 字段
+		userInfoResp := map[string]interface{}{
+			"email":          "no-sub@gmail.com",
+			"email_verified": true,
+			"name":           "No Sub User",
+		}
 
 		mux := http.NewServeMux()
 		mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
@@ -394,23 +521,22 @@ func TestSocialLoginService_HandleCallback_FullFlow(t *testing.T) {
 		defer server.Close()
 
 		providers := map[string]*service.OAuthProvider{
-			"github": {
-				Name: "github", ClientID: "gh-id", ClientSecret: "gh-secret",
+			"google": {
+				Name: "google", ClientID: "g-id", ClientSecret: "g-secret",
 				TokenURL: server.URL + "/token", UserInfoURL: server.URL + "/userinfo",
 			},
 		}
 
 		svc := service.NewSocialLoginServiceWithProviders(storeInst, jwtSvc, providers, http.DefaultClient)
 
-		// 先获取授权URL以生成state
-		authURL, err := svc.GetAuthorizationURL("github", "")
-		require.NoError(t, err)
+		authURL, _ := svc.GetAuthorizationURL("google", "")
 		parsedURL, _ := url.Parse(authURL)
 		state := parsedURL.Query().Get("state")
-		require.NotEmpty(t, state)
 
-		_, err = svc.HandleCallback(context.Background(), "github", "code", state)
+		_, err := svc.HandleCallback(context.Background(), "google", "code", state)
 
-		assert.ErrorIs(t, err, service.ErrSocialLoginFailed)
+		// 阶段 2.3：缺少 provider_user_id 应被拒绝
+		require.Error(t, err)
+		assert.ErrorIs(t, err, service.ErrProviderUserIDMissing)
 	})
 }

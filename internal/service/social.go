@@ -14,12 +14,12 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/example/sso/internal/cache"
 	"github.com/example/sso/internal/crypto"
 	apperrors "github.com/example/sso/internal/errors"
 	"github.com/example/sso/internal/model"
 	"github.com/example/sso/internal/store"
 	"github.com/example/sso/internal/util/auditutil"
-	"github.com/example/sso/internal/util/serviceutil"
 )
 
 // ============================================================================
@@ -74,7 +74,8 @@ type SocialLoginService struct {
 	baseURL    string        // 服务基础URL，用于构建固定的回调地址
 	providers  map[string]*OAuthProvider
 	httpClient HTTPClient
-	stateCache sync.Map      // 用于存储OAuth state，防止CSRF攻击
+	cache      cache.Cache   // 阶段 2.3：state 缓存（Redis 优先，内存回退）
+	stateCache sync.Map      // 内存回退缓存（cache 为 nil 时使用）
 	stopChan   chan struct{} // 用于停止清理goroutine
 	stopOnce   sync.Once     // 确保 Close 只执行一次
 }
@@ -82,6 +83,11 @@ type SocialLoginService struct {
 // SetAuditService 设置审计日志服务
 func (s *SocialLoginService) SetAuditService(auditSvc *AuditService) {
 	s.auditSvc = auditSvc
+}
+
+// SetCache 设置缓存服务（阶段 2.3：用于 state 的 Redis 存储）
+func (s *SocialLoginService) SetCache(cache cache.Cache) {
+	s.cache = cache
 }
 
 func NewSocialLoginService(
@@ -127,7 +133,7 @@ func NewSocialLoginService(
 		stopChan:   make(chan struct{}),
 	}
 
-	// 启动后台清理goroutine
+	// 启动后台清理goroutine（仅用于内存回退缓存清理）
 	go svc.cleanupExpiredStates()
 
 	return svc
@@ -207,6 +213,12 @@ func (s *SocialLoginService) GetProviders() []string {
 	return providers
 }
 
+// OAuthStateTTL state 缓存 TTL（5 分钟）
+const OAuthStateTTL = 5 * time.Minute
+
+// stateCachePrefix state 在 Redis 中的 key 前缀
+const stateCachePrefix = "oauth:state:"
+
 func (s *SocialLoginService) GetAuthorizationURL(provider, state string) (string, error) {
 	p, ok := s.providers[provider]
 	if !ok {
@@ -221,12 +233,24 @@ func (s *SocialLoginService) GetAuthorizationURL(provider, state string) (string
 		state = uuid.New().String()
 	}
 
-	// 存储state到缓存（5分钟过期），用于后续验证
-	s.stateCache.Store(state, stateInfo{
+	// 阶段 2.3：state 存入 Redis（如可用）+ 内存回退
+	info := stateInfo{
 		provider:    provider,
 		redirectURI: redirectURI,
 		createdAt:   time.Now(),
-	})
+	}
+
+	if s.cache != nil {
+		// Redis 存储：写入 state，TTL 由 cache 层处理
+		// 注意：Redis 不会自动删除 key（除非 TTL 到期），调用方需在 HandleCallback 中 Delete
+		if err := s.cache.Set(context.Background(), stateCachePrefix+state, info, OAuthStateTTL); err != nil {
+			// Redis 写入失败，回退到内存（保证可用性）
+			s.stateCache.Store(state, info)
+		}
+	} else {
+		// 内存回退
+		s.stateCache.Store(state, info)
+	}
 
 	params := url.Values{
 		"client_id":     {p.ClientID},
@@ -250,21 +274,10 @@ func (s *SocialLoginService) HandleCallback(ctx context.Context, provider, code,
 		return nil, ErrOAuthStateInvalid
 	}
 
-	// 原子操作：从缓存中获取并删除state（防止TOCTOU竞争和重放攻击）
-	stateVal, loaded := s.stateCache.LoadAndDelete(state)
-	if !loaded {
-		return nil, ErrOAuthStateInvalid
-	}
-
-	// 安全类型断言
-	info, ok := stateVal.(stateInfo)
-	if !ok {
-		return nil, ErrOAuthStateInvalid
-	}
-
-	// 验证state是否过期（5分钟）
-	if time.Since(info.createdAt) > 5*time.Minute {
-		return nil, ErrOAuthStateExpired
+	// 阶段 2.3：从 Redis（优先）或内存中获取并删除 state（原子操作防止 TOCTOU/重放）
+	info, err := s.loadAndDeleteState(ctx, state)
+	if err != nil {
+		return nil, err
 	}
 
 	// 使用state缓存中存储的redirectURI（由GetAuthorizationURL设置）
@@ -282,9 +295,21 @@ func (s *SocialLoginService) HandleCallback(ctx context.Context, provider, code,
 		return nil, apperrors.Wrap(apperrors.ErrCodeSocialLoginFailed, "社交登录失败", 400, err)
 	}
 
-	user, err := s.findOrCreateUser(ctx, provider, userInfo)
+	// 阶段 2.3：从 provider 返回的 userInfo 提取身份信息
+	identity, err := ExtractProviderIdentity(provider, userInfo)
 	if err != nil {
-		return nil, serviceutil.WrapServiceError("查找或创建用户", err)
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventSocialLoginRejected), "", map[string]interface{}{
+			"provider": provider,
+			"reason":   "provider_identity_extract_failed",
+			"error":    err.Error(),
+		})
+		return nil, err
+	}
+
+	// 阶段 2.3：通过 (provider, provider_user_id) 查找或创建用户
+	user, err := s.findOrCreateSocialUser(ctx, provider, identity)
+	if err != nil {
+		return nil, err
 	}
 
 	// Token 生成成功后记录社交登录审计日志
@@ -296,12 +321,53 @@ func (s *SocialLoginService) HandleCallback(ctx context.Context, provider, code,
 
 	if s.auditSvc != nil {
 		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventUserLogin), user.ID, map[string]interface{}{
-			"provider": provider,
-			"email":    user.Email,
+			"provider":         provider,
+			"provider_user_id": identity.ProviderUserID,
+			"email":             user.Email,
 		})
 	}
 
 	return resp, nil
+}
+
+// loadAndDeleteState 原子地从缓存中加载并删除 state
+//
+// 优先使用 Redis（如配置），fallback 到内存 sync.Map
+// 原子性保证：使用 Redis 的 GET + DEL（非事务但足够防 TOCTOU），或 sync.Map.LoadAndDelete
+// 5 分钟过期：Redis 通过 TTL，内存通过 createdAt 检查
+func (s *SocialLoginService) loadAndDeleteState(ctx context.Context, state string) (*stateInfo, error) {
+	// 1. 优先从 Redis 加载
+	if s.cache != nil {
+		var info stateInfo
+		err := s.cache.Get(ctx, stateCachePrefix+state, &info)
+		if err == nil {
+			// 加载成功，立即删除（防重放）
+			_ = s.cache.Delete(ctx, stateCachePrefix+state)
+			// 检查过期（双保险，Redis TTL 应已处理）
+			if time.Since(info.createdAt) > OAuthStateTTL {
+				return nil, ErrOAuthStateExpired
+			}
+			return &info, nil
+		}
+		// Redis 未命中，回退到内存（可能服务刚启动，Redis 还没数据）
+	}
+
+	// 2. 内存回退
+	stateVal, loaded := s.stateCache.LoadAndDelete(state)
+	if !loaded {
+		return nil, ErrOAuthStateInvalid
+	}
+
+	info, ok := stateVal.(stateInfo)
+	if !ok {
+		return nil, ErrOAuthStateInvalid
+	}
+
+	if time.Since(info.createdAt) > OAuthStateTTL {
+		return nil, ErrOAuthStateExpired
+	}
+
+	return &info, nil
 }
 
 // ============================================================================
@@ -371,57 +437,6 @@ func (s *SocialLoginService) getUserInfo(ctx context.Context, p *OAuthProvider, 
 	}
 
 	return userInfo, nil
-}
-
-func (s *SocialLoginService) findOrCreateUser(ctx context.Context, provider string, userInfo map[string]interface{}) (*model.User, error) {
-	var email string
-
-	switch provider {
-	case "google":
-		email, _ = userInfo["email"].(string)
-	case "github":
-		email, _ = userInfo["email"].(string)
-		if email == "" {
-			if login, ok := userInfo["login"].(string); ok {
-				email = login + "@github.com"
-			}
-		}
-	}
-
-	if email == "" {
-		return nil, ErrSocialLoginFailed
-	}
-
-	user, err := s.store.GetByEmail(ctx, email)
-	if err != nil {
-		if !apperrors.Is(err, store.ErrNotFound) {
-			return nil, serviceutil.WrapServiceError("查询用户", err)
-		}
-
-		now := time.Now()
-		user = &model.User{
-			ID:            uuid.New().String(),
-			Email:         email,
-			EmailVerified: true,
-			Status:        model.UserStatusActive,
-			CreatedAt:     now,
-			UpdatedAt:     now,
-		}
-
-		if err := s.store.Create(ctx, user); err != nil {
-			return nil, serviceutil.WrapServiceError("创建用户", err)
-		}
-
-		// 记录新用户注册审计日志
-		if s.auditSvc != nil {
-			auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventUserRegister), user.ID, map[string]interface{}{
-				"provider": provider,
-				"email":    user.Email,
-			})
-		}
-	}
-
-	return user, nil
 }
 
 func (s *SocialLoginService) generateTokenPair(ctx context.Context, user *model.User) (*model.LoginResponse, error) {

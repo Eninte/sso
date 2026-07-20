@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -144,8 +145,14 @@ func createTestSocialLoginHandler(t *testing.T) *handler.SocialLoginHandler {
 func TestSocialLoginHandler_HandleLogin(t *testing.T) {
 	h := createTestSocialLoginHandler(t)
 
-	t.Run("Google登录重定向-通过query参数", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/auth?provider=google&state=random-state-1234567890&redirect_uri=http://localhost/callback", nil)
+	// 阶段 2.3：handler 改用 mux.Vars 读取 provider，需通过 mux.SetURLVars 注入路径变量
+	setProviderVars := func(req *http.Request, provider string) *http.Request {
+		return mux.SetURLVars(req, map[string]string{"provider": provider})
+	}
+
+	t.Run("Google登录重定向-通过路径变量", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/auth/google?state=random-state-1234567890&redirect_uri=http://localhost/callback", nil)
+		req = setProviderVars(req, "google")
 		w := httptest.NewRecorder()
 
 		h.HandleLogin(w, req)
@@ -154,8 +161,9 @@ func TestSocialLoginHandler_HandleLogin(t *testing.T) {
 		assert.Contains(t, w.Header().Get("Location"), "accounts.google.com")
 	})
 
-	t.Run("GitHub登录重定向-通过query参数", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/auth?provider=github&state=random-state-1234567890&redirect_uri=http://localhost/callback", nil)
+	t.Run("GitHub登录重定向-通过路径变量", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/auth/github?state=random-state-1234567890&redirect_uri=http://localhost/callback", nil)
+		req = setProviderVars(req, "github")
 		w := httptest.NewRecorder()
 
 		h.HandleLogin(w, req)
@@ -166,6 +174,7 @@ func TestSocialLoginHandler_HandleLogin(t *testing.T) {
 
 	t.Run("不支持的提供商", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/auth/unsupported?state=random-state-1234567890", nil)
+		req = setProviderVars(req, "unsupported")
 		w := httptest.NewRecorder()
 
 		h.HandleLogin(w, req)
@@ -173,8 +182,10 @@ func TestSocialLoginHandler_HandleLogin(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
-	t.Run("空provider无路径", func(t *testing.T) {
+	t.Run("空provider路径变量", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/auth?state=random-state-1234567890", nil)
+		// 不设置 provider 路径变量，模拟路由匹配失败场景
+		req = mux.SetURLVars(req, map[string]string{})
 		w := httptest.NewRecorder()
 
 		h.HandleLogin(w, req)
@@ -186,8 +197,13 @@ func TestSocialLoginHandler_HandleLogin(t *testing.T) {
 func TestSocialLoginHandler_HandleCallback(t *testing.T) {
 	h := createTestSocialLoginHandler(t)
 
+	setProviderVars := func(req *http.Request, provider string) *http.Request {
+		return mux.SetURLVars(req, map[string]string{"provider": provider})
+	}
+
 	t.Run("缺少授权码", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/auth/google/callback", nil)
+		req = setProviderVars(req, "google")
 		w := httptest.NewRecorder()
 
 		h.HandleCallback(w, req)
@@ -197,11 +213,13 @@ func TestSocialLoginHandler_HandleCallback(t *testing.T) {
 
 	t.Run("有授权码但不支持的提供商", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/auth/unsupported/callback?code=abc123&state=test-state", nil)
+		req = setProviderVars(req, "unsupported")
 		w := httptest.NewRecorder()
 
 		h.HandleCallback(w, req)
 
-		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		// 阶段 2.3：不支持的 provider 返回 400（WriteJSONError 映射 ErrProviderNotSupported）
+		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 }
 

@@ -75,6 +75,19 @@ type Store struct {
 	DeleteKeyErr               error
 	CloseErr                   error
 	PingErr                    error
+
+	// 阶段 2.3：社交账号相关错误
+	CreateSocialAccountErr          error
+	GetSocialAccountErr             error
+	ListSocialAccountsByUserIDErr   error
+	DeleteSocialAccountErr          error
+	CreateSocialAccountAtomicErr    error
+
+	// 社交账号数据存储
+	// key 格式: provider + ":" + provider_user_id
+	socialAccounts map[string]*model.SocialAccount
+	// userSocialAccounts: user_id -> []*SocialAccount（用于 ListSocialAccountsByUserID）
+	userSocialAccounts map[string][]*model.SocialAccount
 }
 
 // New 创建Store实例
@@ -90,6 +103,8 @@ func New() *Store {
 		keys:               make(map[string]*model.KeyVersion),
 		mfaRecoveryCodes:   make(map[string][]string),
 		hmacKey:            []byte("test-hmac-key-32-bytes-long!!!!!"),
+		socialAccounts:     make(map[string]*model.SocialAccount),
+		userSocialAccounts: make(map[string][]*model.SocialAccount),
 	}
 }
 
@@ -777,6 +792,152 @@ func (m *Store) Ping(ctx context.Context) error {
 }
 
 // ============================================================================
+// 社交账号存储实现（阶段 2.3）
+// ============================================================================
+
+// socialAccountKey 生成社交账号存储键
+func socialAccountKey(provider, providerUserID string) string {
+	return provider + ":" + providerUserID
+}
+
+// CreateSocialAccount 创建社交账号绑定记录
+func (m *Store) CreateSocialAccount(ctx context.Context, account *model.SocialAccount) error {
+	if m.CreateSocialAccountErr != nil {
+		return m.CreateSocialAccountErr
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	key := socialAccountKey(account.Provider, account.ProviderUserID)
+	if _, exists := m.socialAccounts[key]; exists {
+		return store.ErrSocialAccountConflict
+	}
+	// 检查 (user_id, provider) 唯一约束
+	for _, existing := range m.socialAccounts {
+		if existing.UserID == account.UserID && existing.Provider == account.Provider {
+			return store.ErrSocialAccountConflict
+		}
+	}
+
+	// 深拷贝避免外部修改
+	copied := *account
+	m.socialAccounts[key] = &copied
+	m.userSocialAccounts[account.UserID] = append(m.userSocialAccounts[account.UserID], &copied)
+	return nil
+}
+
+// GetSocialAccount 通过 (provider, provider_user_id) 查找社交账号
+func (m *Store) GetSocialAccount(ctx context.Context, provider, providerUserID string) (*model.SocialAccount, error) {
+	if m.GetSocialAccountErr != nil {
+		return nil, m.GetSocialAccountErr
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	key := socialAccountKey(provider, providerUserID)
+	account, exists := m.socialAccounts[key]
+	if !exists {
+		return nil, store.ErrNotFound
+	}
+	copied := *account
+	return &copied, nil
+}
+
+// ListSocialAccountsByUserID 列出用户绑定的所有社交账号
+func (m *Store) ListSocialAccountsByUserID(ctx context.Context, userID string) ([]*model.SocialAccount, error) {
+	if m.ListSocialAccountsByUserIDErr != nil {
+		return nil, m.ListSocialAccountsByUserIDErr
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	accounts := m.userSocialAccounts[userID]
+	result := make([]*model.SocialAccount, 0, len(accounts))
+	for _, a := range accounts {
+		copied := *a
+		result = append(result, &copied)
+	}
+	return result, nil
+}
+
+// DeleteSocialAccount 解绑社交账号
+func (m *Store) DeleteSocialAccount(ctx context.Context, provider, providerUserID string) error {
+	if m.DeleteSocialAccountErr != nil {
+		return m.DeleteSocialAccountErr
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	key := socialAccountKey(provider, providerUserID)
+	account, exists := m.socialAccounts[key]
+	if !exists {
+		return store.ErrNotFound
+	}
+	delete(m.socialAccounts, key)
+
+	// 从 userSocialAccounts 索引中移除
+	userAccounts := m.userSocialAccounts[account.UserID]
+	for i, a := range userAccounts {
+		if a.Provider == provider && a.ProviderUserID == providerUserID {
+			m.userSocialAccounts[account.UserID] = append(userAccounts[:i], userAccounts[i+1:]...)
+			break
+		}
+	}
+	if len(m.userSocialAccounts[account.UserID]) == 0 {
+		delete(m.userSocialAccounts, account.UserID)
+	}
+	return nil
+}
+
+// CreateSocialAccountAtomic 原子地创建用户 + 社交账号绑定
+func (m *Store) CreateSocialAccountAtomic(ctx context.Context, user *model.User, account *model.SocialAccount) error {
+	if m.CreateSocialAccountAtomicErr != nil {
+		return m.CreateSocialAccountAtomicErr
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// 1. 检查 email 唯一
+	for _, u := range m.users {
+		if u.Email == user.Email {
+			return store.ErrDuplicateEmail
+		}
+	}
+	// 2. 检查 (provider, provider_user_id) 唯一
+	key := socialAccountKey(account.Provider, account.ProviderUserID)
+	if _, exists := m.socialAccounts[key]; exists {
+		return store.ErrSocialAccountConflict
+	}
+	// 3. 检查 (user_id, provider) 唯一
+	for _, existing := range m.socialAccounts {
+		if existing.UserID == account.UserID && existing.Provider == account.Provider {
+			return store.ErrSocialAccountConflict
+		}
+	}
+
+	// 4. 插入用户
+	userCopy := *user
+	m.users[user.ID] = &userCopy
+
+	// 5. 插入社交账号
+	accountCopy := *account
+	m.socialAccounts[key] = &accountCopy
+	m.userSocialAccounts[account.UserID] = append(m.userSocialAccounts[account.UserID], &accountCopy)
+
+	return nil
+}
+
+// AddSocialAccount 测试辅助方法：直接添加社交账号（不校验）
+func (m *Store) AddSocialAccount(account *model.SocialAccount) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := socialAccountKey(account.Provider, account.ProviderUserID)
+	copied := *account
+	m.socialAccounts[key] = &copied
+	m.userSocialAccounts[account.UserID] = append(m.userSocialAccounts[account.UserID], &copied)
+}
+
+// ============================================================================
 // 测试辅助方法
 // ============================================================================
 
@@ -814,6 +975,50 @@ func (m *Store) Reset() {
 	m.resetTokens = make(map[string]*store.ResetToken)
 	m.auditLogs = make([]*model.AuditLog, 0)
 	m.keys = make(map[string]*model.KeyVersion)
+	m.socialAccounts = make(map[string]*model.SocialAccount)
+	m.userSocialAccounts = make(map[string][]*model.SocialAccount)
+
+	// 重置所有注入错误
+	m.CreateUserErr = nil
+	m.GetUserByIDErr = nil
+	m.GetUserByEmailErr = nil
+	m.UpdateUserErr = nil
+	m.UpdateLoginAttemptsErr = nil
+	m.DeleteUserErr = nil
+	m.ListUsersErr = nil
+	m.ExistsUserByRoleErr = nil
+	m.CreateAdminAtomicErr = nil
+	m.GetClientByClientIDErr = nil
+	m.CreateClientErr = nil
+	m.StoreAuthorizationCodeErr = nil
+	m.GetAuthorizationCodeErr = nil
+	m.StoreTokenErr = nil
+	m.GetTokenByRefreshTokenErr = nil
+	m.GetTokenByAccessTokenErr = nil
+	m.RevokeTokenErr = nil
+	m.RevokeAllUserTokensErr = nil
+	m.RotateRefreshTokenErr = nil
+	m.CleanupExpiredErr = nil
+	m.StoreVerificationTokenErr = nil
+	m.GetVerificationTokenErr = nil
+	m.DeleteVerificationTokenErr = nil
+	m.StoreResetTokenErr = nil
+	m.GetResetTokenErr = nil
+	m.DeleteResetTokenErr = nil
+	m.StoreAuditLogErr = nil
+	m.StoreKeyErr = nil
+	m.GetActiveKeyErr = nil
+	m.GetKeyByIDErr = nil
+	m.DeprecateKeyErr = nil
+	m.RevokeKeyErr = nil
+	m.DeleteKeyErr = nil
+	m.CloseErr = nil
+	m.PingErr = nil
+	m.CreateSocialAccountErr = nil
+	m.GetSocialAccountErr = nil
+	m.ListSocialAccountsByUserIDErr = nil
+	m.DeleteSocialAccountErr = nil
+	m.CreateSocialAccountAtomicErr = nil
 }
 
 // ============================================================================

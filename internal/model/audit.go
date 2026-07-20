@@ -54,6 +54,10 @@ const (
 	EventMFAEnabled  AuditEventType = "mfa.enabled"  // MFA启用
 	EventMFADisabled AuditEventType = "mfa.disabled" // MFA禁用
 
+	// 阶段 2.3：社交登录安全审计事件
+	EventSocialLoginRejected AuditEventType = "social.login_rejected" // 社交登录被拒绝（email 未验证 / 冲突等）
+	EventSocialAccountBound  AuditEventType = "social.account_bound"  // 社交账号绑定到本地用户
+
 	EventKeyRotated AuditEventType = "key.rotated" // 密钥轮换
 	EventKeyRevoked AuditEventType = "key.revoked" // 密钥撤销
 
