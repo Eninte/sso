@@ -43,7 +43,9 @@ make test-coverage-full
 ```
 
 This target runs unit/integration and E2E tests separately, then merges the
-profiles with `go tool cover -merge` and emits `full-coverage.html`.
+profiles with `scripts/merge_coverage.go` (a union merger for mode:set
+profiles, since `go tool cover` has no built-in merge support) and emits
+`full-coverage.html`.
 
 ## CI Integration
 

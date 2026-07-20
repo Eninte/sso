@@ -238,7 +238,7 @@ make bench-report                   # 生成基准测试报告到 docs/reports/
 ### 6.3 覆盖率要求
 
 - 整体覆盖率 >= 80%
-- 覆盖率检查使用 Go 标准工具链：`go test -coverprofile` + `go tool cover -func/-html/-merge`
+- 覆盖率检查使用 Go 标准工具链：`go test -coverprofile` + `go tool cover -func/-html`；多 profile 合并由 `scripts/merge_coverage.go` 完成
 - 阈值强制：Makefile `test-coverage` / `test-coverage-check` 目标提取 `go tool cover -func` 的 total 值，低于 80% 时退出非零码
 - 覆盖率统计排除：`internal/app`（由 E2E 覆盖）、`internal/store/mock`（生成代码）、`internal/testing/`（测试基础设施）、`cmd/`（入口）、`sdks/`（客户端 SDK）
 

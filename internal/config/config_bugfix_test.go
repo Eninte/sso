@@ -34,10 +34,13 @@ func TestBugCondition_GetEnvPathFallback(t *testing.T) {
 	// CI/CD 修复：使用 t.Setenv 自动恢复，避免环境变量泄漏到后续测试
 	// 用空字符串等同于 unset（GetEnvPath 内部检查 envPath != ""）
 	t.Setenv("ENV_FILE_PATH", "")
-	t.Cleanup(func() { os.Chdir(originalCwd) })
 
 	// Create a temporary directory without .env file
 	tmpDir := t.TempDir()
+
+	// Register after t.TempDir() so LIFO cleanup runs Chdir before RemoveAll,
+	// otherwise Windows keeps the temp dir locked as the process cwd.
+	t.Cleanup(func() { os.Chdir(originalCwd) })
 
 	// Change to temporary directory
 	err = os.Chdir(tmpDir)
@@ -69,10 +72,13 @@ func TestBugCondition_GetEnvPathWithExistingFile(t *testing.T) {
 
 	// CI/CD 修复：使用 t.Setenv 自动恢复
 	t.Setenv("ENV_FILE_PATH", "")
-	t.Cleanup(func() { os.Chdir(originalCwd) })
 
 	// Create a temporary directory with .env file
 	tmpDir := t.TempDir()
+
+	// Register after t.TempDir() so LIFO cleanup runs Chdir before RemoveAll,
+	// otherwise Windows keeps the temp dir locked as the process cwd.
+	t.Cleanup(func() { os.Chdir(originalCwd) })
 
 	// Create .env file
 	envPath := filepath.Join(tmpDir, ".env")

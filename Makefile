@@ -166,7 +166,7 @@ test-coverage-full: ## 合并单元/集成/E2E 覆盖率报告
 		exit 1; \
 	}
 	@echo ">>> [3/3] 合并覆盖率报告..."
-	@go tool cover -merge unit-coverage.out e2e-coverage.out -o full-coverage.out
+	@go run scripts/merge_coverage.go -o full-coverage.out unit-coverage.out e2e-coverage.out
 	@echo ">>> 合并后函数级覆盖率："
 	@go tool cover -func=full-coverage.out | grep "total:" || echo "(无覆盖率数据)"
 	@go tool cover -html=full-coverage.out -o full-coverage.html
