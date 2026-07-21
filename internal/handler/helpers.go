@@ -111,6 +111,19 @@ func writeLocalizedError(w http.ResponseWriter, r *http.Request, appErr *apperro
 	writeJSON(w, appErr.HTTPStatus, appErr.ToLocalizedResponse(lang))
 }
 
+// writeServiceError 写入 service 层错误响应（T14）
+// 保留错误链中 AppError 的 HTTP 状态码与本地化消息
+// （如 403 本人操作防护、409 末位管理员保护、404 资源不存在）；
+// 非 AppError 一律返回 500，不暴露内部实现细节
+func writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
+	var appErr *apperrors.AppError
+	if apperrors.As(err, &appErr) {
+		writeLocalizedError(w, r, appErr)
+		return
+	}
+	writeError(w, http.StatusInternalServerError, getMessage(r, apperrors.ErrCodeInternal))
+}
+
 // writeSuccess 写入成功响应
 func writeSuccess(w http.ResponseWriter, status int, message string, data interface{}) {
 	response := map[string]interface{}{

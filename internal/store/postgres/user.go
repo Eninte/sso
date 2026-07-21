@@ -284,6 +284,22 @@ func (s *Store) ExistsUserByRole(ctx context.Context, role string) (bool, error)
 	return exists, nil
 }
 
+// CountActiveAdmins 统计活跃状态的管理员数量
+// 仅统计 role='admin' 且 status='active' 的用户，使用 COUNT 聚合避免加载用户数据
+// 用于 T14"末位管理员保护"：禁用/删除最后一个活跃管理员前必须拦截
+func (s *Store) CountActiveAdmins(ctx context.Context) (int, error) {
+	ctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+
+	var count int
+	query := `SELECT COUNT(*) FROM users WHERE role = $1 AND status = $2`
+	err := s.db.QueryRowContext(ctx, query, model.UserRoleAdmin, model.UserStatusActive).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 // CreateAdminAtomic 原子地创建初始管理员账户
 //
 // 流程：

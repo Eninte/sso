@@ -46,6 +46,10 @@ const (
 	ErrCodePasswordNoSpecial   ErrorCode = "PASSWORD_NO_SPECIAL"   // 密码缺少特殊字符
 	ErrCodePasswordTooWeak     ErrorCode = "PASSWORD_TOO_WEAK"     // 密码太常见
 
+	// 管理员防护错误
+	ErrCodeSelfOperationForbidden ErrorCode = "SELF_OPERATION_FORBIDDEN" // 不能对本人执行禁用或删除操作
+	ErrCodeLastActiveAdmin        ErrorCode = "LAST_ACTIVE_ADMIN"        // 不能禁用或删除最后一个活跃管理员
+
 	// 邮箱验证相关错误
 	ErrCodeEmailAlreadyVerified    ErrorCode = "EMAIL_ALREADY_VERIFIED"    // 邮箱已验证
 	ErrCodeEmailNotVerified        ErrorCode = "EMAIL_NOT_VERIFIED"        // 邮箱未验证
@@ -229,6 +233,10 @@ var (
 	ErrPasswordNoDigit     = New(ErrCodePasswordNoDigit, "密码必须包含至少一个数字", 400)
 	ErrPasswordNoSpecial   = New(ErrCodePasswordNoSpecial, "密码必须包含至少一个特殊字符", 400)
 	ErrPasswordTooWeak     = New(ErrCodePasswordTooWeak, "密码太常见，请使用更复杂的密码", 400)
+
+	// 管理员防护错误
+	ErrSelfOperationForbidden = New(ErrCodeSelfOperationForbidden, "不能对本人执行禁用或删除操作", 403)
+	ErrLastActiveAdmin        = New(ErrCodeLastActiveAdmin, "不能禁用或删除最后一个活跃管理员", 409)
 
 	// 邮箱验证错误
 	ErrEmailAlreadyVerified    = New(ErrCodeEmailAlreadyVerified, "邮箱已验证", 409)

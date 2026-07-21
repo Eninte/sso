@@ -113,7 +113,7 @@ func TestAdminService_DisableUser(t *testing.T) {
 	_ = store.Create(ctx, user)
 
 	t.Run("成功禁用用户", func(t *testing.T) {
-		err := adminSvc.DisableUser(ctx, "disable-user-id")
+		err := adminSvc.DisableUser(ctx, "admin-operator", "disable-user-id")
 		require.NoError(t, err)
 
 		// 验证用户状态已更改
@@ -123,7 +123,7 @@ func TestAdminService_DisableUser(t *testing.T) {
 	})
 
 	t.Run("禁用不存在的用户", func(t *testing.T) {
-		err := adminSvc.DisableUser(ctx, "nonexistent-id")
+		err := adminSvc.DisableUser(ctx, "admin-operator", "nonexistent-id")
 		assert.Error(t, err)
 	})
 
@@ -144,14 +144,14 @@ func TestAdminService_DisableUser(t *testing.T) {
 		}
 		_ = store.Create(ctx, user)
 
-		// 撤销失败不应影响主流程
-		err := adminSvc.DisableUser(ctx, "disable-revoke-fail-id")
-		require.NoError(t, err)
+		// T14：Token 撤销前置，撤销失败时禁用中止并返回错误
+		err := adminSvc.DisableUser(ctx, "admin-operator", "disable-revoke-fail-id")
+		require.Error(t, err)
 
-		// 验证用户状态已更改（主流程成功）
+		// 验证用户状态未被更改（禁用未生效，不留"已禁用但 Token 存活"的中间状态）
 		result, err := store.GetByID(ctx, "disable-revoke-fail-id")
 		require.NoError(t, err)
-		assert.Equal(t, "disabled", result.Status)
+		assert.Equal(t, model.UserStatusActive, result.Status)
 	})
 }
 
@@ -238,7 +238,7 @@ func TestAdminService_DisableUser_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("禁用不存在的用户", func(t *testing.T) {
-		err := adminSvc.DisableUser(ctx, "nonexistent-id")
+		err := adminSvc.DisableUser(ctx, "admin-operator", "nonexistent-id")
 		assert.Error(t, err)
 	})
 }
@@ -277,5 +277,196 @@ func TestAdminService_GetUser_WithCache(t *testing.T) {
 		result, err := adminSvc.GetUser(ctx, "cache-user-id")
 		require.NoError(t, err)
 		assert.Equal(t, "cache-user-id", result.ID)
+	})
+}
+
+// ============================================================================
+// T14：管理员操作防护测试（本人操作防护 + 末位活跃管理员保护）
+// ============================================================================
+
+// newTestAdmin 构造测试用管理员用户
+func newTestAdmin(id string) *model.User {
+	return &model.User{
+		ID:           id,
+		Email:        id + "@example.com",
+		PasswordHash: "hash",
+		Role:         model.UserRoleAdmin,
+		Status:       model.UserStatusActive,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+}
+
+func TestAdminService_DisableUser_Protection(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("禁止禁用本人账户", func(t *testing.T) {
+		store := mock.New()
+		_ = store.Create(ctx, newTestAdmin("admin-1"))
+		_ = store.Create(ctx, newTestAdmin("admin-2"))
+		adminSvc := service.NewAdminService(store)
+
+		err := adminSvc.DisableUser(ctx, "admin-1", "admin-1")
+		require.ErrorIs(t, err, apperrors.ErrSelfOperationForbidden)
+
+		// 状态未被修改
+		u, err := store.GetByID(ctx, "admin-1")
+		require.NoError(t, err)
+		assert.Equal(t, model.UserStatusActive, u.Status)
+	})
+
+	t.Run("禁止禁用最后一个活跃管理员", func(t *testing.T) {
+		store := mock.New()
+		_ = store.Create(ctx, newTestAdmin("admin-1"))
+		adminSvc := service.NewAdminService(store)
+
+		// 操作者是非管理员的审计账号等（ID 与目标不同即可）
+		err := adminSvc.DisableUser(ctx, "operator", "admin-1")
+		require.ErrorIs(t, err, apperrors.ErrLastActiveAdmin)
+
+		u, err := store.GetByID(ctx, "admin-1")
+		require.NoError(t, err)
+		assert.Equal(t, model.UserStatusActive, u.Status)
+	})
+
+	t.Run("另有已禁用管理员时仍判定为末位活跃管理员", func(t *testing.T) {
+		store := mock.New()
+		_ = store.Create(ctx, newTestAdmin("admin-1"))
+		disabledAdmin := newTestAdmin("admin-2")
+		disabledAdmin.Status = model.UserStatusDisabled
+		_ = store.Create(ctx, disabledAdmin)
+		adminSvc := service.NewAdminService(store)
+
+		// admin-2 已禁用不计入活跃数，admin-1 是唯一活跃管理员
+		err := adminSvc.DisableUser(ctx, "operator", "admin-1")
+		require.ErrorIs(t, err, apperrors.ErrLastActiveAdmin)
+	})
+
+	t.Run("存在其他活跃管理员时可正常禁用", func(t *testing.T) {
+		store := mock.New()
+		_ = store.Create(ctx, newTestAdmin("admin-1"))
+		_ = store.Create(ctx, newTestAdmin("admin-2"))
+		adminSvc := service.NewAdminService(store)
+
+		err := adminSvc.DisableUser(ctx, "admin-2", "admin-1")
+		require.NoError(t, err)
+
+		u, err := store.GetByID(ctx, "admin-1")
+		require.NoError(t, err)
+		assert.Equal(t, model.UserStatusDisabled, u.Status)
+	})
+
+	t.Run("统计活跃管理员失败时中止禁用", func(t *testing.T) {
+		store := mock.New()
+		_ = store.Create(ctx, newTestAdmin("admin-1"))
+		_ = store.Create(ctx, newTestAdmin("admin-2"))
+		store.CountActiveAdminsErr = assert.AnError
+		adminSvc := service.NewAdminService(store)
+
+		err := adminSvc.DisableUser(ctx, "admin-2", "admin-1")
+		require.Error(t, err)
+
+		// 防护判定失败时不得继续执行禁用
+		u, err := store.GetByID(ctx, "admin-1")
+		require.NoError(t, err)
+		assert.Equal(t, model.UserStatusActive, u.Status)
+	})
+
+	t.Run("禁用普通用户不触发管理员计数", func(t *testing.T) {
+		store := mock.New()
+		normalUser := &model.User{
+			ID:           "normal-user",
+			Email:        "normal@example.com",
+			PasswordHash: "hash",
+			Role:         model.UserRoleUser,
+			Status:       model.UserStatusActive,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}
+		_ = store.Create(ctx, normalUser)
+		// 即使计数查询失败，普通用户禁用也不受影响（不调用 CountActiveAdmins）
+		store.CountActiveAdminsErr = assert.AnError
+		adminSvc := service.NewAdminService(store)
+
+		err := adminSvc.DisableUser(ctx, "operator", "normal-user")
+		require.NoError(t, err)
+
+		u, err := store.GetByID(ctx, "normal-user")
+		require.NoError(t, err)
+		assert.Equal(t, model.UserStatusDisabled, u.Status)
+	})
+}
+
+func TestAdminService_DeleteUser_Protection(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("禁止删除本人账户", func(t *testing.T) {
+		store := mock.New()
+		_ = store.Create(ctx, newTestAdmin("admin-1"))
+		_ = store.Create(ctx, newTestAdmin("admin-2"))
+		adminSvc := service.NewAdminService(store)
+
+		err := adminSvc.DeleteUser(ctx, "admin-1", "admin-1")
+		require.ErrorIs(t, err, apperrors.ErrSelfOperationForbidden)
+
+		// 用户未被删除
+		_, err = store.GetByID(ctx, "admin-1")
+		require.NoError(t, err)
+	})
+
+	t.Run("禁止删除最后一个活跃管理员", func(t *testing.T) {
+		store := mock.New()
+		_ = store.Create(ctx, newTestAdmin("admin-1"))
+		adminSvc := service.NewAdminService(store)
+
+		err := adminSvc.DeleteUser(ctx, "operator", "admin-1")
+		require.ErrorIs(t, err, apperrors.ErrLastActiveAdmin)
+
+		_, err = store.GetByID(ctx, "admin-1")
+		require.NoError(t, err)
+	})
+
+	t.Run("删除不存在的用户返回NotFound", func(t *testing.T) {
+		store := mock.New()
+		adminSvc := service.NewAdminService(store)
+
+		err := adminSvc.DeleteUser(ctx, "operator", "nonexistent-id")
+		require.ErrorIs(t, err, apperrors.ErrNotFound)
+	})
+
+	t.Run("删除用户时撤销Token失败则中止删除", func(t *testing.T) {
+		store := mock.New()
+		normalUser := &model.User{
+			ID:           "del-revoke-fail-id",
+			Email:        "del-revoke@example.com",
+			PasswordHash: "hash",
+			Role:         model.UserRoleUser,
+			Status:       model.UserStatusActive,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}
+		_ = store.Create(ctx, normalUser)
+		store.RevokeAllUserTokensErr = assert.AnError
+		adminSvc := service.NewAdminService(store)
+
+		err := adminSvc.DeleteUser(ctx, "operator", "del-revoke-fail-id")
+		require.Error(t, err)
+
+		// 撤销失败时用户不得被删除
+		_, err = store.GetByID(ctx, "del-revoke-fail-id")
+		require.NoError(t, err)
+	})
+
+	t.Run("存在其他活跃管理员时可正常删除管理员", func(t *testing.T) {
+		store := mock.New()
+		_ = store.Create(ctx, newTestAdmin("admin-1"))
+		_ = store.Create(ctx, newTestAdmin("admin-2"))
+		adminSvc := service.NewAdminService(store)
+
+		err := adminSvc.DeleteUser(ctx, "admin-2", "admin-1")
+		require.NoError(t, err)
+
+		_, err = store.GetByID(ctx, "admin-1")
+		require.ErrorIs(t, err, apperrors.ErrNotFound)
 	})
 }

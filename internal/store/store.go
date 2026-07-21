@@ -65,6 +65,10 @@ type UserStore interface {
 	// 用于管理员存在性检查等场景，避免全表扫描
 	ExistsUserByRole(ctx context.Context, role string) (bool, error)
 
+	// CountActiveAdmins 统计活跃状态的管理员数量
+	// 用于"末位管理员保护"：禁用/删除最后一个活跃管理员前必须拦截
+	CountActiveAdmins(ctx context.Context) (int, error)
+
 	// CreateAdminAtomic 原子地创建初始管理员账户
 	// 使用事务级 advisory lock + 数据库 EXISTS 检查，确保全局只能创建一个初始管理员
 	// 并发调用时，仅第一个获取锁的事务会执行插入，其余返回 ErrForbidden

@@ -484,3 +484,117 @@ func TestAdminHandler_HandleAuditLogs(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 }
+
+// ============================================================================
+// T14：管理员操作防护 Handler 测试（状态码透传：403 本人操作 / 409 末位管理员）
+// ============================================================================
+
+func TestAdminHandler_HandleDisableUser_Protection(t *testing.T) {
+	t.Run("禁止禁用本人账户返回403", func(t *testing.T) {
+		adminHandler, store := createTestAdminHandler()
+
+		// addAdminContext 固定操作者 ID 为 "admin-user-id"
+		store.AddUser(&model.User{
+			ID:     "admin-user-id",
+			Email:  "admin@example.com",
+			Role:   model.UserRoleUser,
+			Status: model.UserStatusActive,
+		})
+
+		body := map[string]string{"user_id": "admin-user-id"}
+		bodyBytes, _ := json.Marshal(body)
+
+		req := httptest.NewRequest("POST", "/admin/users/disable", bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		req = addAdminContext(req, "admin@example.com")
+		w := httptest.NewRecorder()
+
+		adminHandler.HandleDisableUser(w, req)
+
+		assert.Equal(t, http.StatusForbidden, w.Code)
+
+		var resp map[string]interface{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "SELF_OPERATION_FORBIDDEN", resp["code"])
+
+		// 用户状态未被修改
+		u, _ := store.GetByID(context.Background(), "admin-user-id")
+		assert.Equal(t, model.UserStatusActive, u.Status)
+	})
+
+	t.Run("禁止禁用最后一个活跃管理员返回409", func(t *testing.T) {
+		adminHandler, store := createTestAdminHandler()
+
+		store.AddUser(&model.User{
+			ID:     "only-admin",
+			Email:  "only-admin@example.com",
+			Role:   model.UserRoleAdmin,
+			Status: model.UserStatusActive,
+		})
+
+		body := map[string]string{"user_id": "only-admin"}
+		bodyBytes, _ := json.Marshal(body)
+
+		req := httptest.NewRequest("POST", "/admin/users/disable", bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		req = addAdminContext(req, "admin@example.com")
+		w := httptest.NewRecorder()
+
+		adminHandler.HandleDisableUser(w, req)
+
+		assert.Equal(t, http.StatusConflict, w.Code)
+
+		var resp map[string]interface{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "LAST_ACTIVE_ADMIN", resp["code"])
+	})
+}
+
+func TestAdminHandler_HandleDeleteUser_Protection(t *testing.T) {
+	t.Run("禁止删除本人账户返回403", func(t *testing.T) {
+		adminHandler, store := createTestAdminHandler()
+
+		store.AddUser(&model.User{
+			ID:     "admin-user-id",
+			Email:  "admin@example.com",
+			Role:   model.UserRoleUser,
+			Status: model.UserStatusActive,
+		})
+
+		req := httptest.NewRequest("DELETE", "/admin/users/admin-user-id", nil)
+		req = addAdminContext(req, "admin@example.com")
+		req = mux.SetURLVars(req, map[string]string{"id": "admin-user-id"})
+		w := httptest.NewRecorder()
+
+		adminHandler.HandleDeleteUser(w, req)
+
+		assert.Equal(t, http.StatusForbidden, w.Code)
+
+		// 用户未被删除
+		_, err := store.GetByID(context.Background(), "admin-user-id")
+		assert.NoError(t, err)
+	})
+
+	t.Run("禁止删除最后一个活跃管理员返回409", func(t *testing.T) {
+		adminHandler, store := createTestAdminHandler()
+
+		store.AddUser(&model.User{
+			ID:     "only-admin",
+			Email:  "only-admin@example.com",
+			Role:   model.UserRoleAdmin,
+			Status: model.UserStatusActive,
+		})
+
+		req := httptest.NewRequest("DELETE", "/admin/users/only-admin", nil)
+		req = addAdminContext(req, "admin@example.com")
+		req = mux.SetURLVars(req, map[string]string{"id": "only-admin"})
+		w := httptest.NewRecorder()
+
+		adminHandler.HandleDeleteUser(w, req)
+
+		assert.Equal(t, http.StatusConflict, w.Code)
+
+		_, err := store.GetByID(context.Background(), "only-admin")
+		assert.NoError(t, err)
+	})
+}

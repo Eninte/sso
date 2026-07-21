@@ -266,13 +266,30 @@ func TestMFAService_NewMFAServiceWithAudit(t *testing.T) {
 }
 
 func TestAdminService_DeleteUser(t *testing.T) {
-	t.Run("删除不存在的用户返回错误", func(t *testing.T) {
+	t.Run("删除用户时存储删除失败返回错误", func(t *testing.T) {
 		m := mock.New()
 		m.DeleteUserErr = assert.AnError
 
 		adminSvc := NewAdminService(m)
 
-		err := adminSvc.DeleteUser(context.Background(), "nonexistent")
+		// 先创建目标用户，确保错误来自 Delete 而非前置的 GetByID（T14 新增查询）
+		ctx := context.Background()
+		require.NoError(t, m.Create(ctx, &model.User{
+			ID:     "del-fail-id",
+			Email:  "del-fail@example.com",
+			Status: model.UserStatusActive,
+		}))
+
+		err := adminSvc.DeleteUser(ctx, "admin-operator", "del-fail-id")
+		assert.Error(t, err)
+	})
+
+	t.Run("删除不存在的用户返回错误", func(t *testing.T) {
+		m := mock.New()
+
+		adminSvc := NewAdminService(m)
+
+		err := adminSvc.DeleteUser(context.Background(), "admin-operator", "nonexistent")
 		assert.Error(t, err)
 	})
 }

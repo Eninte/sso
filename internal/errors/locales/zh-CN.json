@@ -24,6 +24,8 @@
   "PASSWORD_NO_LOWERCASE": "密码必须包含至少一个小写字母",
   "PASSWORD_NO_DIGIT": "密码必须包含至少一个数字",
   "PASSWORD_NO_SPECIAL": "密码必须包含至少一个特殊字符",
+  "SELF_OPERATION_FORBIDDEN": "不能对本人执行禁用或删除操作",
+  "LAST_ACTIVE_ADMIN": "不能禁用或删除最后一个活跃管理员",
   
   "EMAIL_ALREADY_VERIFIED": "邮箱已验证",
   "VERIFICATION_CODE_INVALID": "验证码无效",

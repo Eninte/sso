@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/example/sso/internal/cache"
+	apperrors "github.com/example/sso/internal/errors"
 	"github.com/example/sso/internal/logging"
 	"github.com/example/sso/internal/model"
 	"github.com/example/sso/internal/store"
@@ -45,9 +46,9 @@ type AdminServiceInterface interface {
 	// 用户管理
 	ListUsers(ctx context.Context, offset, limit int) ([]*model.User, int, error)
 	GetUser(ctx context.Context, userID string) (*model.User, error)
-	DisableUser(ctx context.Context, userID string) error
+	DisableUser(ctx context.Context, operatorID, userID string) error
 	EnableUser(ctx context.Context, userID string) error
-	DeleteUser(ctx context.Context, userID string) error
+	DeleteUser(ctx context.Context, operatorID, userID string) error
 
 	// 审计日志
 	GetAuditLogs(ctx context.Context, offset, limit int, eventType string) ([]*model.AuditLog, int, error)
@@ -163,11 +164,50 @@ func (s *AdminService) GetUser(ctx context.Context, userID string) (*model.User,
 	return user, nil
 }
 
+// checkAdminProtection 管理员操作防护检查（T14 安全修复）
+// 规则：
+//   - 禁止对本人执行禁用/删除操作，防止管理员误操作导致自己失去系统访问权
+//   - 禁止禁用/删除最后一个活跃管理员，防止系统失去所有管理入口
+//     （仅统计 status=active 的管理员，已禁用的管理员不计入兜底）
+func (s *AdminService) checkAdminProtection(ctx context.Context, operatorID string, target *model.User) error {
+	// 禁止操作本人账户
+	if operatorID != "" && operatorID == target.ID {
+		return apperrors.ErrSelfOperationForbidden
+	}
+
+	// 目标是活跃管理员时，检查是否为最后一个活跃管理员
+	if target.Role == model.UserRoleAdmin && target.Status == model.UserStatusActive {
+		count, err := s.store.CountActiveAdmins(ctx)
+		if err != nil {
+			return serviceutil.WrapServiceError("统计活跃管理员", err)
+		}
+		if count <= 1 {
+			return apperrors.ErrLastActiveAdmin
+		}
+	}
+
+	return nil
+}
+
 // DisableUser 禁用用户
-func (s *AdminService) DisableUser(ctx context.Context, userID string) error {
+// T14（安全修复）：
+//   - 禁止禁用本人账户 / 最后一个活跃管理员（checkAdminProtection）
+//   - Token 撤销前置：撤销失败直接返回错误并中止禁用，
+//     避免出现"用户已禁用但 Token 仍可使用"的中间状态；
+//     反向顺序（先改状态后撤销）失败时留下的窗口属于不安全方向
+func (s *AdminService) DisableUser(ctx context.Context, operatorID, userID string) error {
 	user, err := s.store.GetByID(ctx, userID)
 	if err != nil {
-		return serviceutil.WrapServiceError("查询用户", err)
+		return serviceutil.HandleStoreError(err, apperrors.ErrNotFound)
+	}
+
+	if err := s.checkAdminProtection(ctx, operatorID, user); err != nil {
+		return err
+	}
+
+	// 先撤销所有Token，撤销失败则中止禁用
+	if err := s.store.RevokeAllUserTokens(ctx, userID); err != nil {
+		return serviceutil.WrapServiceError("撤销用户Token", err)
 	}
 
 	user.Status = model.UserStatusDisabled
@@ -175,12 +215,6 @@ func (s *AdminService) DisableUser(ctx context.Context, userID string) error {
 
 	if err := s.store.Update(ctx, user); err != nil {
 		return serviceutil.WrapServiceError("更新用户", err)
-	}
-
-	// 撤销所有Token（失败不影响主流程）
-	if err := s.store.RevokeAllUserTokens(ctx, userID); err != nil {
-		// 阶段 D 审查修复（H5）：store 错误可能含 DSN
-		slog.Warn("撤销用户Token失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", userID)
 	}
 
 	// 阶段 2.4：统一清 token 缓存（撤销后立即生效，避免 15 分钟延迟窗口）
@@ -252,11 +286,24 @@ func (s *AdminService) EnableUser(ctx context.Context, userID string) error {
 }
 
 // DeleteUser 删除用户
-func (s *AdminService) DeleteUser(ctx context.Context, userID string) error {
-	// 先撤销所有Token
+// T14（安全修复）：
+//   - 禁止删除本人账户 / 最后一个活跃管理员（checkAdminProtection）
+//   - 删除前先查询目标用户，不存在直接返回 404（原实现未查询，
+//     依赖 Delete 报错，无法区分"不存在"与存储故障）
+//   - Token 撤销前置：撤销失败直接返回错误并中止删除，避免残留可用 Token
+func (s *AdminService) DeleteUser(ctx context.Context, operatorID, userID string) error {
+	user, err := s.store.GetByID(ctx, userID)
+	if err != nil {
+		return serviceutil.HandleStoreError(err, apperrors.ErrNotFound)
+	}
+
+	if err := s.checkAdminProtection(ctx, operatorID, user); err != nil {
+		return err
+	}
+
+	// 先撤销所有Token，撤销失败则中止删除
 	if err := s.store.RevokeAllUserTokens(ctx, userID); err != nil {
-		// 阶段 D 审查修复（H5）：store 错误可能含 DSN
-		slog.Warn("撤销用户Token失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", userID)
+		return serviceutil.WrapServiceError("撤销用户Token", err)
 	}
 
 	// 删除用户

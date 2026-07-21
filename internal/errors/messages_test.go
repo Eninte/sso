@@ -139,6 +139,8 @@ func TestToLocalizedResponse_AllPredefinedErrors(t *testing.T) {
 		apperrors.ErrTokenExpired,
 		apperrors.ErrCacheMiss,
 		apperrors.ErrKeyNotFound,
+		apperrors.ErrSelfOperationForbidden,
+		apperrors.ErrLastActiveAdmin,
 	}
 
 	for _, err := range errors {

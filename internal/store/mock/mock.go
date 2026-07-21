@@ -55,6 +55,7 @@ type Store struct {
 	DeleteUserErr              error
 	ListUsersErr               error
 	ExistsUserByRoleErr        error
+	CountActiveAdminsErr       error
 	CreateAdminAtomicErr       error
 	GetClientByClientIDErr     error
 	CreateClientErr            error
@@ -336,6 +337,24 @@ func (m *Store) ExistsUserByRole(ctx context.Context, role string) (bool, error)
 		}
 	}
 	return false, nil
+}
+
+// CountActiveAdmins 统计活跃状态的管理员数量
+func (m *Store) CountActiveAdmins(ctx context.Context) (int, error) {
+	if m.CountActiveAdminsErr != nil {
+		return 0, m.CountActiveAdminsErr
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	count := 0
+	for _, user := range m.users {
+		if user.Role == model.UserRoleAdmin && user.Status == model.UserStatusActive {
+			count++
+		}
+	}
+	return count, nil
 }
 
 // CreateAdminAtomic 模拟原子创建初始管理员
@@ -1110,6 +1129,7 @@ func (m *Store) Reset() {
 	m.DeleteUserErr = nil
 	m.ListUsersErr = nil
 	m.ExistsUserByRoleErr = nil
+	m.CountActiveAdminsErr = nil
 	m.CreateAdminAtomicErr = nil
 	m.GetClientByClientIDErr = nil
 	m.CreateClientErr = nil

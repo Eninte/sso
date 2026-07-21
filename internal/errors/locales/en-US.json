@@ -24,6 +24,8 @@
   "PASSWORD_NO_LOWERCASE": "Password must contain at least one lowercase letter",
   "PASSWORD_NO_DIGIT": "Password must contain at least one digit",
   "PASSWORD_NO_SPECIAL": "Password must contain at least one special character",
+  "SELF_OPERATION_FORBIDDEN": "You cannot disable or delete your own account",
+  "LAST_ACTIVE_ADMIN": "Cannot disable or delete the last active administrator",
   
   "EMAIL_ALREADY_VERIFIED": "Email already verified",
   "VERIFICATION_CODE_INVALID": "Invalid verification code",

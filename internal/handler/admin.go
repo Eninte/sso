@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/mux"
 
 	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/middleware"
 	"github.com/example/sso/internal/service"
 )
 
@@ -139,10 +140,11 @@ func (h *AdminHandler) HandleGetUser(w http.ResponseWriter, r *http.Request) {
 
 // handleUserStatusChange 处理用户状态变更请求（通用方法）
 // 用于禁用/启用用户等操作
+// action 接收操作者 ID 与目标用户 ID（T14：操作者 ID 用于"禁止操作本人"防护）
 func (h *AdminHandler) handleUserStatusChange(
 	w http.ResponseWriter,
 	r *http.Request,
-	action func(context.Context, string) error,
+	action func(ctx context.Context, operatorID, userID string) error,
 	successMessage string,
 ) {
 	var userID string
@@ -168,9 +170,13 @@ func (h *AdminHandler) handleUserStatusChange(
 		return
 	}
 
+	// T14：操作者 ID 用于"禁止禁用/删除本人"防护
+	operatorID := middleware.GetUserIDFromContext(r.Context())
 	ctx := service.WithClientIP(r.Context(), extractClientIP(r))
-	if err := action(ctx, userID); err != nil {
-		writeError(w, http.StatusNotFound, getMessage(r, apperrors.ErrCodeNotFound))
+	if err := action(ctx, operatorID, userID); err != nil {
+		// T14：保留 service 层错误的状态码与本地化消息
+		// （403 本人操作防护、409 末位管理员保护、404 用户不存在），不再一律返回 404
+		writeServiceError(w, r, err)
 		return
 	}
 
@@ -188,7 +194,10 @@ func (h *AdminHandler) HandleDisableUser(w http.ResponseWriter, r *http.Request)
 // POST /admin/users/{id}/enable 或 POST /admin/users/enable
 // 注意：管理员权限检查由 AdminMiddleware 处理
 func (h *AdminHandler) HandleEnableUser(w http.ResponseWriter, r *http.Request) {
-	h.handleUserStatusChange(w, r, h.adminSvc.EnableUser, "用户已启用")
+	// 启用操作无本人/末位管理员防护，忽略操作者 ID
+	h.handleUserStatusChange(w, r, func(ctx context.Context, _, userID string) error {
+		return h.adminSvc.EnableUser(ctx, userID)
+	}, "用户已启用")
 }
 
 // HandleDeleteUser 处理删除用户请求
@@ -203,9 +212,12 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// T14：操作者 ID 用于"禁止删除本人"防护
+	operatorID := middleware.GetUserIDFromContext(r.Context())
 	ctx := service.WithClientIP(r.Context(), extractClientIP(r))
-	if err := h.adminSvc.DeleteUser(ctx, userID); err != nil {
-		writeError(w, http.StatusNotFound, getMessage(r, apperrors.ErrCodeNotFound))
+	if err := h.adminSvc.DeleteUser(ctx, operatorID, userID); err != nil {
+		// T14：保留 service 层错误的状态码与本地化消息，不再一律返回 404
+		writeServiceError(w, r, err)
 		return
 	}
 
