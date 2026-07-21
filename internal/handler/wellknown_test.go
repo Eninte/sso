@@ -44,9 +44,18 @@ func TestWellKnownHandler_HandleDiscovery(t *testing.T) {
 
 		// 验证关键字段
 		assert.Equal(t, "http://localhost:9090", resp["issuer"])
-		assert.Equal(t, "http://localhost:9090/authorize", resp["authorization_endpoint"])
+		// T19（I1）：authorization_endpoint 与实际路由 /api/v1/authorize 对齐
+		assert.Equal(t, "http://localhost:9090/api/v1/authorize", resp["authorization_endpoint"])
 		assert.Equal(t, "http://localhost:9090/api/v1/token", resp["token_endpoint"])
 		assert.Equal(t, "http://localhost:9090/.well-known/jwks.json", resp["jwks_uri"])
+
+		// T19（I1）：客户端认证方式与实际能力对齐——
+		// token 端点仅接受 JSON body，不支持 HTTP Basic，故不声明 client_secret_basic
+		authMethods, ok := resp["token_endpoint_auth_methods_supported"].([]interface{})
+		require.True(t, ok)
+		assert.Contains(t, authMethods, "client_secret_post")
+		assert.Contains(t, authMethods, "none")
+		assert.NotContains(t, authMethods, "client_secret_basic")
 
 		// 验证支持的响应类型
 		responseTypes, ok := resp["response_types_supported"].([]interface{})

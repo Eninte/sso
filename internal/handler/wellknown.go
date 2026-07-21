@@ -47,7 +47,9 @@ func (h *WellKnownHandler) HandleDiscovery(w http.ResponseWriter, r *http.Reques
 		"issuer": h.baseURL,
 
 		// 端点
-		"authorization_endpoint": h.baseURL + "/authorize",
+		// T19（I1）：authorization_endpoint 与实际路由 /api/v1/authorize 对齐，
+		// 旧值 /authorize 在路由器中不存在，会误导依赖 Discovery 的客户端
+		"authorization_endpoint": h.baseURL + "/api/v1/authorize",
 		"token_endpoint":         h.baseURL + "/api/v1/token",
 		"userinfo_endpoint":      h.baseURL + "/api/v1/userinfo",
 		"jwks_uri":               h.baseURL + "/.well-known/jwks.json",
@@ -76,8 +78,11 @@ func (h *WellKnownHandler) HandleDiscovery(w http.ResponseWriter, r *http.Reques
 		},
 
 		// 支持的客户端认证方式
+		// T19（I1）：与实际 token 端点能力对齐——token 端点仅接受 JSON body，
+		// 不解析 HTTP Basic 头，故不声明 client_secret_basic；
+		// client_secret_post 对应机密客户端在请求体中携带 client_secret，
+		// none 对应公共客户端（PKCE 强制 S256，无需密钥）
 		"token_endpoint_auth_methods_supported": []string{
-			"client_secret_basic",
 			"client_secret_post",
 			"none",
 		},
