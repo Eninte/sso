@@ -60,10 +60,47 @@ func TestValidateEmail(t *testing.T) {
 			wantErr: true,
 			errMsg:  "邮箱地址格式无效",
 		},
+		// T18（L11）：以下变体在旧实现中被接受（trim 或 ParseAddress 宽容解析），
+		// 现一律拒绝，仅接受纯 addr-spec
 		{
-			name:    "带空格的邮箱",
+			name:    "T18 - 前后多余空白",
 			email:   " user@example.com ",
-			wantErr: false, // 应该trim空格
+			wantErr: true,
+			errMsg:  "邮箱地址格式无效",
+		},
+		{
+			name:    "T18 - display-name 带引号",
+			email:   `"Name" <user@example.com>`,
+			wantErr: true,
+			errMsg:  "邮箱地址格式无效",
+		},
+		{
+			name:    "T18 - display-name 不带引号",
+			email:   "Name <user@example.com>",
+			wantErr: true,
+			errMsg:  "邮箱地址格式无效",
+		},
+		{
+			name:    "T18 - 尾部注释",
+			email:   "user@example.com (comment)",
+			wantErr: true,
+			errMsg:  "邮箱地址格式无效",
+		},
+		{
+			name:    "T18 - 尖括号形式",
+			email:   "<user@example.com>",
+			wantErr: true,
+			errMsg:  "邮箱地址格式无效",
+		},
+		{
+			name:    "T18 - 正常值不受影响",
+			email:   "user@example.com",
+			wantErr: false,
+		},
+		{
+			name:    "T18 - 大小写与加号标签不受影响",
+			email:   "User+Tag@Example.COM",
+			wantErr: false,
 		},
 	}
 

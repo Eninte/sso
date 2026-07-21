@@ -32,15 +32,26 @@ var (
 // ============================================================================
 
 // ValidateEmail 验证邮箱地址格式
+// T18（安全修复，审计 L11）：仅接受纯 addr-spec —— mail.ParseAddress 通过后
+// 追加校验"无 display-name 且解析结果与原输入完全一致"，拒绝以下变体：
+//   - display-name 形式："Name" <a@b.c>、Name <a@b.c>
+//   - 注释形式：a@b.c (comment)
+//   - 尖括号形式：<a@b.c>
+//   - 前后多余空白：" a@b.c "
+//
+// 防止同一人以多种写法绕过邮箱唯一性约束或干扰审计/计费的账号口径
 func ValidateEmail(email string) error {
-	email = strings.TrimSpace(email)
-
-	if email == "" {
+	if strings.TrimSpace(email) == "" {
 		return ErrEmailRequired
 	}
 
-	_, err := mail.ParseAddress(email)
+	addr, err := mail.ParseAddress(email)
 	if err != nil {
+		return ErrEmailInvalid
+	}
+
+	// 纯 addr-spec 校验：解析结果必须与原输入逐字符一致
+	if addr.Name != "" || addr.Address != email {
 		return ErrEmailInvalid
 	}
 
