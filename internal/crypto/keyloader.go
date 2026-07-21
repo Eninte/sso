@@ -265,10 +265,11 @@ func LoadKeysForRotation(
 		return nil, fmt.Errorf("加载签名公钥失败: %w", err)
 	}
 
-	// 生成密钥ID
-	keyID, err := GenerateKeyID()
-	if err != nil {
-		return nil, fmt.Errorf("生成密钥ID失败: %w", err)
+	// T16：密钥 ID 从公钥内容派生（RFC 7638 JWK thumbprint），
+	// 同一密钥跨重启恒定同一 kid，重启后旧 token 仍可验证
+	keyID := DeriveKeyID(publicKey)
+	if keyID == "" {
+		return nil, fmt.Errorf("从公钥派生密钥ID失败: %w", ErrKeyParseFailed)
 	}
 
 	// 创建JWTService
@@ -290,9 +291,12 @@ func LoadKeysForRotation(
 			fmt.Printf("警告: 加载轮换公钥失败 %s: %v\n", path, err)
 			continue
 		}
-		rotKeyID, err := GenerateKeyID()
-		if err != nil {
-			fmt.Printf("警告: 生成轮换密钥ID失败: %v\n", err)
+		// T16：轮换公钥的 kid 同样从内容派生，
+		// 保证重启后旧 token 的 kid 能匹配到同一把轮换公钥；
+		// 与活跃密钥同一把时 kid 相同，map 赋值幂等（JWKS 不再出现同钥多 kid）
+		rotKeyID := DeriveKeyID(rotKey)
+		if rotKeyID == "" {
+			fmt.Printf("警告: 从轮换公钥派生密钥ID失败 %s\n", path)
 			continue
 		}
 		svc.AddVerificationKey(rotKeyID, rotKey)

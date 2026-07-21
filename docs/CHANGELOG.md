@@ -40,6 +40,10 @@
 
 ### Fixed
 
+- **安全修复（T16 / 报告 L3）**：JWT kid 改为按 RFC 7638 JWK Thumbprint 从公钥内容派生（SHA-256 base64url 前 16 字符），同一密钥内容恒定同一 kid；修复原随机 kid 导致重启后旧 token 无匹配公钥、全员强制登出的问题；JWKS 与签发 token header 的 kid 保证一致，重复公钥在 JWKS 中幂等去重
+
+- **安全修复（T18 / 报告 L11）**：注册/登录入口邮箱仅接受纯 addr-spec——拒绝 display-name（`"Name" <a@b.c>`）、尖括号形式、尾部注释与前后空白（原实现 trim 后放行）；纯 addr-spec（含大小写、`+tag`）不受影响
+
 - **安全修复（T15 / 报告 L7）**：图形验证码增加账号维度失败计数——登录凭据错误时同时按来源 IP 与账号（邮箱归一化后 SHA-256 作键，明文不落 Redis 键）累计失败次数，任一维度达阈值即要求验证码，攻击者换 IP 对同一账号爆破不再绕过验证码；登录成功双维度清零；注册/忘记密码等端点同步做账号维度判定；缓存故障时与 IP 维度一致 fail-open 降级
 
 - **安全修复（T14 / 报告 L5+L6）**：管理员接口增加本人/末位管理员防护——禁止 admin 修改或删除自己的角色（`SELF_OPERATION_FORBIDDEN`，403）；当目标用户是系统中最后一个 active admin 时，任何人的降级/禁用/删除均被拒绝（`LAST_ACTIVE_ADMIN`，409），防止管理面永久锁死。`user_roles` 撤销提前到角色写入之前，且写入失败时按差异补撤销，被撤权用户不再能凭旧 JWT 继续调用管理接口。新增 `store.CountActiveAdmins`（含 Postgres 集成测试与 mock 支持）

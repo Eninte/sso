@@ -5,9 +5,12 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -615,4 +618,94 @@ func TestLoadKeysForRotation_PublicKeyNotFound(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "加载签名公钥失败")
+}
+
+// ============================================================================
+// T16：kid 从密钥内容派生的稳定性与一致性测试
+// ============================================================================
+
+// tokenHeaderKid 解析 JWT header 中的 kid（仅测试用，不验证签名）
+func tokenHeaderKid(t *testing.T, token string) string {
+	t.Helper()
+	parts := strings.Split(token, ".")
+	require.Len(t, parts, 3)
+	header, err := base64.RawURLEncoding.DecodeString(parts[0])
+	require.NoError(t, err)
+	var h map[string]interface{}
+	require.NoError(t, json.Unmarshal(header, &h))
+	kid, _ := h["kid"].(string)
+	return kid
+}
+
+// jwksKIDs 提取 JWKS 中全部 kid
+func jwksKIDs(t *testing.T, jwks map[string]interface{}) []string {
+	t.Helper()
+	keys, ok := jwks["keys"].([]map[string]interface{})
+	require.True(t, ok, "JWKS 应包含 keys 数组")
+	kids := make([]string, 0, len(keys))
+	for _, k := range keys {
+		kid, _ := k["kid"].(string)
+		kids = append(kids, kid)
+	}
+	return kids
+}
+
+// TestLoadKeysForRotation_KeyIDStableAcrossRestarts 同一密钥文件两次加载 kid 恒定，
+// 且"重启前"签发的 token 在"重启后"的实例上仍可验证（T16 核心目标）
+func TestLoadKeysForRotation_KeyIDStableAcrossRestarts(t *testing.T) {
+	privateKeyPath, publicKeyPath := createTestKeys(t)
+
+	svc1, err := crypto.LoadKeysForRotation(
+		privateKeyPath, publicKeyPath, nil, "test-issuer", 15*time.Minute, 7*24*time.Hour)
+	require.NoError(t, err)
+
+	// 模拟重启：同一密钥文件再次加载
+	svc2, err := crypto.LoadKeysForRotation(
+		privateKeyPath, publicKeyPath, nil, "test-issuer", 15*time.Minute, 7*24*time.Hour)
+	require.NoError(t, err)
+
+	assert.NotEmpty(t, svc1.GetActiveKeyID())
+	assert.Equal(t, svc1.GetActiveKeyID(), svc2.GetActiveKeyID(),
+		"同一密钥内容跨加载（重启）应恒定派生同一 kid")
+
+	// 重启前签发的 token 在重启后的实例上可验证
+	token, err := svc1.GenerateAccessToken("user-123", "test@example.com", "user", []string{"openid"})
+	require.NoError(t, err)
+	claims, err := svc2.ValidateAccessToken(token)
+	require.NoError(t, err, "kid 稳定时重启后旧 token 仍可验证，不再强制全员重新登录")
+	assert.Equal(t, "user-123", claims.Subject)
+}
+
+// TestLoadKeysForRotation_TokenKidMatchesJWKS 签发 token header 的 kid 与 JWKS 暴露的 kid 一致
+func TestLoadKeysForRotation_TokenKidMatchesJWKS(t *testing.T) {
+	privateKeyPath, publicKeyPath := createTestKeys(t)
+
+	svc, err := crypto.LoadKeysForRotation(
+		privateKeyPath, publicKeyPath, nil, "test-issuer", 15*time.Minute, 7*24*time.Hour)
+	require.NoError(t, err)
+
+	token, err := svc.GenerateAccessToken("user-123", "test@example.com", "user", []string{"openid"})
+	require.NoError(t, err)
+
+	kid := tokenHeaderKid(t, token)
+	assert.NotEmpty(t, kid, "轮换模式下签发的 token 应携带 kid")
+	assert.Equal(t, svc.GetActiveKeyID(), kid, "token header kid 应等于活跃密钥 ID")
+	assert.Contains(t, jwksKIDs(t, svc.GetJWKS()), kid,
+		"token header kid 必须能在 JWKS 中找到（验证方缓存可正确命中）")
+}
+
+// TestLoadKeysForRotation_DuplicateKeySingleKid 活跃公钥同时出现在轮换列表时，
+// kid 从内容派生保证 JWKS 中同一公钥仅一个条目（旧实现会生成两个随机 kid）
+func TestLoadKeysForRotation_DuplicateKeySingleKid(t *testing.T) {
+	privateKeyPath, publicKeyPath := createTestKeys(t)
+
+	svc, err := crypto.LoadKeysForRotation(
+		privateKeyPath, publicKeyPath,
+		[]string{publicKeyPath}, // 轮换列表重复包含活跃公钥
+		"test-issuer", 15*time.Minute, 7*24*time.Hour)
+	require.NoError(t, err)
+
+	kids := jwksKIDs(t, svc.GetJWKS())
+	assert.Len(t, kids, 1, "同一公钥在 JWKS 中应仅一个条目（kid 内容派生，幂等去重）")
+	assert.Equal(t, svc.GetActiveKeyID(), kids[0])
 }

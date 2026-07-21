@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/base64"
+	"math/big"
 	"testing"
 	"time"
 
@@ -449,16 +451,54 @@ func TestJWTService_GetJWKS(t *testing.T) {
 // 工具函数测试
 // ============================================================================
 
-func TestGenerateKeyID(t *testing.T) {
-	// 生成多个KeyID，验证唯一性
-	ids := make(map[string]bool)
-	for i := 0; i < 100; i++ {
-		id, err := crypto.GenerateKeyID()
+func TestDeriveKeyID(t *testing.T) {
+	t.Run("同一密钥多次派生kid恒定", func(t *testing.T) {
+		key, err := crypto.GenerateRSAKeyPair(2048)
 		require.NoError(t, err)
-		assert.NotEmpty(t, id)
-		assert.False(t, ids[id], "生成了重复的KeyID")
-		ids[id] = true
-	}
+
+		id1 := crypto.DeriveKeyID(&key.PublicKey)
+		id2 := crypto.DeriveKeyID(&key.PublicKey)
+		assert.NotEmpty(t, id1)
+		assert.Equal(t, id1, id2, "同一密钥内容应恒定派生同一 kid（跨重启稳定）")
+	})
+
+	t.Run("不同密钥派生不同kid", func(t *testing.T) {
+		key1, err := crypto.GenerateRSAKeyPair(2048)
+		require.NoError(t, err)
+		key2, err := crypto.GenerateRSAKeyPair(2048)
+		require.NoError(t, err)
+
+		assert.NotEqual(t,
+			crypto.DeriveKeyID(&key1.PublicKey),
+			crypto.DeriveKeyID(&key2.PublicKey),
+			"kid 与密钥内容绑定，不同密钥必须不同 kid")
+	})
+
+	t.Run("kid为16字符base64url", func(t *testing.T) {
+		key, err := crypto.GenerateRSAKeyPair(2048)
+		require.NoError(t, err)
+
+		id := crypto.DeriveKeyID(&key.PublicKey)
+		assert.Len(t, id, 16, "kid 应为 thumbprint base64url 的前 16 字符")
+		assert.Regexp(t, `^[A-Za-z0-9_-]{16}$`, id, "kid 应为无填充 base64url 字符集")
+	})
+
+	t.Run("nil或缺模数返回空", func(t *testing.T) {
+		assert.Empty(t, crypto.DeriveKeyID(nil))
+		assert.Empty(t, crypto.DeriveKeyID(&rsa.PublicKey{E: 65537}))
+	})
+
+	t.Run("RFC7638标准测试向量", func(t *testing.T) {
+		// RFC 7638 §3.1 示例 RSA 公钥，其 JWK Thumbprint（SHA-256）为
+		// NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs（base64url，43 字符）
+		// 本项目 kid 取其前 16 字符
+		nBytes, err := base64.RawURLEncoding.DecodeString("0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw")
+		require.NoError(t, err)
+
+		pub := &rsa.PublicKey{N: new(big.Int).SetBytes(nBytes), E: 65537}
+		assert.Equal(t, "NzbLsXh8uDCcd-6M", crypto.DeriveKeyID(pub),
+			"应与 RFC 7638 §3.1 thumbprint 的前 16 字符一致")
+	})
 }
 
 func TestGenerateRSAKeyPair(t *testing.T) {
@@ -496,6 +536,14 @@ func TestCreateKeyVersion(t *testing.T) {
 	assert.NotEmpty(t, keyVersion.ID)
 	assert.NotEmpty(t, keyVersion.PublicKey)
 	assert.NotEmpty(t, keyVersion.PrivateKey)
+
+	// T16：ID 从公钥内容派生，与 DeriveKeyID 一致且幂等
+	assert.Equal(t, crypto.DeriveKeyID(&key.PublicKey), keyVersion.ID,
+		"KeyVersion.ID 应为公钥内容的 RFC 7638 thumbprint 派生值")
+	keyVersion2, err := crypto.CreateKeyVersion(key)
+	require.NoError(t, err)
+	assert.Equal(t, keyVersion.ID, keyVersion2.ID,
+		"同一密钥重复创建版本应得到同一 ID（幂等）")
 }
 
 // ============================================================================

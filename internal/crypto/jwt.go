@@ -6,12 +6,15 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"sync"
 	"time"
 
@@ -441,8 +444,10 @@ func (s *JWTService) GetJWKS() map[string]interface{} {
 			"kty": "RSA",
 			"alg": "RS256",
 			"use": "sig",
-			"n":   base64.RawURLEncoding.EncodeToString(pubKey.N.Bytes()),
-			"e":   base64.RawURLEncoding.EncodeToString([]byte{1, 0, 1}),
+			"n":   base64urlUInt(pubKey.N),
+			// T16：指数按实际值编码（原硬编码 65537 对应的 {1,0,1}），
+			// 与 DeriveKeyID 的 RFC 7638 thumbprint 输入保持一致
+			"e": base64urlUInt(big.NewInt(int64(pubKey.E))),
 		})
 	}
 	return map[string]interface{}{
@@ -450,12 +455,53 @@ func (s *JWTService) GetJWKS() map[string]interface{} {
 	}
 }
 
-func GenerateKeyID() (string, error) {
-	bytes := make([]byte, 16)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
+// ============================================================================
+// 密钥 ID 派生（T16：RFC 7638 JWK Thumbprint）
+// ============================================================================
+
+// jwkThumbprint RFC 7638 §3 规定的 RSA JWK thumbprint 输入结构。
+// 成员按字典序（e, kty, n）排列；encoding/json 按字段声明顺序输出，
+// 序列化结果天然满足 RFC 7638 的字典序 + 无空白要求
+type jwkThumbprint struct {
+	E   string `json:"e"`
+	Kty string `json:"kty"`
+	N   string `json:"n"`
+}
+
+// base64urlUInt 按 RFC 7638 §2 将非负整数编码为最小大端字节序的 base64url（无填充）
+func base64urlUInt(v *big.Int) string {
+	return base64.RawURLEncoding.EncodeToString(v.Bytes())
+}
+
+// DeriveKeyID 从 RSA 公钥内容派生密钥 ID（T16 安全修复，审计 L3）
+//
+// 算法：RFC 7638 JWK Thumbprint —— 对 {"e":...,"kty":"RSA","n":...}
+// （成员字典序、紧凑无空白）计算 SHA-256，base64url（无填充）编码后取前 16 字符。
+// 16 字符 = 96 bit 截断，对轮换场景（个位数密钥）碰撞概率可忽略，
+// 同时保持 kid 短小，与原随机 kid 的长度量级一致。
+//
+// 性质：
+//   - 同一密钥内容恒定派生同一 kid：跨重启稳定，重启后旧 token 的 kid
+//     仍能匹配到同一公钥，不再强制全员重新登录（原实现每次启动随机生成）
+//   - 不同密钥必然不同 kid：kid 与密钥内容绑定，轮换/重排不会造成
+//     验证方缓存中"同 kid 不同钥"的混乱
+//
+// publicKey 为 nil 或模数缺失时返回空字符串（调用方应视为异常并跳过）
+func DeriveKeyID(publicKey *rsa.PublicKey) string {
+	if publicKey == nil || publicKey.N == nil {
+		return ""
 	}
-	return base64.RawURLEncoding.EncodeToString(bytes), nil
+	input, err := json.Marshal(jwkThumbprint{
+		E:   base64urlUInt(big.NewInt(int64(publicKey.E))),
+		Kty: "RSA",
+		N:   base64urlUInt(publicKey.N),
+	})
+	if err != nil {
+		// 结构体仅含字符串字段，Marshal 不可能失败；防御性返回空
+		return ""
+	}
+	sum := sha256.Sum256(input)
+	return base64.RawURLEncoding.EncodeToString(sum[:])[:16]
 }
 
 func GenerateRSAKeyPair(bits int) (*rsa.PrivateKey, error) {
@@ -494,9 +540,11 @@ func EncodePublicKeyToPKIXPEM(key *rsa.PublicKey) []byte {
 }
 
 func CreateKeyVersion(privateKey *rsa.PrivateKey) (*model.KeyVersion, error) {
-	keyID, err := GenerateKeyID()
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate key ID: %w", err)
+	// T16：kid 从公钥内容派生（RFC 7638 thumbprint），
+	// 与密钥内容绑定且跨重启稳定；同一密钥重复创建版本将得到同一 ID（幂等）
+	keyID := DeriveKeyID(&privateKey.PublicKey)
+	if keyID == "" {
+		return nil, apperrors.ErrKeyParseFailed
 	}
 
 	return &model.KeyVersion{
