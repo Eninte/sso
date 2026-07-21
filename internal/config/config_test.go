@@ -685,3 +685,102 @@ func TestConnectionPoolConfig(t *testing.T) {
 	assert.Equal(t, 10*time.Minute, cfg.DBConnMaxLifetime)
 	assert.Equal(t, 30*time.Second, cfg.DBQueryTimeout)
 }
+
+// ============================================================================
+// T4：MFA_RECOVERY_HMAC_KEY 强度校验测试
+// ============================================================================
+
+// TestValidate_MFARecoveryKeyStrength 验证 MFA 恢复码 HMAC 密钥强度校验
+// 生产环境密钥 < 32 字节拒绝启动；非生产环境仅告警不拒绝
+func TestValidate_MFARecoveryKeyStrength(t *testing.T) {
+	// setProductionPrereqs 设置生产环境校验所需的其他变量
+	setProductionPrereqs := func(t *testing.T) {
+		t.Helper()
+		t.Setenv("SERVER_ENV", "production")
+		t.Setenv("BCRYPT_COST", "12")
+		t.Setenv("DB_SSL_MODE", "require")
+		t.Setenv("CORS_ALLOWED_ORIGINS", "https://example.com")
+		t.Setenv("JWT_ISSUER", "myapp")
+		t.Setenv("SMTP_HOST", "smtp.example.com")
+	}
+
+	t.Run("生产环境_弱密钥_拒绝启动", func(t *testing.T) {
+		setupTestEnv(t)
+		setProductionPrereqs(t)
+		t.Setenv("MFA_RECOVERY_HMAC_KEY", "123456")
+
+		_, err := config.Load()
+		require.Error(t, err, "生产环境弱密钥（<32字节）应拒绝启动")
+		assert.Contains(t, err.Error(), "MFA_RECOVERY_HMAC_KEY")
+	})
+
+	t.Run("生产环境_32字节密钥_通过", func(t *testing.T) {
+		setupTestEnv(t)
+		setProductionPrereqs(t)
+		// openssl rand -hex 32 输出 64 字符 hex（32 字节）
+		t.Setenv("MFA_RECOVERY_HMAC_KEY", "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90")
+
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.NotNil(t, cfg)
+	})
+
+	t.Run("开发环境_弱密钥_通过（仅告警）", func(t *testing.T) {
+		setupTestEnv(t)
+		t.Setenv("SERVER_ENV", "development")
+		t.Setenv("MFA_RECOVERY_HMAC_KEY", "123456")
+
+		cfg, err := config.Load()
+		require.NoError(t, err, "开发环境弱密钥不应拒绝启动")
+		assert.NotNil(t, cfg)
+	})
+}
+
+// ============================================================================
+// T5：SERVER_ENV 白名单校验测试
+// ============================================================================
+
+// TestValidate_ServerEnvWhitelist 验证 SERVER_ENV 白名单
+// 未知值（含大小写混用）拒绝启动；合法值 development/production 通过
+func TestValidate_ServerEnvWhitelist(t *testing.T) {
+	t.Run("大小写混用_拒绝启动", func(t *testing.T) {
+		setupTestEnv(t)
+		t.Setenv("SERVER_ENV", "Production")
+
+		_, err := config.Load()
+		require.Error(t, err, "SERVER_ENV=Production（大小写混用）应拒绝启动")
+		assert.Contains(t, err.Error(), "SERVER_ENV")
+	})
+
+	t.Run("未知值_拒绝启动", func(t *testing.T) {
+		setupTestEnv(t)
+		t.Setenv("SERVER_ENV", "staging")
+
+		_, err := config.Load()
+		require.Error(t, err, "SERVER_ENV=staging 应拒绝启动")
+		assert.Contains(t, err.Error(), "SERVER_ENV")
+	})
+
+	t.Run("development_通过", func(t *testing.T) {
+		setupTestEnv(t)
+		t.Setenv("SERVER_ENV", "development")
+
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.NotNil(t, cfg)
+	})
+
+	t.Run("production_通过", func(t *testing.T) {
+		setupTestEnv(t)
+		t.Setenv("SERVER_ENV", "production")
+		t.Setenv("BCRYPT_COST", "12")
+		t.Setenv("DB_SSL_MODE", "require")
+		t.Setenv("CORS_ALLOWED_ORIGINS", "https://example.com")
+		t.Setenv("JWT_ISSUER", "myapp")
+		t.Setenv("SMTP_HOST", "smtp.example.com")
+
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.NotNil(t, cfg)
+	})
+}

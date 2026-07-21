@@ -488,16 +488,21 @@ func validateProdJWTKeyPermissions(c *Config, lanMode bool) error {
 
 // validateProdMFARecoveryKey 检查 MFA 恢复码 HMAC 密钥（生产环境强制要求）
 // 防止攻击者通过数据库泄露推导恢复码，AGENTS.md 硬约束
+//
+// T4 强度校验：生产环境密钥长度必须 >= 32 字节（建议 openssl rand -hex 32 生成），
+// 过短密钥熵不足，恢复码 HMAC 可被暴力推导，拒绝启动
 func validateProdMFARecoveryKey(c *Config, lanMode bool) error {
-	if c.MFARecoveryHMACKey != "" {
+	if len(c.MFARecoveryHMACKey) >= 32 {
 		return nil
 	}
 	if lanMode {
-		slog.Warn("生产环境未设置MFA_RECOVERY_HMAC_KEY（LAN部署模式）")
+		slog.Warn("生产环境 MFA_RECOVERY_HMAC_KEY 未设置或少于32字节（LAN部署模式）",
+			"key_length", len(c.MFARecoveryHMACKey))
 		return nil
 	}
-	slog.Error("生产环境必须设置MFA_RECOVERY_HMAC_KEY")
-	return fmt.Errorf("MFA_RECOVERY_HMAC_KEY must be set in production")
+	slog.Error("生产环境 MFA_RECOVERY_HMAC_KEY 必须设置且不少于32字节",
+		"key_length", len(c.MFARecoveryHMACKey))
+	return fmt.Errorf("MFA_RECOVERY_HMAC_KEY must be set and at least 32 bytes in production")
 }
 
 // validateProdInitEnabled 检查初始化面板配置：生产环境推荐初始化完成后关闭 INIT_ENABLED
@@ -570,9 +575,16 @@ func (c *Config) validate() error {
 		return err
 	}
 
-	// 验证环境设置
+	// 验证环境设置（T5：SERVER_ENV 白名单，未知值拒绝启动而非仅警告）
 	if c.Env != "development" && c.Env != "production" {
-		slog.Warn("未知的运行环境，应为 development 或 production", "env", c.Env)
+		slog.Error("未知的运行环境", "env", c.Env)
+		return fmt.Errorf("SERVER_ENV must be one of: development, production (got %q)", c.Env)
+	}
+
+	// T4：非生产环境 MFA_RECOVERY_HMAC_KEY 未设置或强度不足时告警（不拒绝启动）
+	if c.Env != "production" && len(c.MFARecoveryHMACKey) < 32 {
+		slog.Warn("MFA_RECOVERY_HMAC_KEY 未设置或少于32字节，生产环境将拒绝启动",
+			"key_length", len(c.MFARecoveryHMACKey))
 	}
 
 	// 验证端口范围

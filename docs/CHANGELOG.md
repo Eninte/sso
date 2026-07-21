@@ -40,6 +40,8 @@
 
 ### Fixed
 
+- **T4 生产环境强制 MFA_RECOVERY_HMAC_KEY ≥32 字节**（安全审查 L2）：弱密钥（如 123456）将拒绝启动，非生产环境降级为警告
+- **T5 SERVER_ENV 白名单校验**（安全审查 L13）：非 development/production 的值（含 Production 大小写拼错）拒绝启动，避免静默跳过全部生产校验
 - **T3 日志与响应脱敏补齐**（安全审查 M5+L8）：配置向导 DB/Redis 连接测试失败不再向响应返回原始错误详情、日志经 SanitizeDBURL 脱敏；邮件发送日志收件人改用 SanitizeEmail
 - **T2 重置/验证令牌哈希存储**（安全审查 H2+L14）：`reset_tokens`/`verification_tokens` 改存 SHA-256 hash，校验时 ConstantTimeCompare 比对 hash；修复 storeToken 静默忽略 DELETE 错误。**注意**：迁移 020 执行后已签发未过期的重置/验证令牌失效，用户需重新发起流程
 - **T1 tokens 表去除明文存储**（安全审查 H1）：`access_token`/`refresh_token` 明文列改为仅写 NULL，查询/轮换/撤销全部走 SHA-256 hash，删除全部明文回退路径；Redis token 缓存键同步改为 hash。**注意**：迁移 019 执行后，迁移 018 之前签发且仍在有效期内的 refresh token 将失效，用户需重新登录一次
