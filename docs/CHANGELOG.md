@@ -40,6 +40,7 @@
 
 ### Fixed
 
+- **T6 升级 golang.org/x/crypto 至 v0.52.0**（安全审查 L15）：消除 15 条已知漏洞的扫描噪音（代码路径本未触达）；govulncheck 复扫 0 项受影响
 - **T4 生产环境强制 MFA_RECOVERY_HMAC_KEY ≥32 字节**（安全审查 L2）：弱密钥（如 123456）将拒绝启动，非生产环境降级为警告
 - **T5 SERVER_ENV 白名单校验**（安全审查 L13）：非 development/production 的值（含 Production 大小写拼错）拒绝启动，避免静默跳过全部生产校验
 - **T3 日志与响应脱敏补齐**（安全审查 M5+L8）：配置向导 DB/Redis 连接测试失败不再向响应返回原始错误详情、日志经 SanitizeDBURL 脱敏；邮件发送日志收件人改用 SanitizeEmail
