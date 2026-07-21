@@ -13,6 +13,27 @@
 
 自动化扫描：gosec **0 issues**（含 CI 豁免 G118/G201/G202/G706/G710，豁免理由经复核均成立）；govulncheck **代码路径 0 漏洞**（golang.org/x/crypto v0.49.0 存在已知漏洞但代码未触达，建议升级，见 L15）。
 
+
+## 修复进展（2026-07-21 更新）
+
+阶段一与阶段二已全部完成并通过 CI 验证（单元/集成/E2E/gosec/govulncheck/lint 全绿，合并口径覆盖率 82.7%）：
+
+| 发现 | 状态 | 修复提交 |
+|------|------|---------|
+| H1 tokens 明文落库 | ✅ 已修复（T1） | `e63bb52` |
+| H2 重置/验证令牌明文 | ✅ 已修复（T2） | `290bc5d` |
+| H3 JWT 私钥明文入库 | ✅ 已修复（T7） | `7d4dc6d` |
+| M1 CORS credentials | ✅ 已修复（T8） | `b945f74` |
+| M2 社交登录 state | ✅ 已修复（T11） | `f738b6a`+`b244179` |
+| M3 MFA 单机内存 | ✅ 已修复（T9） | `e5e193d` |
+| M4 限流 fail-open | ✅ 已修复（T10） | `7610da0` |
+| M5 setup 错误泄露 | ✅ 已修复（T3） | `ba8b329` |
+| M6 CI 供应链固定 | ⏳ 阶段三（T12） | — |
+| L1/L2/L8/L13/L14/L15 | ✅ 已修复（T9/T4/T3/T5/T2/T6） | 见对应任务提交 |
+| L3-L7、L9-L12、I1-I6 | ⏳ 阶段三（T13-T19） | — |
+
+执行细节见 `docs/SECURITY_FIX_PLAN.md`。High 级发现已全部清零。
+
 ## 发现汇总
 
 | # | 级别 | 问题 | 位置 |
@@ -33,21 +54,21 @@
 
 ## High 级发现
 
-### H1. Access/Refresh Token 明文落库
+### H1. Access/Refresh Token 明文落库　✅ 已修复（T1）
 
 - **位置**：`internal/store/postgres/token.go:102-134`（StoreToken）、`226-299`（RotateRefreshToken）
 - **证据**：INSERT 同时写入 `access_token`/`refresh_token` 明文与 `access_token_hash`/`refresh_token_hash`，注释明确"明文保留用于调试和审计"。迁移 018 已引入 hash 列且查询优先走 hash。
 - **利用场景**：数据库泄露（拖库/备份外泄/注入读取）→ 攻击者直接获得全部未过期会话凭据，hash 列的保护被完全抵消；撤销机制无法防御已泄露的有效凭据。
 - **修复建议**：新迁移将明文列置 NULL（后续版本 DROP COLUMN），删除明文回退查询路径（`getTokenByField(ctx, "refresh_token", ...)`），仅保留 hash 存储与查询。
 
-### H2. 密码重置/邮箱验证令牌明文落库
+### H2. 密码重置/邮箱验证令牌明文落库　✅ 已修复（T2）
 
 - **位置**：`internal/store/postgres/verification.go:44-49`；生成点 `internal/service/user.go:232-245`
 - **证据**：`common.GenerateToken()` 生成 32 字节随机令牌后明文写入 `reset_tokens.token` / `verification_tokens.token`，同时明文拼入邮件链接。
 - **利用场景**：任何 DB 读权限泄露 → 在 1 小时 TTL 内直接使用泄露令牌重置任意账户密码（重置令牌等效一次性账户接管凭据）。
 - **修复建议**：改存 SHA-256 hash（令牌本身高熵无需加盐），校验时 hash 后比对；邮件链接仍用原始令牌。
 
-### H3. JWT 轮换私钥明文入库
+### H3. JWT 轮换私钥明文入库　✅ 已修复（T7）
 
 - **位置**：`internal/crypto/jwt.go:445-458`（CreateKeyVersion）、`internal/service/keyrotation.go:55`（StoreKey）、`internal/store/postgres/key.go:19-36`
 - **证据**：密钥轮换模式下新生成的 RSA 私钥以 PKCS8 PEM 明文写入 `key_versions.private_key`，无信封加密/KMS 保护。与文件模式"私钥权限必须 0600"的要求形成明显安全等级落差。
@@ -59,34 +80,34 @@
 
 ## Medium 级发现
 
-### M1. CORS Origin 反射 + 恒定 Allow-Credentials
+### M1. CORS Origin 反射 + 恒定 Allow-Credentials　✅ 已修复（T8）
 
 - **位置**：`internal/middleware/cors.go:67-105`
 - **证据**：Origin 命中允许列表即反射回显且恒定设置 `Access-Control-Allow-Credentials: true`；`Validate()` 仅在 `env == "production"` 时禁止 `*`；`*.example.com` 子域通配（HasSuffix）与 credentials 组合时，任一（可能被攻陷的）子域均可带凭据跨域。另未设置 `Vary: Origin`。
 - **利用场景**：非 production 的 `SERVER_ENV` 暴露公网（配置失误）时，恶意站点可携带用户凭据读取 `/api/v1/userinfo` 等响应。
 - **修复建议**：仅精确匹配的 Origin 发送 credentials；任何通配形式（含 `*.` 子域）不发送；补 `Vary: Origin`。
 
-### M2. 社交登录 state 未绑定发起方会话
+### M2. 社交登录 state 未绑定发起方会话　✅ 已修复（T11）
 
 - **位置**：`internal/handler/social.go:43`、`internal/service/social.go:232-303, 375-427`
 - **证据**：state 可由客户端任意传入，服务端仅校验存在性、一次性（GETDEL）、provider 绑定与 TTL，**不校验该 state 是否由当前浏览器发起**。
 - **利用场景**：典型 login CSRF——攻击者用自己的 Google/GitHub 账号获得合法 code + 自建 state，诱导受害者访问回调 URL，受害者被登录为攻击者账号。当前 token 以 JSON 返回，实际影响取决于前端接管方式。
 - **修复建议**：state 强制服务端生成，与发起方指纹绑定（双重提交 cookie 校验）；文档明确前端集成的 login CSRF 注意事项。
 
-### M3. MFA 防护为单机内存实现
+### M3. MFA 防护为单机内存实现　✅ 已修复（T9）
 
 - **位置**：`internal/service/mfa.go:127-171`（recoveryAttempts）、`181-211`（totpUsage）
 - **证据**：恢复码失败限流（5 次锁 15 分钟）与 TOTP 重放记录存进程内 map，而登录限流已用 Redis 分布式实现。多副本部署时尝试次数随副本数线性放大；TOTP 重放记录不跨实例，重放请求打到另一实例即绕过。
 - **修复建议**：迁移至 Redis（`INCR`+TTL / `SET NX EX 90`），与 LoginRateLimiter 保持一致。
 
-### M4. 限流 Redis 故障时 fail-open（含敏感端点）
+### M4. 限流 Redis 故障时 fail-open（含敏感端点）　✅ 已修复（T10）
 
 - **位置**：`internal/middleware/ratelimit_distributed.go:96-165`、`internal/service/login_ratelimit.go:62-65`、`email_ratelimit.go:56-59`
 - **证据**：Redis 错误时直接放行（分布式中间件有日志+指标，登录/邮件限流器静默放行）。登录/注册/忘记密码/重置密码/MFA 验证等敏感端点同样 fail-open。
 - **利用场景**：Redis 故障窗口内（或攻击者诱发故障）对登录/重置密码无限制爆破。账户锁定（DB 层）是唯一兜底。
 - **修复建议**：敏感端点 Redis 故障时 fail-closed（503）或降级为进程内限流；所有 fail-open 路径必须有 Error 级日志 + metrics。
 
-### M5. 配置向导泄露原始 DB 错误
+### M5. 配置向导泄露原始 DB 错误　✅ 已修复（T3）
 
 - **位置**：`internal/handler/setup.go:383-386`
 - **证据**：`slog.Error("setup test-db 数据库连接失败", "error", err)` 未走 `logging.SanitizeDBURL`（项目其他 20+ 处已做脱敏，此处遗漏）；且 `apperrors.ErrInternal.WithDetails(err.Error())` 把内部错误详情返回 HTTP 客户端，违反项目错误处理规范。

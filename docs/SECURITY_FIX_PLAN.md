@@ -65,17 +65,17 @@ curl -s "https://api.github.com/repos/Eninte/sso/actions/runs?per_page=1" | \
 
 | ID | 级别 | 任务 | 阶段 | 依赖 | 状态 |
 |----|------|------|------|------|------|
-| T1 | High | tokens 表去除明文存储（H1） | 一 | 无 | ☐ |
-| T2 | High | reset/verification 令牌哈希存储（H2，含 L14 顺手修） | 一 | 无 | ☐ |
-| T3 | Medium | setup.go 错误脱敏 + 邮件日志邮箱脱敏（M5+L8） | 一 | 无 | ☐ |
-| T4 | Low | MFA_RECOVERY_HMAC_KEY 强度校验（L2） | 一 | 无 | ☐ |
-| T5 | Low | SERVER_ENV 白名单拒绝未知值（L13） | 一 | 无 | ☐ |
-| T6 | Low | 升级 golang.org/x/crypto 至 v0.52.0（L15） | 一 | 无 | ☐ |
-| T7 | High | JWT 轮换私钥信封加密（H3） | 二 | 无 | ☐ |
-| T8 | Medium | CORS credentials 策略收紧（M1） | 二 | 无 | ☐ |
-| T9 | Medium | MFA 限流与 TOTP 重放记录 Redis 化（M3+L1） | 二 | 无 | ☐ |
-| T10 | Medium | 敏感端点限流 fail-closed（M4） | 二 | 无 | ☐ |
-| T11 | Medium | 社交登录 state 会话绑定（M2） | 二 | 无 | ☐ |
+| T1 | High | tokens 表去除明文存储（H1） | 一 | 无 | ☑ |
+| T2 | High | reset/verification 令牌哈希存储（H2，含 L14 顺手修） | 一 | 无 | ☑ |
+| T3 | Medium | setup.go 错误脱敏 + 邮件日志邮箱脱敏（M5+L8） | 一 | 无 | ☑ |
+| T4 | Low | MFA_RECOVERY_HMAC_KEY 强度校验（L2） | 一 | 无 | ☑ |
+| T5 | Low | SERVER_ENV 白名单拒绝未知值（L13） | 一 | 无 | ☑ |
+| T6 | Low | 升级 golang.org/x/crypto 至 v0.52.0（L15） | 一 | 无 | ☑ |
+| T7 | High | JWT 轮换私钥信封加密（H3） | 二 | 无 | ☑ |
+| T8 | Medium | CORS credentials 策略收紧（M1） | 二 | 无 | ☑ |
+| T9 | Medium | MFA 限流与 TOTP 重放记录 Redis 化（M3+L1） | 二 | 无 | ☑ |
+| T10 | Medium | 敏感端点限流 fail-closed（M4） | 二 | 无 | ☑ |
+| T11 | Medium | 社交登录 state 会话绑定（M2） | 二 | 无 | ☑ |
 | T12 | Medium | CI 供应链固定（M6） | 三 | 无 | ☐ |
 | T13 | Low | /api/v1/token 纳入敏感限流（L4） | 三 | T10 | ☐ |
 | T14 | Low | 管理员自锁/末位防护 + 角色变更失效（L5+L6） | 三 | 无 | ☐ |
