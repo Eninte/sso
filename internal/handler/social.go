@@ -88,6 +88,7 @@ func (h *SocialLoginHandler) stateFingerprint(state string) string {
 // setStateFingerprintCookie 下发 state 指纹 Cookie
 // HttpOnly + SameSite=Lax（OAuth 重定向回来的顶层 GET 导航会携带）+ 生产 Secure
 func (h *SocialLoginHandler) setStateFingerprintCookie(w http.ResponseWriter, state string) {
+	// #nosec G124 -- Secure 按环境设置：生产强制 true；开发环境 http 下 Secure=true 浏览器会拒存 Cookie
 	http.SetCookie(w, &http.Cookie{
 		Name:     socialStateCookieName,
 		Value:    h.stateFingerprint(state),
