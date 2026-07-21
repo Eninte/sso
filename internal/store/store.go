@@ -139,6 +139,8 @@ type KeyStore interface {
 	DeprecateKey(ctx context.Context, keyID string, expiresAt time.Time) error
 	RevokeKey(ctx context.Context, keyID string) error
 	DeleteKey(ctx context.Context, keyID string) error
+	// UpdateKeyPrivateKey 更新密钥的私钥字段（T7：懒加密回写密文时使用）
+	UpdateKeyPrivateKey(ctx context.Context, keyID string, privateKey []byte) error
 }
 
 // ============================================================================

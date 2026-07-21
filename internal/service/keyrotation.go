@@ -20,6 +20,7 @@ type KeyRotationService struct {
 	jwtSvc           *crypto.JWTService
 	auditSvc         *AuditService
 	transitionPeriod time.Duration
+	kek              []byte // T7：私钥信封加密 KEK（32 字节），nil 表示未启用加密
 }
 
 func NewKeyRotationService(
@@ -34,6 +35,15 @@ func NewKeyRotationService(
 		auditSvc:         auditSvc,
 		transitionPeriod: transitionPeriod,
 	}
+}
+
+// WithKeyEncryptionKey 配置私钥信封加密的 KEK（T7，链式调用）
+//
+// 配置后 RotateKey 生成的新私钥加密落库（v1:gcm: 格式）；
+// kek 必须为 32 字节（由 crypto.ParseKEK 解析 JWT_KEY_ENCRYPTION_KEY 得到）
+func (s *KeyRotationService) WithKeyEncryptionKey(kek []byte) *KeyRotationService {
+	s.kek = kek
+	return s
 }
 
 func (s *KeyRotationService) RotateKey(ctx context.Context) (*model.KeyVersion, error) {
@@ -52,6 +62,17 @@ func (s *KeyRotationService) RotateKey(ctx context.Context) (*model.KeyVersion, 
 		return nil, serviceutil.WrapServiceError("创建密钥版本", err)
 	}
 
+	// T7：KEK 已配置时私钥信封加密后落库（v1:gcm: 格式）；
+	// 内存中保留明文 PEM 用于解析与设置活跃密钥
+	plainPEM := newKeyVersion.PrivateKey
+	if len(s.kek) > 0 {
+		ciphertext, err := crypto.EncryptPrivateKey(s.kek, plainPEM)
+		if err != nil {
+			return nil, serviceutil.WrapServiceError("加密新私钥", err)
+		}
+		newKeyVersion.PrivateKey = []byte(ciphertext)
+	}
+
 	if err := s.keyStore.StoreKey(ctx, newKeyVersion); err != nil {
 		return nil, serviceutil.WrapServiceError("存储新密钥", err)
 	}
@@ -61,7 +82,7 @@ func (s *KeyRotationService) RotateKey(ctx context.Context) (*model.KeyVersion, 
 		return nil, serviceutil.WrapServiceError("解析公钥", err)
 	}
 
-	privKey, err := crypto.ParsePrivateKey(newKeyVersion.PrivateKey)
+	privKey, err := crypto.ParsePrivateKey(plainPEM)
 	if err != nil {
 		return nil, serviceutil.WrapServiceError("解析私钥", err)
 	}

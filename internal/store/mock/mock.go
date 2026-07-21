@@ -1304,6 +1304,19 @@ func (m *Store) DeleteKey(ctx context.Context, keyID string) error {
 	return nil
 }
 
+// UpdateKeyPrivateKey 更新密钥的私钥字段（T7：懒加密回写）
+func (m *Store) UpdateKeyPrivateKey(ctx context.Context, keyID string, privateKey []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	key, ok := m.keys[keyID]
+	if !ok {
+		return store.ErrNotFound
+	}
+	key.PrivateKey = privateKey
+	return nil
+}
+
 // ============================================================================
 // MFA恢复码 Mock实现
 // ============================================================================

@@ -226,3 +226,24 @@ func (s *Store) DeleteKey(ctx context.Context, keyID string) error {
 	}
 	return nil
 }
+
+// UpdateKeyPrivateKey 更新密钥的私钥字段
+// T7：懒加密回写密文时使用；store 层不做加解密，仅原样写入
+func (s *Store) UpdateKeyPrivateKey(ctx context.Context, keyID string, privateKey []byte) error {
+	ctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+
+	query := `UPDATE key_versions SET private_key = $2 WHERE id = $1`
+	result, err := s.db.ExecContext(ctx, query, keyID, privateKey)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}

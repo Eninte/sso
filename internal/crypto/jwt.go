@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -35,6 +36,7 @@ type JWTService struct {
 	publicKeys      map[string]*rsa.PublicKey
 	activeKeyID     string
 	keyStore        store.KeyStore
+	kek             []byte // T7：私钥信封加密的 KEK（32 字节），nil 表示未启用加密
 	issuer          string
 	accessTokenTTL  time.Duration
 	refreshTokenTTL time.Duration
@@ -72,6 +74,20 @@ func NewJWTServiceWithKeyStore(
 		accessTokenTTL:  accessTokenTTL,
 		refreshTokenTTL: refreshTokenTTL,
 	}
+}
+
+// SetKeyEncryptionKey 配置私钥信封加密的 KEK（T7）
+//
+// 配置后：LoadKeysFromStore 读取密文行时解密、读取存量明文行后懒加密回写；
+// kek 必须为 32 字节（由 ParseKEK 解析 JWT_KEY_ENCRYPTION_KEY 得到）
+func (s *JWTService) SetKeyEncryptionKey(kek []byte) error {
+	if len(kek) != 0 && len(kek) != 32 {
+		return fmt.Errorf("KEK must be 32 bytes, got %d", len(kek))
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.kek = kek
+	return nil
 }
 
 func (s *JWTService) SetActiveKey(keyID string, privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey) error {
@@ -126,9 +142,17 @@ func (s *JWTService) LoadKeysFromStore(ctx context.Context) error {
 		return fmt.Errorf("failed to load keys from store: %w", err)
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	kek := s.kek
+	s.mu.RUnlock()
 
+	// T7：待懒加密回写的明文行（keyID -> 明文 PEM）
+	var lazyEncrypt []struct {
+		keyID string
+		pem   []byte
+	}
+
+	s.mu.Lock()
 	for _, keyVersion := range keys {
 		if !keyVersion.CanVerify() {
 			continue
@@ -142,13 +166,40 @@ func (s *JWTService) LoadKeysFromStore(ctx context.Context) error {
 		s.publicKeys[keyVersion.ID] = pubKey
 
 		if keyVersion.IsActive() && len(keyVersion.PrivateKey) > 0 {
-			privKey, err := ParsePrivateKey(keyVersion.PrivateKey)
+			// T7：按前缀分派解密；明文行原样返回（过渡兼容存量数据）
+			plainPEM, err := DecryptPrivateKey(kek, string(keyVersion.PrivateKey))
+			if err != nil {
+				slog.Warn("私钥信封解密失败，跳过该密钥", "key_id", keyVersion.ID, "error", err)
+				continue
+			}
+			privKey, err := ParsePrivateKey(plainPEM)
 			if err == nil {
 				s.keys[keyVersion.ID] = privKey
 				s.activeKeyID = keyVersion.ID
 				s.privateKey = privKey
 				s.publicKey = pubKey
+
+				// 明文行且已配置 KEK → 标记懒加密回写（无需迁移脚本）
+				if len(kek) > 0 && !IsEncryptedPrivateKey(string(keyVersion.PrivateKey)) {
+					lazyEncrypt = append(lazyEncrypt, struct {
+						keyID string
+						pem   []byte
+					}{keyID: keyVersion.ID, pem: plainPEM})
+				}
 			}
+		}
+	}
+	s.mu.Unlock()
+
+	// T7：懒加密回写（锁外执行；回写失败仅告警，不阻塞密钥加载）
+	for _, item := range lazyEncrypt {
+		ciphertext, err := EncryptPrivateKey(kek, item.pem)
+		if err != nil {
+			slog.Warn("私钥懒加密失败", "key_id", item.keyID, "error", err)
+			continue
+		}
+		if err := s.keyStore.UpdateKeyPrivateKey(ctx, item.keyID, []byte(ciphertext)); err != nil {
+			slog.Warn("私钥懒加密回写失败", "key_id", item.keyID, "error", err)
 		}
 	}
 

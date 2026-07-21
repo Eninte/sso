@@ -83,6 +83,15 @@ func (m *mockKeyStore) RevokeKey(ctx context.Context, keyID string) error {
 	return apperrors.ErrKeyNotFound
 }
 
+// UpdateKeyPrivateKey 更新密钥私钥（T7 接口扩展）
+func (m *mockKeyStore) UpdateKeyPrivateKey(ctx context.Context, keyID string, privateKey []byte) error {
+	if key, ok := m.keys[keyID]; ok {
+		key.PrivateKey = privateKey
+		return nil
+	}
+	return apperrors.ErrKeyNotFound
+}
+
 func (m *mockKeyStore) DeleteKey(ctx context.Context, keyID string) error {
 	if _, ok := m.keys[keyID]; ok {
 		delete(m.keys, keyID)

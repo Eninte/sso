@@ -793,3 +793,100 @@ func TestValidate_ServerEnvWhitelist(t *testing.T) {
 		assert.NotNil(t, cfg)
 	})
 }
+
+// ============================================================================
+// T7：JWT_KEY_ENCRYPTION_KEY 校验测试
+// ============================================================================
+
+// TestValidate_JWTKeyEncryptionKey 验证 DB 私钥信封加密 KEK 的校验规则：
+// 所有环境配置即须为 64 位 hex；生产环境启用密钥轮换（DB 密钥存储）时必填
+func TestValidate_JWTKeyEncryptionKey(t *testing.T) {
+	// setProductionPrereqs 设置生产环境校验所需的其他变量
+	setProductionPrereqs := func(t *testing.T) {
+		t.Helper()
+		t.Setenv("SERVER_ENV", "production")
+		t.Setenv("BCRYPT_COST", "12")
+		t.Setenv("DB_SSL_MODE", "require")
+		t.Setenv("CORS_ALLOWED_ORIGINS", "https://example.com")
+		t.Setenv("JWT_ISSUER", "myapp")
+		t.Setenv("SMTP_HOST", "smtp.example.com")
+	}
+
+	validKEK := "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+
+	t.Run("生产环境_启用轮换_无KEK_拒绝启动", func(t *testing.T) {
+		setupTestEnv(t)
+		setProductionPrereqs(t)
+		t.Setenv("KEY_ROTATION_ENABLED", "true")
+		t.Setenv("JWT_KEY_ENCRYPTION_KEY", "")
+
+		_, err := config.Load()
+		require.Error(t, err, "生产环境启用密钥轮换且无 KEK 应拒绝启动")
+		assert.Contains(t, err.Error(), "JWT_KEY_ENCRYPTION_KEY")
+	})
+
+	t.Run("生产环境_启用轮换_合法KEK_通过", func(t *testing.T) {
+		setupTestEnv(t)
+		setProductionPrereqs(t)
+		t.Setenv("KEY_ROTATION_ENABLED", "true")
+		t.Setenv("JWT_KEY_ENCRYPTION_KEY", validKEK)
+
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.Equal(t, validKEK, cfg.JWTKeyEncryptionKey)
+	})
+
+	t.Run("生产环境_未启用轮换_无KEK_通过", func(t *testing.T) {
+		setupTestEnv(t)
+		setProductionPrereqs(t)
+		t.Setenv("KEY_ROTATION_ENABLED", "false")
+		t.Setenv("JWT_KEY_ENCRYPTION_KEY", "")
+
+		cfg, err := config.Load()
+		require.NoError(t, err, "未启用密钥轮换时 KEK 非必填（文件密钥模式）")
+		assert.NotNil(t, cfg)
+	})
+
+	t.Run("生产环境_启用轮换_LAN部署_无KEK_通过", func(t *testing.T) {
+		setupTestEnv(t)
+		setProductionPrereqs(t)
+		t.Setenv("KEY_ROTATION_ENABLED", "true")
+		t.Setenv("JWT_KEY_ENCRYPTION_KEY", "")
+		t.Setenv("LAN_DEPLOYMENT", "true")
+
+		cfg, err := config.Load()
+		require.NoError(t, err, "LAN 内网部署可放宽 KEK 必填校验")
+		assert.NotNil(t, cfg)
+	})
+
+	t.Run("任意环境_KEK非hex_拒绝启动", func(t *testing.T) {
+		setupTestEnv(t)
+		t.Setenv("SERVER_ENV", "development")
+		t.Setenv("JWT_KEY_ENCRYPTION_KEY", "zz")
+
+		_, err := config.Load()
+		require.Error(t, err, "KEK 非合法 hex 应拒绝启动")
+		assert.Contains(t, err.Error(), "JWT_KEY_ENCRYPTION_KEY")
+	})
+
+	t.Run("任意环境_KEK长度不足_拒绝启动", func(t *testing.T) {
+		setupTestEnv(t)
+		t.Setenv("SERVER_ENV", "development")
+		// 32 个 hex 字符（16 字节），不满足 AES-256 的 32 字节要求
+		t.Setenv("JWT_KEY_ENCRYPTION_KEY", "00112233445566778899aabbccddeeff")
+
+		_, err := config.Load()
+		require.Error(t, err, "KEK 非 64 位 hex 应拒绝启动")
+		assert.Contains(t, err.Error(), "JWT_KEY_ENCRYPTION_KEY")
+	})
+
+	t.Run("开发环境_合法KEK_通过", func(t *testing.T) {
+		setupTestEnv(t)
+		t.Setenv("SERVER_ENV", "development")
+		t.Setenv("JWT_KEY_ENCRYPTION_KEY", validKEK)
+
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.Equal(t, validKEK, cfg.JWTKeyEncryptionKey)
+	})
+}

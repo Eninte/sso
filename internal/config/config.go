@@ -4,6 +4,7 @@
 package config
 
 import (
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net"
@@ -75,6 +76,7 @@ type Config struct {
 	KeyRotationInterval      time.Duration // 密钥轮换周期
 	KeyTransitionPeriod      time.Duration // 密钥过渡期时长
 	JWTTransitionPubKeyPaths string        // 轮换期间的旧公钥路径（逗号分隔）
+	JWTKeyEncryptionKey      string        // T7：DB 私钥信封加密 KEK（64 位 hex = 32 字节）
 
 	// 安全配置
 	BcryptCost         int           // bcrypt成本因子
@@ -177,6 +179,7 @@ func Load() (*Config, error) {
 		KeyRotationInterval:      getEnvDuration("KEY_ROTATION_INTERVAL", 2160*time.Hour), // 90天
 		KeyTransitionPeriod:      getEnvDuration("KEY_TRANSITION_PERIOD", 24*time.Hour),   // 24小时
 		JWTTransitionPubKeyPaths: os.Getenv("JWT_TRANSITION_PUBKEY_PATHS"),                // 轮换期间的旧公钥路径（逗号分隔）
+		JWTKeyEncryptionKey:      os.Getenv("JWT_KEY_ENCRYPTION_KEY"),                     // T7：DB 私钥信封加密 KEK（64 位 hex）
 
 		// 安全配置
 		// BcryptCost: bcrypt成本因子，影响密码哈希性能
@@ -333,6 +336,20 @@ func validateSecurityConfig(c *Config) error {
 	}
 	if c.LockoutDuration <= 0 {
 		slog.Warn("账户锁定时长应为正数", "duration", c.LockoutDuration)
+	}
+
+	// T7：KEK 格式校验（所有环境，配置即须合法，fail-fast）
+	if c.JWTKeyEncryptionKey != "" {
+		if _, err := hex.DecodeString(c.JWTKeyEncryptionKey); err != nil || len(c.JWTKeyEncryptionKey) != 64 {
+			slog.Error("JWT_KEY_ENCRYPTION_KEY 必须为64位hex（32字节）")
+			return fmt.Errorf("JWT_KEY_ENCRYPTION_KEY must be 64 hex chars (32 bytes for AES-256)")
+		}
+	}
+
+	// T7：生产环境启用密钥轮换（DB 密钥存储）时 KEK 必填，否则私钥只能明文落库
+	if c.Env == "production" && c.KeyRotationEnabled && c.JWTKeyEncryptionKey == "" && !c.LANDeployment {
+		slog.Error("生产环境启用密钥轮换时必须设置 JWT_KEY_ENCRYPTION_KEY")
+		return fmt.Errorf("JWT_KEY_ENCRYPTION_KEY must be set in production when KEY_ROTATION_ENABLED=true")
 	}
 
 	return nil
