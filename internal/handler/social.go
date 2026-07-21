@@ -149,7 +149,7 @@ func (h *SocialLoginHandler) HandleLogin(w http.ResponseWriter, r *http.Request)
 	// 5. 重定向到授权URL
 	// authURL 由服务层从预配置的 OAuth 提供商端点构造，
 	// provider 已在 GetAuthorizationURL 内白名单验证，非用户可控的开放重定向
-	http.Redirect(w, r, authURL, http.StatusTemporaryRedirect) // nosec G710
+	http.Redirect(w, r, authURL, http.StatusTemporaryRedirect) // #nosec G710 -- authURL 由服务层从预配置提供商端点构造，provider 白名单验证
 }
 
 // extractStateFromAuthURL 从授权 URL 中提取服务端生成的 state 参数

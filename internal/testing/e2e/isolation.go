@@ -516,7 +516,7 @@ func (ih *IsolationHelper) deleteAuditLogsByUserIDs(ctx context.Context, userIDs
 		if i > 0 {
 			query += ", "
 		}
-		query += fmt.Sprintf("$%d", i+1)
+		query += fmt.Sprintf("$%d", i+1) // #nosec G202 -- i+1 为循环整数索引，仅拼接参数占位符编号，非用户输入
 		args[i] = id
 	}
 	query += ")"
@@ -542,7 +542,7 @@ func (ih *IsolationHelper) countAuditLogsByUserIDs(ctx context.Context, userIDs 
 		if i > 0 {
 			query += ", "
 		}
-		query += fmt.Sprintf("$%d", i+1)
+		query += fmt.Sprintf("$%d", i+1) // #nosec G202 -- i+1 为循环整数索引，仅拼接参数占位符编号，非用户输入
 		args[i] = id
 	}
 	query += ")"

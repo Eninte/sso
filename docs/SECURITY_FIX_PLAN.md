@@ -76,14 +76,14 @@ curl -s "https://api.github.com/repos/Eninte/sso/actions/runs?per_page=1" | \
 | T9 | Medium | MFA 限流与 TOTP 重放记录 Redis 化（M3+L1） | 二 | 无 | ☑ |
 | T10 | Medium | 敏感端点限流 fail-closed（M4） | 二 | 无 | ☑ |
 | T11 | Medium | 社交登录 state 会话绑定（M2） | 二 | 无 | ☑ |
-| T12 | Medium | CI 供应链固定（M6） | 三 | 无 | ☐ |
-| T13 | Low | /api/v1/token 纳入敏感限流（L4） | 三 | T10 | ☐ |
-| T14 | Low | 管理员自锁/末位防护 + 角色变更失效（L5+L6） | 三 | 无 | ☐ |
-| T15 | Low | 验证码账号维度计数（L7） | 三 | 无 | ☐ |
-| T16 | Low | kid 从密钥内容派生（L3，RFC 7638） | 三 | 无 | ☐ |
-| T17 | Low | Docker/Compose 凭据卫生（L9+L10） | 三 | 无 | ☐ |
-| T18 | Low | 注册邮箱限制为纯 addr-spec（L11） | 三 | 无 | ☐ |
-| T19 | Info | OIDC Discovery 与实际路由对齐（I1） | 三 | 无 | ☐ |
+| T12 | Medium | CI 供应链固定（M6） | 三 | 无 | ☑ |
+| T13 | Low | /api/v1/token 纳入敏感限流（L4） | 三 | T10 | ☑ |
+| T14 | Low | 管理员自锁/末位防护 + 角色变更失效（L5+L6） | 三 | 无 | ☑ |
+| T15 | Low | 验证码账号维度计数（L7） | 三 | 无 | ☑ |
+| T16 | Low | kid 从密钥内容派生（L3，RFC 7638） | 三 | 无 | ☑ |
+| T17 | Low | Docker/Compose 凭据卫生（L9+L10） | 三 | 无 | ☑ |
+| T18 | Low | 注册邮箱限制为纯 addr-spec（L11） | 三 | 无 | ☑ |
+| T19 | Info | OIDC Discovery 与实际路由对齐（I1） | 三 | 无 | ☑ |
 
 可选加固（另立项评估，不在本计划内）：TOTP secret 落库加密（L12，可在 T7 引入 KEK 后低成本实现）、JWT audience（I3）、consent_token kid 统一（I2）。
 
@@ -432,6 +432,8 @@ govulncheck ./...   # 确认 x/crypto 相关 15 条不再出现
 | 邮箱校验收紧拒绝存量合法输入 | T18 | 个别注册失败 | 仅影响新注册；错误消息明确 |
 
 ## 7. 全部完成后的收尾
+
+> **执行状态（2026-07-21）**：T1-T19 全部完成并推送，CI 逐提交全绿。收尾项 1-4 已完成（CHANGELOG 逐任务追加并校对；审查报告已回填全部修复提交；收尾复扫 gosec 0 issue / govulncheck 0 可触达漏洞，E2E 由 CI 逐提交验证；SECURITY.md 已补新机制说明）。第 5 项版本发布评估待所有者决策。
 
 1. `docs/CHANGELOG.md` [Unreleased] 汇总所有条目（各任务已分别追加，收尾时校对）
 2. 更新 `docs/reports/SECURITY_REVIEW_2026-07-21.md`：已修复项标注「✅ 已修复（commit xxx）」

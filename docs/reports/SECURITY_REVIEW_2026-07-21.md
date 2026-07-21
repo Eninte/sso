@@ -11,12 +11,16 @@
 
 最突出的残余风险集中在一个主题——**数据库静态数据中的敏感值明文**（H1/H2/H3）：会话令牌、密码重置令牌、JWT 签名私钥三类凭据在 DB 中明文存储，构成"DB 一旦泄露即全线失守"的纵深防御缺口。三者均非代码缺陷而是设计取舍，但 H1/H2 已有 hash 基础设施，修复成本低、收益大。
 
-自动化扫描：gosec **0 issues**（含 CI 豁免 G118/G201/G202/G706/G710，豁免理由经复核均成立）；govulncheck **代码路径 0 漏洞**（golang.org/x/crypto v0.49.0 存在已知漏洞但代码未触达，建议升级，见 L15）。
+> **2026-07-21 更新**：上述 H1/H2/H3 及全部 Medium 级发现已修复完毕（见下表），该纵深防御缺口已闭合。
+
+自动化扫描：gosec **0 issues**（含 CI 豁免 G118/G201/G202/G706/G710，豁免理由经复核均成立）；govulncheck **代码路径 0 漏洞**。
+
+> **2026-07-21 复扫**：x/crypto 已升级（T6）；收尾复扫 gosec 0 issue（两处 nosec 格式问题已修正）、govulncheck 0 个可触达漏洞。
 
 
 ## 修复进展（2026-07-21 更新）
 
-阶段一与阶段二已全部完成并通过 CI 验证（单元/集成/E2E/gosec/govulncheck/lint 全绿，合并口径覆盖率 82.7%）：
+阶段一、二、三已全部完成并通过 CI 验证（单元/集成/E2E/gosec/govulncheck/lint 全绿；最终复扫 gosec 0 issue、govulncheck 0 个可触达漏洞）：
 
 | 发现 | 状态 | 修复提交 |
 |------|------|---------|
@@ -28,11 +32,18 @@
 | M3 MFA 单机内存 | ✅ 已修复（T9） | `e5e193d` |
 | M4 限流 fail-open | ✅ 已修复（T10） | `7610da0` |
 | M5 setup 错误泄露 | ✅ 已修复（T3） | `ba8b329` |
-| M6 CI 供应链固定 | ⏳ 阶段三（T12） | — |
+| M6 CI 供应链固定 | ✅ 已修复（T12） | `dd4783b` |
 | L1/L2/L8/L13/L14/L15 | ✅ 已修复（T9/T4/T3/T5/T2/T6） | 见对应任务提交 |
-| L3-L7、L9-L12、I1-I6 | ⏳ 阶段三（T13-T19） | — |
+| L3 kid 随机派生 | ✅ 已修复（T16） | `07c1640` |
+| L4 token 端点限流缺口 | ✅ 已修复（T13） | `ff70816` |
+| L5/L6 管理员防护 | ✅ 已修复（T14） | `6a554de` |
+| L7 验证码 IP 维度 | ✅ 已修复（T15） | `437e4e0` |
+| L9/L10 Docker 凭据卫生 | ✅ 已修复（T17） | `7c46a23` |
+| L11 邮箱 addr-spec | ✅ 已修复（T18） | `02d2ec8` |
+| I1 OIDC Discovery | ✅ 已修复（T19） | `ef1ee55` |
+| L12、I2-I6 | 🔵 已评估，暂不修复（见对应条目说明） | — |
 
-执行细节见 `docs/SECURITY_FIX_PLAN.md`。High 级发现已全部清零。
+执行细节见 `docs/SECURITY_FIX_PLAN.md`。High 级发现已全部清零，Medium 级全部清零，Low 级除 L12（TOTP secret 落库，业界常见做法，可选信封加密加固）外全部清零。
 
 ## 发现汇总
 
@@ -114,7 +125,7 @@
 - **利用场景**：向导开启期间，本地调用者可借连接测试接口探测内网 DB 拓扑；若驱动错误串含 DSN 片段则泄露凭据。
 - **修复建议**：日志经 `SanitizeDBURL` 脱敏，响应返回通用错误消息。
 
-### M6. CI/构建工具链未固定版本
+### M6. CI/构建工具链未固定版本　✅ 已修复（T12）
 
 - **位置**：`.github/workflows/ci.yml:360-369`、`docker/Dockerfile:25`
 - **证据**：`go install gotest.tools/gotestsum@latest`、`migrate@latest` 完全不固定版本；`actions/checkout@v5` 等仅固定 major tag（gosec@v2.28.0、govulncheck@v1.1.4 已固定，值得肯定）。
@@ -129,15 +140,15 @@
 |---|------|------|------|
 | L1 | TOTP 重放记录每用户仅存一条 | `internal/service/mfa_setup.go:163-177`、`mfa.go:202-211` | 90 秒窗口内两次验证后旧码可被重放一次；改为小集合或 Redis SET |
 | L2 | `MFA_RECOVERY_HMAC_KEY` 无强度校验 | `internal/config/config.go:489-501` | 仅查非空；弱值使恢复码 HMAC 形同虚设；建议 ≥32 字节校验 |
-| L3 | 文件模式 kid 每次重启随机生成 | `internal/crypto/keyloader.go:269-299` | 重启后全部在线用户强制登出，轮换公钥机制失效；建议 kid 从密钥内容派生（RFC 7638 thumbprint）。fail-closed，属可用性缺陷 |
-| L4 | `/api/v1/token` 未纳入敏感限流 | `internal/app/router.go:164` | client_secret 可以 100 次/分/IP 在线猜测；建议纳入 sensitive 子路由 |
-| L5 | 无自锁/末位管理员防护；禁用用户 token 撤销失败仅告警 | `internal/handler/admin.go:183-213`、`internal/service/admin.go:167-187` | 可将全部 admin 禁用致管理面锁死；RevokeAllUserTokens 失败窗口内被禁用户 token 可用至过期（≤15 分钟） |
-| L6 | `RequireAdmin` 仅信任 JWT role claim | `internal/middleware/auth.go:179-222` | 角色降级在 token 剩余有效期内（≤15 分钟）不生效；可接受但需文档声明 |
-| L7 | 验证码为数学题且按 IP 计数 | `internal/captcha/captcha.go:126`、`internal/handler/helpers.go:50-77` | 脚本可解析算术题；IP 轮换可永久低于触发阈值；建议账号维度计数并行 |
+| L3 | 文件模式 kid 每次重启随机生成 ✅（T16 `07c1640`） | `internal/crypto/keyloader.go:269-299` | 重启后全部在线用户强制登出，轮换公钥机制失效；建议 kid 从密钥内容派生（RFC 7638 thumbprint）。fail-closed，属可用性缺陷 |
+| L4 | `/api/v1/token` 未纳入敏感限流 ✅（T13 `ff70816`） | `internal/app/router.go:164` | client_secret 可以 100 次/分/IP 在线猜测；建议纳入 sensitive 子路由 |
+| L5 | 无自锁/末位管理员防护；禁用用户 token 撤销失败仅告警 ✅（T14 `6a554de`） | `internal/handler/admin.go:183-213`、`internal/service/admin.go:167-187` | 可将全部 admin 禁用致管理面锁死；RevokeAllUserTokens 失败窗口内被禁用户 token 可用至过期（≤15 分钟） |
+| L6 | `RequireAdmin` 仅信任 JWT role claim ✅（T14 文档声明） | `internal/middleware/auth.go:179-222` | 角色降级在 token 剩余有效期内（≤15 分钟）不生效；可接受但需文档声明 |
+| L7 | 验证码为数学题且按 IP 计数 ✅（T15 `437e4e0`，账号维度已并行） | `internal/captcha/captcha.go:126`、`internal/handler/helpers.go:50-77` | 脚本可解析算术题；IP 轮换可永久低于触发阈值；建议账号维度计数并行 |
 | L8 | 邮件日志记录完整收件人邮箱 | `internal/service/email.go:138,142` | 与全项目 PII 脱敏策略不一致；改用 `SanitizeEmail` |
-| L9 | 容器内密码出现在进程命令行/环境 | `docker/entrypoint.sh:36,42`、`docker-compose.yml:167` | migrate -database 参数与 redis healthcheck 密码对 `ps`/`docker inspect` 可见 |
-| L10 | Compose `DB_PASSWORD` 无强制校验 | `docker-compose.yml:30` | 未设置时静默传空串；改用 `${DB_PASSWORD:?...}` |
-| L11 | 注册邮箱接受 display-name 形式 | `internal/validator/validator.go:42` | `mail.ParseAddress` 接受 `"Name" <a@b.c>`；建议限制为纯 addr-spec |
+| L9 | 容器内密码出现在进程命令行/环境 ✅（T17 `7c46a23`） | `docker/entrypoint.sh:36,42`、`docker-compose.yml:167` | migrate -database 参数与 redis healthcheck 密码对 `ps`/`docker inspect` 可见 |
+| L10 | Compose `DB_PASSWORD` 无强制校验 ✅（T17 `7c46a23`） | `docker-compose.yml:30` | 未设置时静默传空串；改用 `${DB_PASSWORD:?...}` |
+| L11 | 注册邮箱接受 display-name 形式 ✅（T18 `02d2ec8`） | `internal/validator/validator.go:42` | `mail.ParseAddress` 接受 `"Name" <a@b.c>`；建议限制为纯 addr-spec |
 | L12 | TOTP secret 明文落库 | `internal/store/postgres/user.go:81,105` | 业界常见做法但 DB 泄露即可绕过 MFA；可选信封加密加固 |
 | L13 | 未知 `SERVER_ENV` 仅警告 | `internal/config/config.go:574-576` | `Production`（大小写拼错）静默跳过全部生产校验；建议非白名单值拒绝启动 |
 | L14 | `storeToken` 忽略 DELETE 错误 | `internal/store/postgres/verification.go:44` | 删除旧令牌失败被静默吞掉，错误语义不清晰 |
@@ -149,7 +160,7 @@
 
 | # | 问题 | 位置 | 要点 |
 |---|------|------|------|
-| I1 | OIDC Discovery 与实际不符 | `internal/handler/wellknown.go:50` | `authorization_endpoint` 声明 `/authorize` 实为 `/api/v1/authorize`；token 端点仅接受 JSON body 而非 RFC 6749 惯例的 form-urlencoded；标准 OIDC 客户端集成会失败 |
+| I1 | OIDC Discovery 与实际不符 ✅（T19 `ef1ee55`，form-urlencoded 支持经所有者决策暂不实现） | `internal/handler/wellknown.go:50` | `authorization_endpoint` 声明 `/authorize` 实为 `/api/v1/authorize`；token 端点仅接受 JSON body 而非 RFC 6749 惯例的 form-urlencoded；标准 OIDC 客户端集成会失败 |
 | I2 | consent_token 验证忽略 kid | `internal/service/oauth_security.go:248-258` | 固定用当前公钥，轮换后 5 分钟窗口内旧 consent_token 失效；fail-closed，建议统一走 kid 查找 |
 | I3 | JWT 未设置/校验 audience | `internal/crypto/jwt.go:211-298` | 单服务自用可接受；多资源服务器场景建议引入 aud 防跨服务重放 |
 | I4 | RequestID 原样信任客户端 `X-Request-ID` | `internal/middleware/requestid.go:22-27` | 可用于日志关联伪造；建议限制字符集/长度 |
