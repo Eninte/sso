@@ -12,9 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/example/sso/internal/cache"
+	"github.com/example/sso/internal/common"
 	"github.com/example/sso/internal/crypto"
 	apperrors "github.com/example/sso/internal/errors"
 	"github.com/example/sso/internal/model"
@@ -239,8 +238,13 @@ func (s *SocialLoginService) GetAuthorizationURL(provider, state string) (string
 	redirectURI := s.baseURL + "/auth/" + provider + "/callback"
 
 	// 如果未提供state，生成随机state
+	// T11（M2）：crypto/rand 32 字节（256 位熵），替代 uuid（128 位）
 	if state == "" {
-		state = uuid.New().String()
+		var err error
+		state, err = common.GenerateRandomString(32)
+		if err != nil {
+			return "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to generate OAuth state", 500, err)
+		}
 	}
 
 	// 阶段 2.3：state 存入 Redis（如可用）+ 内存回退

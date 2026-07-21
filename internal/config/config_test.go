@@ -890,3 +890,59 @@ func TestValidate_JWTKeyEncryptionKey(t *testing.T) {
 		assert.Equal(t, validKEK, cfg.JWTKeyEncryptionKey)
 	})
 }
+
+// ============================================================================
+// T11：SOCIAL_STATE_COOKIE_BINDING 配置测试
+// ============================================================================
+
+// TestValidate_SocialStateCookieBinding 验证社交登录 state 会话绑定配置项
+// 默认开启；生产环境关闭仅 Warn 不拒绝（逃生门）
+func TestValidate_SocialStateCookieBinding(t *testing.T) {
+	setProductionPrereqs := func(t *testing.T) {
+		t.Helper()
+		t.Setenv("SERVER_ENV", "production")
+		t.Setenv("BCRYPT_COST", "12")
+		t.Setenv("DB_SSL_MODE", "require")
+		t.Setenv("CORS_ALLOWED_ORIGINS", "https://example.com")
+		t.Setenv("JWT_ISSUER", "myapp")
+		t.Setenv("SMTP_HOST", "smtp.example.com")
+	}
+
+	t.Run("默认开启", func(t *testing.T) {
+		setupTestEnv(t)
+		t.Setenv("SOCIAL_STATE_COOKIE_BINDING", "")
+
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.True(t, cfg.SocialStateCookieBinding, "未设置时应默认开启")
+	})
+
+	t.Run("显式关闭", func(t *testing.T) {
+		setupTestEnv(t)
+		t.Setenv("SOCIAL_STATE_COOKIE_BINDING", "false")
+
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.False(t, cfg.SocialStateCookieBinding)
+	})
+
+	t.Run("生产环境_开启_通过", func(t *testing.T) {
+		setupTestEnv(t)
+		setProductionPrereqs(t)
+		t.Setenv("SOCIAL_STATE_COOKIE_BINDING", "true")
+
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.True(t, cfg.SocialStateCookieBinding)
+	})
+
+	t.Run("生产环境_关闭_仅告警不拒绝", func(t *testing.T) {
+		setupTestEnv(t)
+		setProductionPrereqs(t)
+		t.Setenv("SOCIAL_STATE_COOKIE_BINDING", "false")
+
+		cfg, err := config.Load()
+		require.NoError(t, err, "生产环境关闭绑定仅 Warn（纯 API 客户端逃生门），不应拒绝启动")
+		assert.False(t, cfg.SocialStateCookieBinding)
+	})
+}

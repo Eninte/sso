@@ -99,6 +99,9 @@ type Config struct {
 	GoogleClientSecret string // Google客户端密钥
 	GitHubClientID     string // GitHub客户端ID
 	GitHubClientSecret string // GitHub客户端密钥
+	// SocialStateCookieBinding T11：社交登录 state 会话绑定（login CSRF 防护）
+	// 默认开启；纯 API 客户端（无 Cookie）场景可设为 false 恢复旧行为
+	SocialStateCookieBinding bool
 
 	// 受信代理配置（X-Real-IP仅在请求来自受信代理时才被信任）
 	TrustedProxies string // 受信代理IP列表 (逗号分隔，如 "10.0.0.1,172.16.0.0/12")
@@ -206,6 +209,8 @@ func Load() (*Config, error) {
 		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
 		GitHubClientID:     os.Getenv("GITHUB_CLIENT_ID"),
 		GitHubClientSecret: os.Getenv("GITHUB_CLIENT_SECRET"),
+		// T11：社交登录 state 会话绑定，默认开启
+		SocialStateCookieBinding: getEnvBool("SOCIAL_STATE_COOKIE_BINDING", true),
 
 		// 受信代理配置
 		TrustedProxies: getEnv("TRUSTED_PROXIES", ""),
@@ -338,7 +343,24 @@ func validateSecurityConfig(c *Config) error {
 		slog.Warn("账户锁定时长应为正数", "duration", c.LockoutDuration)
 	}
 
-	// T7：KEK 格式校验（所有环境，配置即须合法，fail-fast）
+	// T7：KEK 格式与生产必填校验
+	if err := validateKeyEncryptionConfig(c); err != nil {
+		return err
+	}
+
+	// T11：生产环境关闭 state 会话绑定会暴露 login CSRF 风险，告警提示
+	if c.Env == "production" && !c.SocialStateCookieBinding {
+		slog.Warn("生产环境已关闭社交登录 state 会话绑定（SOCIAL_STATE_COOKIE_BINDING=false），存在 login CSRF 风险，仅纯 API 客户端场景适用")
+	}
+
+	return nil
+}
+
+// validateKeyEncryptionConfig 验证 JWT_KEY_ENCRYPTION_KEY（T7）
+// 所有环境配置即须为 64 位 hex（fail-fast）；
+// 生产环境启用密钥轮换（DB 密钥存储）时必填，否则私钥只能明文落库
+func validateKeyEncryptionConfig(c *Config) error {
+	// KEK 格式校验（所有环境，配置即须合法，fail-fast）
 	if c.JWTKeyEncryptionKey != "" {
 		if _, err := hex.DecodeString(c.JWTKeyEncryptionKey); err != nil || len(c.JWTKeyEncryptionKey) != 64 {
 			slog.Error("JWT_KEY_ENCRYPTION_KEY 必须为64位hex（32字节）")
@@ -346,12 +368,11 @@ func validateSecurityConfig(c *Config) error {
 		}
 	}
 
-	// T7：生产环境启用密钥轮换（DB 密钥存储）时 KEK 必填，否则私钥只能明文落库
+	// 生产环境启用密钥轮换（DB 密钥存储）时 KEK 必填
 	if c.Env == "production" && c.KeyRotationEnabled && c.JWTKeyEncryptionKey == "" && !c.LANDeployment {
 		slog.Error("生产环境启用密钥轮换时必须设置 JWT_KEY_ENCRYPTION_KEY")
 		return fmt.Errorf("JWT_KEY_ENCRYPTION_KEY must be set in production when KEY_ROTATION_ENABLED=true")
 	}
-
 	return nil
 }
 

@@ -40,6 +40,7 @@
 
 ### Fixed
 
+- **T11 社交登录 state 会话绑定**（安全审查 M2）：state 改为始终由服务端生成（crypto/rand 32 字节），并下发 HMAC 指纹 Cookie（HttpOnly/SameSite=Lax/Path=/auth/5 分钟），回调双重校验防 login CSRF；新配置 `SOCIAL_STATE_COOKIE_BINDING` 默认开启，纯 API 客户端可关闭（生产关闭告警）
 - **T10 限流 Redis 故障降级**（安全审查 M4）：全局/敏感端点限流器及登录/邮件限流器在 Redis 故障时降级为进程内内存限流（限额不失效，多副本下限额放宽为 N 倍），替代原静默 fail-open；降级路径补齐 Error 日志（中间件层每分钟节流）与 security_ratelimit_error_total 指标
 - **T9 MFA 防护 Redis 化**（安全审查 M3+L1）：恢复码失败限流与 TOTP 重放记录迁入 Redis（`mfa:recovery:attempts:`/`mfa:totp:used:` 键，多副本一致）；TOTP 改按 timeStep 独立记录，修复 90 秒窗口内旧码可二次使用（L1）；Redis 不可用时降级为内存路径并记录 Error 日志
 - **T8 CORS credentials 策略收紧**（安全审查 M1）：仅精确匹配的 Origin 发送 `Access-Control-Allow-Credentials`，通配（`*`/`*.suffix`）命中不再发送；所有响应补 `Vary: Origin`；精确匹配优先于通配

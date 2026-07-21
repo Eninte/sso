@@ -30,7 +30,8 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 	authorizeHandler := handler.NewAuthorizeHandler(svc.OAuth)
 	userHandler := handler.NewUserHandler(svc.User, svc.Captcha)
 	mfaHandler := handler.NewMFAHandler(svc.MFA)
-	socialHandler := handler.NewSocialLoginHandler(svc.Social)
+	socialHandler := handler.NewSocialLoginHandler(svc.Social).
+		WithStateBinding(cfg.SocialStateCookieBinding, []byte(cfg.MFARecoveryHMACKey), cfg.Env == "production")
 	// 使用支持多密钥JWKS的handler
 	wellKnownHandler := handler.NewWellKnownHandlerWithJWTService(cfg.BaseURL(), svc.JWT)
 	metricsHandler := handler.NewMetricsHandler(svc.Metrics)
