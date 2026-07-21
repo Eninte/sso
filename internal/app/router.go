@@ -53,11 +53,13 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 	}
 
 	// 创建限流器：Redis可用时使用分布式限流器，否则使用本地限流器
+	// T10（方案 B）：分布式限流器统一启用内存降级——Redis 故障时当次请求
+	// 降级为进程内内存限流（全局与敏感端点一致，降级期间限额仍生效）
 	var rateLimiter middleware.RateLimitMiddleware
 	if rc, ok := svc.Cache.(*cache.RedisCache); ok {
 		rateLimiter = middleware.NewDistributedRateLimiter(
 			rc.Client(), cfg.RateLimitRequests, cfg.RateLimitWindow, "ratelimit:global",
-		)
+		).WithMemoryFallback()
 	} else {
 		rateLimiter = middleware.NewRateLimiter(cfg.RateLimitRequests, cfg.RateLimitWindow)
 	}
@@ -249,7 +251,8 @@ func newEndpointRateLimiter(cacheSvc cache.Cache, limit int, window time.Duratio
 		return nil
 	}
 	if rc, ok := cacheSvc.(*cache.RedisCache); ok {
-		return middleware.NewDistributedRateLimiter(rc.Client(), limit, window, keyPrefix)
+		// T10（方案 B）：敏感端点限流器启用内存降级
+		return middleware.NewDistributedRateLimiter(rc.Client(), limit, window, keyPrefix).WithMemoryFallback()
 	}
 	return middleware.NewRateLimiter(limit, window)
 }

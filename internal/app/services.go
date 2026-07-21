@@ -155,12 +155,17 @@ func initServices(cfg *config.Config, version, buildTime string) (*Services, *sq
 	userSvc.WithCache(cacheSvc)
 	// 仅在限流启用时配置邮件限流器（RATE_LIMIT_REQUESTS <= 0 表示禁用所有限流）
 	if cfg.RateLimitRequests > 0 {
-		userSvc.WithEmailRateLimit(service.NewEmailRateLimiter(cacheSvc))
+		// T10：降级指标回调（Redis 故障时 security_ratelimit_error_total）
+		userSvc.WithEmailRateLimit(service.NewEmailRateLimiter(cacheSvc).WithErrorCallback(func() {
+			metricsSvc.Increment("security_ratelimit_error_total")
+		}))
 	}
 	// 仅在限流启用时配置登录限流器
 	var loginRateLimitOpt service.AuthServiceOption
 	if cfg.RateLimitRequests > 0 {
-		loginRateLimitOpt = service.WithLoginRateLimit(service.NewLoginRateLimiter(cacheSvc))
+		loginRateLimitOpt = service.WithLoginRateLimit(service.NewLoginRateLimiter(cacheSvc).WithErrorCallback(func() {
+			metricsSvc.Increment("security_ratelimit_error_total")
+		}))
 	}
 	authSvcOpts := []service.AuthServiceOption{
 		service.WithCache(cacheSvc),

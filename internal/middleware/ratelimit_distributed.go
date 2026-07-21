@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -55,7 +56,16 @@ type DistributedRateLimiter struct {
 	keyPrefix   string        // Redis键前缀
 	metricFunc  func()        // 限流触发回调（用于指标计数）
 	errorFunc   func()        // 阶段 4：fail-open 错误回调（用于指标计数）
+
+	// T10（M4）：Redis 故障降级（方案 B）
+	// 降级时当次请求改用进程内内存限流器（同限额同窗口），而非 fail-open 放行
+	fallback        *RateLimiter // 内存降级限流器（WithMemoryFallback 启用）
+	fallbackLogMu   sync.Mutex   // 降级日志节流锁
+	lastFallbackLog time.Time    // 上次降级日志时间（每分钟最多一条）
 }
+
+// fallbackLogInterval 降级日志节流间隔（避免 Redis 故障期间刷日志）
+const fallbackLogInterval = time.Minute
 
 // NewDistributedRateLimiter 创建分布式限流器
 // redisClient: Redis客户端
@@ -85,6 +95,28 @@ func (drl *DistributedRateLimiter) WithErrorCallback(fn func()) *DistributedRate
 	return drl
 }
 
+// WithMemoryFallback 启用内存降级（T10 方案 B）
+// Redis 故障时当次请求降级到进程内内存限流器（同限额同窗口），
+// 降级期间限额仍然生效（可用性与安全的折中），而非 fail-open 无限放行
+func (drl *DistributedRateLimiter) WithMemoryFallback() *DistributedRateLimiter {
+	drl.fallback = NewRateLimiter(drl.limit, drl.window)
+	return drl
+}
+
+// logFallbackThrottled 记录降级日志（Error 级，每分钟最多一条，避免刷日志）
+func (drl *DistributedRateLimiter) logFallbackThrottled(err error, clientIP string) {
+	drl.fallbackLogMu.Lock()
+	defer drl.fallbackLogMu.Unlock()
+	if time.Since(drl.lastFallbackLog) < fallbackLogInterval {
+		return
+	}
+	drl.lastFallbackLog = time.Now()
+	slog.Error("限流 Redis 错误，降级为进程内内存限流",
+		"error", err,
+		"client_ip", clientIP,
+		"key_prefix", drl.keyPrefix)
+}
+
 // Middleware 分布式限流中间件
 // 检查客户端请求频率，超过限制返回429
 func (drl *DistributedRateLimiter) Middleware(next http.Handler) http.Handler {
@@ -95,15 +127,31 @@ func (drl *DistributedRateLimiter) Middleware(next http.Handler) http.Handler {
 		// 检查是否超过限制
 		allowed, remaining, resetTime, err := drl.Allow(r.Context(), clientIP)
 		if err != nil {
+			// 指标：每次降级都计数（日志节流，指标不节流）
+			if drl.errorFunc != nil {
+				drl.errorFunc()
+			}
+			// T10（方案 B）：配置了内存降级时，当次请求改用进程内内存限流，
+			// Redis 故障期间限额仍然生效
+			if drl.fallback != nil {
+				drl.logFallbackThrottled(err, clientIP)
+				if !drl.fallback.Allow(clientIP) {
+					w.Header().Set("Retry-After", strconv.Itoa(int(drl.window.Seconds())))
+					if drl.metricFunc != nil {
+						drl.metricFunc()
+					}
+					writeError(w, http.StatusTooManyRequests, "请求过于频繁，请稍后再试")
+					return
+				}
+				next.ServeHTTP(w, r)
+				return
+			}
 			// 阶段 4 安全增强：fail-open 时必须记录日志和指标
 			// 满足 AGENTS.md 第 8.4 节"禁止忽略错误"规则
 			slog.Error("限流 Redis 错误，fail-open 放行",
 				"error", err,
 				"client_ip", clientIP,
 				"key_prefix", drl.keyPrefix)
-			if drl.errorFunc != nil {
-				drl.errorFunc()
-			}
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -159,8 +207,8 @@ func (drl *DistributedRateLimiter) Allow(ctx context.Context, clientIP string) (
 		member,
 	).Result()
 	if err != nil {
-		// Redis错误时fail-open，允许请求通过
-		// 错误日志和指标在 Middleware 中处理，避免 Allow 函数被外部调用时重复记录
+		// Redis错误：返回错误由 Middleware 决策（T10：内存降级或 fail-open），
+		// 避免 Allow 被外部调用时重复记录日志和指标
 		return true, 0, time.Time{}, err
 	}
 
@@ -182,7 +230,9 @@ func (drl *DistributedRateLimiter) buildKey(clientIP string) string {
 	return drl.keyPrefix + ":" + clientIP
 }
 
-// Stop 停止分布式限流器（无操作，保持接口一致性）
+// Stop 停止分布式限流器（含内存降级限流器的后台清理 goroutine）
 func (drl *DistributedRateLimiter) Stop() {
-	// Redis限流器无需清理后台goroutine
+	if drl.fallback != nil {
+		drl.fallback.Stop()
+	}
 }
