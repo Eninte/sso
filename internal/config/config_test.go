@@ -741,7 +741,7 @@ func TestValidate_MFARecoveryKeyStrength(t *testing.T) {
 // ============================================================================
 
 // TestValidate_ServerEnvWhitelist 验证 SERVER_ENV 白名单
-// 未知值（含大小写混用）拒绝启动；合法值 development/production 通过
+// 未知值（含大小写混用）拒绝启动；合法值 development/production/test 通过
 func TestValidate_ServerEnvWhitelist(t *testing.T) {
 	t.Run("大小写混用_拒绝启动", func(t *testing.T) {
 		setupTestEnv(t)
@@ -767,6 +767,15 @@ func TestValidate_ServerEnvWhitelist(t *testing.T) {
 
 		cfg, err := config.Load()
 		require.NoError(t, err)
+		assert.NotNil(t, cfg)
+	})
+
+	t.Run("test_通过", func(t *testing.T) {
+		setupTestEnv(t)
+		t.Setenv("SERVER_ENV", "test")
+
+		cfg, err := config.Load()
+		require.NoError(t, err, "SERVER_ENV=test 为合法值（CI E2E 与 .env.test 使用）")
 		assert.NotNil(t, cfg)
 	})
 

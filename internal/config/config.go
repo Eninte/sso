@@ -576,9 +576,10 @@ func (c *Config) validate() error {
 	}
 
 	// 验证环境设置（T5：SERVER_ENV 白名单，未知值拒绝启动而非仅警告）
-	if c.Env != "development" && c.Env != "production" {
+	// test 为合法值：CI E2E 与 .env.test 使用，行为等同非生产（不启用生产校验）
+	if c.Env != "development" && c.Env != "production" && c.Env != "test" {
 		slog.Error("未知的运行环境", "env", c.Env)
-		return fmt.Errorf("SERVER_ENV must be one of: development, production (got %q)", c.Env)
+		return fmt.Errorf("SERVER_ENV must be one of: development, production, test (got %q)", c.Env)
 	}
 
 	// T4：非生产环境 MFA_RECOVERY_HMAC_KEY 未设置或强度不足时告警（不拒绝启动）
