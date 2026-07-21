@@ -1,0 +1,31 @@
+# Dependabot 配置（T12：CI 供应链固定）
+# 每周检查 GitHub Actions 与 Go modules 依赖更新，自动生成 PR
+version: 2
+updates:
+  # GitHub Actions（配合 ci.yml 中固定到 commit SHA 的 action，Dependabot 会同步更新 SHA 与版本注释）
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "main"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Asia/Shanghai"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "ci"
+
+  # Go modules（根模块）
+  - package-ecosystem: "gomod"
+    directory: "/"
+    target-branch: "main"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Asia/Shanghai"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "go"

@@ -21,8 +21,8 @@ WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
 
-# 安装数据库迁移工具
-RUN go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+# 安装数据库迁移工具（T12：固定版本，供应链安全）
+RUN go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.19.1
 
 # 复制源代码
 COPY . .
