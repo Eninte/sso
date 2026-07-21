@@ -242,6 +242,22 @@ func TestHandleSetupTestDB(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, rec.Code, "连接失败应返回500")
 	})
 
+	t.Run("连接失败_响应不泄露内部错误详情_T3", func(t *testing.T) {
+		// T3：连接失败的响应体不得包含原始驱动错误/DSN 片段（密码、地址、dial 错误串）
+		body := `{"host":"10.255.255.1","port":"1","name":"db","user":"u","password":"supersecret-t3"}`
+		req := httptest.NewRequest(http.MethodPost, "/setup/test-db", strings.NewReader(body))
+		req.RemoteAddr = "127.0.0.1:12345"
+		rec := httptest.NewRecorder()
+
+		handler.HandleSetupTestDB(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		respBody := rec.Body.String()
+		assert.NotContains(t, respBody, "supersecret-t3", "响应不得包含密码")
+		assert.NotContains(t, respBody, "dial tcp", "响应不得包含原始网络错误")
+		assert.NotContains(t, respBody, "10.255.255.1", "响应不得包含主机地址")
+		assert.Contains(t, respBody, "数据库连接失败", "响应应包含通用消息")
+	})
+
 	t.Run("空SSLMode默认disable", func(t *testing.T) {
 		// 不传 ssl_mode，应默认 disable 并尝试连接（连接失败返回500，但不报 ssl_mode 错误）
 		body := `{"host":"127.0.0.1","port":"1","name":"db","user":"u","password":"p"}`
@@ -289,6 +305,22 @@ func TestHandleSetupTestRedis(t *testing.T) {
 
 		handler.HandleSetupTestRedis(rec, req)
 		assert.Equal(t, http.StatusInternalServerError, rec.Code, "连接失败应返回500")
+	})
+
+	t.Run("连接失败_响应不泄露内部错误详情_T3", func(t *testing.T) {
+		// T3：Redis 连接失败的响应体不得包含原始错误串/地址
+		body := `{"host":"10.255.255.1","port":"1","password":"supersecret-t3","db":0}`
+		req := httptest.NewRequest(http.MethodPost, "/setup/test-redis", strings.NewReader(body))
+		req.RemoteAddr = "127.0.0.1:12345"
+		rec := httptest.NewRecorder()
+
+		handler.HandleSetupTestRedis(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		respBody := rec.Body.String()
+		assert.NotContains(t, respBody, "supersecret-t3", "响应不得包含密码")
+		assert.NotContains(t, respBody, "dial tcp", "响应不得包含原始网络错误")
+		assert.NotContains(t, respBody, "10.255.255.1", "响应不得包含主机地址")
+		assert.Contains(t, respBody, "Redis连接失败", "响应应包含通用消息")
 	})
 }
 

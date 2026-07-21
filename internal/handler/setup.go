@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/example/sso/internal/config"
 	apperrors "github.com/example/sso/internal/errors"
+	"github.com/example/sso/internal/logging"
 	"github.com/example/sso/internal/middleware"
 	"github.com/example/sso/internal/util/handlerutil"
 )
@@ -292,6 +294,10 @@ func buildDSNs(filtered map[string]string) (dbDSN, redisAddr, redisPassword stri
 	return dbDSN, redisAddr, redisPassword, redisDB, nil
 }
 
+// testConnections 测试数据库与 Redis 连接
+//
+// 安全设计（T3）：真实错误（可能含 DSN/密码）仅经脱敏后写入日志，
+// 返回给调用方的是通用错误消息，避免内部错误详情经 HTTP 响应泄露
 func (h *SetupHandler) testConnections(r *http.Request, dbDSN, redisAddr, redisPassword string, redisDB int, filtered map[string]string) error {
 	if h.validateConns != nil {
 		return h.validateConns(dbDSN, redisAddr, redisPassword, redisDB)
@@ -301,16 +307,17 @@ func (h *SetupHandler) testConnections(r *http.Request, dbDSN, redisAddr, redisP
 	defer cancel()
 
 	if err := testDBConnection(ctx, dbDSN); err != nil {
-		slog.Error("数据库连接失败", "error", err, "host", filtered["DB_HOST"], "port", filtered["DB_PORT"], "database", filtered["DB_NAME"])
-		return err
+		slog.Error("数据库连接失败", "error", logging.SanitizeDBURL(err.Error()), "host", filtered["DB_HOST"], "port", filtered["DB_PORT"], "database", filtered["DB_NAME"])
+		return errors.New("数据库连接失败，请检查连接配置")
 	}
 
 	if redisAddr != "" {
 		redisCtx, redisCancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer redisCancel()
 		if err := testRedisConnection(redisCtx, redisAddr, redisPassword, redisDB); err != nil {
+			// go-redis 错误仅含地址不含密码，可安全记录
 			slog.Error("Redis连接失败", "error", err, "host", filtered["REDIS_HOST"], "port", filtered["REDIS_PORT"])
-			return err
+			return errors.New("Redis连接失败，请检查连接配置")
 		}
 	}
 	return nil
@@ -380,8 +387,9 @@ func (h *SetupHandler) HandleSetupTestDB(w http.ResponseWriter, r *http.Request)
 	defer cancel()
 	slog.Info("setup test-db 开始连接测试", "host_port", hostPort, "database", req.Name, "ssl_mode", req.SSLMode, "timeout", "10s")
 	if err := testDBConnection(ctx, dsn); err != nil {
-		slog.Error("setup test-db 数据库连接失败", "error", err, "host", req.Host, "port", req.Port, "database", req.Name, "ssl_mode", req.SSLMode, "user", req.User)
-		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails(err.Error()))
+		// T3：错误可能含 DSN（含密码），日志脱敏记录，响应仅返回通用消息
+		slog.Error("setup test-db 数据库连接失败", "error", logging.SanitizeDBURL(err.Error()), "host", req.Host, "port", req.Port, "database", req.Name, "ssl_mode", req.SSLMode, "user", req.User)
+		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("数据库连接失败，请检查连接配置"))
 		return
 	}
 
@@ -420,8 +428,9 @@ func (h *SetupHandler) HandleSetupTestRedis(w http.ResponseWriter, r *http.Reque
 	defer cancel()
 	slog.Info("setup test-redis 开始连接测试", "addr", addr, "db", req.DB, "timeout", "10s")
 	if err := testRedisConnection(ctx, addr, req.Password, req.DB); err != nil {
+		// T3：go-redis 错误仅含地址不含密码，可安全记录；响应仅返回通用消息
 		slog.Error("setup test-redis Redis连接失败", "error", err, "addr", addr, "db", req.DB)
-		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails(err.Error()))
+		handlerutil.WriteJSONError(w, apperrors.ErrInternal.WithDetails("Redis连接失败，请检查连接配置"))
 		return
 	}
 
