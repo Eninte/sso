@@ -40,6 +40,10 @@
 
 ### Fixed
 
+- **安全修复（T14 / 报告 L5+L6）**：管理员接口增加本人/末位管理员防护——禁止 admin 修改或删除自己的角色（`SELF_OPERATION_FORBIDDEN`，403）；当目标用户是系统中最后一个 active admin 时，任何人的降级/禁用/删除均被拒绝（`LAST_ACTIVE_ADMIN`，409），防止管理面永久锁死。`user_roles` 撤销提前到角色写入之前，且写入失败时按差异补撤销，被撤权用户不再能凭旧 JWT 继续调用管理接口。新增 `store.CountActiveAdmins`（含 Postgres 集成测试与 mock 支持）
+
+- **安全修复（T13 / 报告 L4）**：`/api/v1/token` 纳入敏感限流（与登录/注册同一 `SensitiveRateLimiter`），堵住授权码/refresh_token/password 凭据爆破唯一的限流缺口；敏感限流未启用时自动回退到全局限流中间件，保证端点始终受限流保护。`token/revoke` 无爆破面，维持全局限流不变
+
 - **T12 CI 供应链固定**（安全审查 M6）：全部 GitHub Actions 固定到 commit SHA（保留版本注释），gotestsum/migrate 等工具链固定具体版本；新增 Dependabot 周更 github-actions 与 gomod
 - **T11 社交登录 state 会话绑定**（安全审查 M2）：state 改为始终由服务端生成（crypto/rand 32 字节），并下发 HMAC 指纹 Cookie（HttpOnly/SameSite=Lax/Path=/auth/5 分钟），回调双重校验防 login CSRF；新配置 `SOCIAL_STATE_COOKIE_BINDING` 默认开启，纯 API 客户端可关闭（生产关闭告警）
 - **T10 限流 Redis 故障降级**（安全审查 M4）：全局/敏感端点限流器及登录/邮件限流器在 Redis 故障时降级为进程内内存限流（限额不失效，多副本下限额放宽为 N 倍），替代原静默 fail-open；降级路径补齐 Error 日志（中间件层每分钟节流）与 security_ratelimit_error_total 指标

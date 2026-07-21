@@ -144,9 +144,10 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 	}
 
 	// 公开端点 (不需要认证)
+	var sensitive *mux.Router
 	if sensitiveLimiter != nil {
 		// 敏感端点使用独立的更严格限流器
-		sensitive := api.PathPrefix("").Subrouter()
+		sensitive = api.PathPrefix("").Subrouter()
 		sensitive.Use(sensitiveLimiter.Middleware)
 		sensitive.HandleFunc("/register", registerHandler.Handle).Methods("POST")
 		sensitive.HandleFunc("/login", loginHandler.Handle).Methods("POST")
@@ -162,9 +163,16 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 		api.HandleFunc("/reset-password", userHandler.HandleResetPassword).Methods("POST")
 	}
 
+	// T13（安全修复）：/token 承载 refresh_token 兑换与客户端凭证校验，
+	// 是 token 枚举/爆破的直接目标，纳入敏感限流子路由（限额为全局的 1/10）。
+	// 敏感限流未启用时（如压测 RATE_LIMIT_REQUESTS=0）回退注册到全局限流路由。
+	// 注意：loadtest s6/s7 的 OAuth 全流程会高频调用 /token，
+	// 执行压测前需通过 RATE_LIMIT_REQUESTS 调整配额（敏感限额 = 全局/10，至少为 1）。
+	// /token/revoke 位于受认证保护的子路由中，无爆破面，不纳入敏感限流。
+	registerTokenEndpoint(api, sensitive, tokenHandler.HandleToken)
+
 	// 一般公开端点（使用全局限流）
 	api.HandleFunc("/captcha", captchaHandler.Handle).Methods("GET")
-	api.HandleFunc("/token", tokenHandler.HandleToken).Methods("POST")
 	api.HandleFunc("/verify-email", userHandler.HandleVerifyEmail).Methods("GET")
 
 	// 受保护的端点 (需要认证)
@@ -314,4 +322,15 @@ func readyzHandler(storeSvc store.Store) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ready","service":"sso"}`))
 	}
+}
+
+// registerTokenEndpoint 注册 /token 端点（T13）
+// 敏感限流子路由可用时注册到敏感子路由（更严格限额），
+// 否则（敏感限流未启用，如压测场景）回退注册到全局限流路由
+func registerTokenEndpoint(api, sensitive *mux.Router, tokenHandler http.HandlerFunc) {
+	if sensitive != nil {
+		sensitive.HandleFunc("/token", tokenHandler).Methods("POST")
+		return
+	}
+	api.HandleFunc("/token", tokenHandler).Methods("POST")
 }
