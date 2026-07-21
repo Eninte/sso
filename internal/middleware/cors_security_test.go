@@ -2,6 +2,8 @@
 package middleware
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -226,5 +228,156 @@ func TestCORSConfig_Validate_RealWorldScenarios(t *testing.T) {
 		err := config.Validate("production")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "localhost")
+	})
+}
+
+// ============================================================================
+// T8：CORS credentials 策略收紧测试（M1）
+// ============================================================================
+
+// newCORSRequest 构造带 Origin 的测试请求并经由 CORS 中间件处理
+func newCORSRequest(t *testing.T, config *CORSConfig, method, origin string) *httptest.ResponseRecorder {
+	t.Helper()
+	handler := CORS(config)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(method, "/api/v1/userinfo", nil)
+	if origin != "" {
+		req.Header.Set("Origin", origin)
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	return recorder
+}
+
+// TestCORS_CredentialsPolicy 验证 Allow-Credentials 仅在精确匹配时发送
+func TestCORS_CredentialsPolicy(t *testing.T) {
+	baseConfig := func(origins ...string) *CORSConfig {
+		return &CORSConfig{
+			AllowedOrigins: origins,
+			AllowedMethods: []string{"GET", "POST", "OPTIONS"},
+			AllowedHeaders: []string{"Content-Type", "Authorization"},
+			MaxAge:         3600,
+		}
+	}
+
+	t.Run("精确匹配_有credentials且ACAO回显", func(t *testing.T) {
+		recorder := newCORSRequest(t, baseConfig("https://app.example.com"), http.MethodGet, "https://app.example.com")
+
+		assert.Equal(t, "https://app.example.com", recorder.Header().Get("Access-Control-Allow-Origin"))
+		assert.Equal(t, "true", recorder.Header().Get("Access-Control-Allow-Credentials"))
+	})
+
+	t.Run("通配符星号_有ACAO无credentials", func(t *testing.T) {
+		recorder := newCORSRequest(t, baseConfig("*"), http.MethodGet, "https://anything.example.com")
+
+		assert.Equal(t, "https://anything.example.com", recorder.Header().Get("Access-Control-Allow-Origin"))
+		assert.Empty(t, recorder.Header().Get("Access-Control-Allow-Credentials"),
+			"通配符命中不得发送 Allow-Credentials")
+	})
+
+	t.Run("子域通配后缀命中_有ACAO无credentials", func(t *testing.T) {
+		recorder := newCORSRequest(t, baseConfig("*.example.com"), http.MethodGet, "https://api.example.com")
+
+		assert.Equal(t, "https://api.example.com", recorder.Header().Get("Access-Control-Allow-Origin"))
+		assert.Empty(t, recorder.Header().Get("Access-Control-Allow-Credentials"),
+			"子域通配命中不得发送 Allow-Credentials")
+	})
+
+	t.Run("子域通配裸域命中_有ACAO无credentials", func(t *testing.T) {
+		recorder := newCORSRequest(t, baseConfig("*.example.com"), http.MethodGet, "https://example.com")
+
+		assert.Equal(t, "https://example.com", recorder.Header().Get("Access-Control-Allow-Origin"))
+		assert.Empty(t, recorder.Header().Get("Access-Control-Allow-Credentials"))
+	})
+
+	t.Run("混合列表_精确项仍发送credentials", func(t *testing.T) {
+		config := baseConfig("*.example.com", "https://api.example.com")
+		recorder := newCORSRequest(t, config, http.MethodGet, "https://api.example.com")
+
+		assert.Equal(t, "https://api.example.com", recorder.Header().Get("Access-Control-Allow-Origin"))
+		assert.Equal(t, "true", recorder.Header().Get("Access-Control-Allow-Credentials"),
+			"origin 同时命中精确项时应视为精确匹配")
+	})
+
+	t.Run("混合列表_仅通配项命中_无credentials", func(t *testing.T) {
+		config := baseConfig("*.example.com", "https://api.example.com")
+		recorder := newCORSRequest(t, config, http.MethodGet, "https://web.example.com")
+
+		assert.Equal(t, "https://web.example.com", recorder.Header().Get("Access-Control-Allow-Origin"))
+		assert.Empty(t, recorder.Header().Get("Access-Control-Allow-Credentials"))
+	})
+
+	t.Run("预检请求_通配命中_无credentials", func(t *testing.T) {
+		recorder := newCORSRequest(t, baseConfig("*"), http.MethodOptions, "https://anything.example.com")
+
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		assert.Equal(t, "https://anything.example.com", recorder.Header().Get("Access-Control-Allow-Origin"))
+		assert.Empty(t, recorder.Header().Get("Access-Control-Allow-Credentials"))
+	})
+}
+
+// TestCORS_VaryOrigin 验证响应始终携带 Vary: Origin
+func TestCORS_VaryOrigin(t *testing.T) {
+	config := &CORSConfig{
+		AllowedOrigins: []string{"https://app.example.com"},
+		AllowedMethods: []string{"GET", "OPTIONS"},
+		AllowedHeaders: []string{"Content-Type"},
+		MaxAge:         3600,
+	}
+
+	t.Run("允许的origin_含Vary", func(t *testing.T) {
+		recorder := newCORSRequest(t, config, http.MethodGet, "https://app.example.com")
+		assert.Contains(t, recorder.Header().Values("Vary"), "Origin")
+	})
+
+	t.Run("不允许的origin_含Vary", func(t *testing.T) {
+		recorder := newCORSRequest(t, config, http.MethodGet, "https://evil.example.com")
+		assert.Contains(t, recorder.Header().Values("Vary"), "Origin",
+			"不允许的 origin 也需 Vary 以防缓存污染")
+	})
+
+	t.Run("无origin_含Vary", func(t *testing.T) {
+		recorder := newCORSRequest(t, config, http.MethodGet, "")
+		assert.Contains(t, recorder.Header().Values("Vary"), "Origin")
+	})
+
+	t.Run("预检请求_含Vary", func(t *testing.T) {
+		recorder := newCORSRequest(t, config, http.MethodOptions, "https://app.example.com")
+		assert.Contains(t, recorder.Header().Values("Vary"), "Origin")
+	})
+}
+
+// TestCORS_DisallowedOrigin 验证不允许的 origin 不携带任何 CORS 头
+func TestCORS_DisallowedOrigin(t *testing.T) {
+	config := &CORSConfig{
+		AllowedOrigins: []string{"https://app.example.com", "*.example.org"},
+		AllowedMethods: []string{"GET", "POST", "OPTIONS"},
+		AllowedHeaders: []string{"Content-Type", "Authorization"},
+		MaxAge:         3600,
+	}
+
+	t.Run("普通请求_无CORS头", func(t *testing.T) {
+		recorder := newCORSRequest(t, config, http.MethodGet, "https://evil.example.com")
+
+		assert.Empty(t, recorder.Header().Get("Access-Control-Allow-Origin"))
+		assert.Empty(t, recorder.Header().Get("Access-Control-Allow-Credentials"))
+		assert.Empty(t, recorder.Header().Get("Access-Control-Allow-Methods"))
+		assert.Empty(t, recorder.Header().Get("Access-Control-Allow-Headers"))
+		assert.Equal(t, http.StatusOK, recorder.Code, "非预检请求应继续放行由后续处理器响应")
+	})
+
+	t.Run("子域后缀欺骗_无CORS头", func(t *testing.T) {
+		// evil-example.org 不是 *.example.org 的子域
+		recorder := newCORSRequest(t, config, http.MethodGet, "https://evil-example.org")
+		assert.Empty(t, recorder.Header().Get("Access-Control-Allow-Origin"))
+	})
+
+	t.Run("预检请求_无CORS头", func(t *testing.T) {
+		recorder := newCORSRequest(t, config, http.MethodOptions, "https://evil.example.com")
+
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		assert.Empty(t, recorder.Header().Get("Access-Control-Allow-Origin"))
+		assert.Empty(t, recorder.Header().Get("Access-Control-Allow-Credentials"))
 	})
 }
