@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/example/sso/internal/common"
 	"github.com/example/sso/internal/model"
 	storepkg "github.com/example/sso/internal/store"
 	"github.com/example/sso/internal/store/postgres"
@@ -472,7 +473,8 @@ func TestStore_VerificationTokens(t *testing.T) {
 
 		retrieved, err := store.GetVerificationToken(ctx, user.ID)
 		require.NoError(t, err)
-		assert.Equal(t, token, retrieved.Token)
+		// T2：Token 字段为 SHA-256 哈希值，非明文
+		assert.Equal(t, common.HashToken(token), retrieved.Token)
 
 		assert.NoError(t, store.DeleteVerificationToken(ctx, user.ID))
 	})
@@ -483,7 +485,8 @@ func TestStore_VerificationTokens(t *testing.T) {
 
 		retrieved, err := store.GetResetToken(ctx, user.ID)
 		require.NoError(t, err)
-		assert.Equal(t, token, retrieved.Token)
+		// T2：Token 字段为 SHA-256 哈希值，非明文
+		assert.Equal(t, common.HashToken(token), retrieved.Token)
 
 		assert.NoError(t, store.DeleteResetToken(ctx, user.ID))
 	})

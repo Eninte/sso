@@ -14,6 +14,7 @@ import (
 	"encoding/base32"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,6 +28,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib" // PostgreSQL 驱动
 
+	"github.com/example/sso/internal/common"
 	e2etest "github.com/example/sso/internal/testing/e2e"
 	"github.com/example/sso/internal/util/retryutil"
 	"github.com/example/sso/internal/util/testutil"
@@ -474,7 +476,7 @@ func generatePKCEPair() (verifier, challenge string) {
 // 2026-06-17 的安全修复（commit 7054cc7 "修复用户枚举漏洞 H3"）移除了 user_id 返回，
 // 防止攻击者通过注册接口枚举已注册邮箱。响应改为 {"message":"..."}（无 data 字段）。
 //
-// 但 E2E 测试需要 user_id（verifyEmail/setUserRole/getResetTokenFromDB 都依赖它），
+// 但 E2E 测试需要 user_id（verifyEmail/setUserRole/injectKnownResetToken 都依赖它），
 // 所以这里在注册成功后，用 e2eDB 按邮箱从 DB 查询 user_id 并填充到返回的 map 中。
 // 这不破坏生产代码的安全设计——user_id 仅在测试进程内通过 DB 直查获得，
 // 不经过 HTTP 响应暴露。
@@ -704,7 +706,7 @@ func registerAndLoginWithCleanup(t *testing.T) (string, *loginResponse, error) {
 //
 // 历史问题：之前读 TEST_DATABASE_URL 环境变量是 bug——Makefile 实际传给测试进程的是
 // DATABASE_URL（见 Makefile 的 `DATABASE_URL="$(TEST_DATABASE_URL)" gotestsum ...`），
-// 导致 openTestDB 在 make test-e2e 下总是 t.Skip，getResetTokenFromDB 永远不执行。
+// 导致 openTestDB 在 make test-e2e 下总是 t.Skip，重置令牌辅助函数永远不执行。
 //
 // 连接生命周期由 testutil 通过 t.Cleanup 管理，无需全局缓存。
 func openTestDB(t *testing.T) *sql.DB {
@@ -712,20 +714,36 @@ func openTestDB(t *testing.T) *sql.DB {
 	return testutil.ConnectTestDB(t)
 }
 
-// getResetTokenFromDB 从 reset_tokens 表读取真实重置令牌
-// 用于在邮件不可用的测试环境中验证完整密码重置链路
-func getResetTokenFromDB(t *testing.T, userID string) string {
+// injectKnownResetToken 向 reset_tokens 表注入已知重置令牌并返回明文
+//
+// 用于在邮件不可用的测试环境中验证完整密码重置链路。
+//
+// T2 安全修复后：reset_tokens.token 只存 SHA-256 哈希，无法从 DB 读回明文。
+// 因此改为注入方式——测试进程自行生成明文令牌，将其 hash 覆盖写入 DB
+// （模拟服务端刚签发的令牌），再把明文用于 reset-password API 调用。
+func injectKnownResetToken(t *testing.T, userID string) string {
 	t.Helper()
 	db := openTestDB(t)
-	var token string
-	err := db.QueryRow(
-		`SELECT token FROM reset_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`,
-		userID,
-	).Scan(&token)
-	if err != nil {
-		t.Fatalf("从 DB 读取重置令牌失败 (user_id=%s): %v", userID, err)
+
+	// 生成高熵明文令牌（与服务端 GenerateToken 同等级随机性）
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		t.Fatalf("生成测试重置令牌失败: %v", err)
 	}
-	return token
+	plainToken := hex.EncodeToString(raw)
+
+	// 覆盖写入 hash（服务端 forget-password 已先创建该行）
+	res, err := db.Exec(
+		`UPDATE reset_tokens SET token = $1 WHERE user_id = $2`,
+		common.HashToken(plainToken), userID,
+	)
+	if err != nil {
+		t.Fatalf("注入测试重置令牌失败 (user_id=%s): %v", userID, err)
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		t.Fatalf("注入测试重置令牌失败：reset_tokens 无该用户记录 (user_id=%s)", userID)
+	}
+	return plainToken
 }
 
 // ============================================================================

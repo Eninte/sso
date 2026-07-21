@@ -262,9 +262,9 @@ func TestFullPasswordResetFlow_RealToken(t *testing.T) {
 	require.True(t, forgotResp.StatusCode == http.StatusOK || forgotResp.StatusCode == http.StatusAccepted,
 		"forgot-password 期望 200/202，实际 %d", forgotResp.StatusCode)
 
-	// 4. 从 DB 读取真实重置令牌（邮件链路在 E2E 中不可用）
-	realToken := getResetTokenFromDB(t, userID)
-	require.NotEmpty(t, realToken, "应从 DB 读取到真实重置令牌")
+	// 4. 注入已知重置令牌（T2 后 DB 只存 hash 无法读回明文；邮件链路在 E2E 中不可用）
+	realToken := injectKnownResetToken(t, userID)
+	require.NotEmpty(t, realToken, "应注入已知重置令牌")
 
 	// 5. 使用真实令牌重置密码成功
 	resetReq := resetPasswordRequest{

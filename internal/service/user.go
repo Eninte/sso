@@ -164,7 +164,8 @@ func (s *UserService) VerifyEmail(ctx context.Context, userID, token string) err
 		return serviceutil.HandleStoreError(err, ErrVerificationCodeInvalid)
 	}
 
-	if subtle.ConstantTimeCompare([]byte(storedToken.Token), []byte(token)) != 1 {
+	// T2：store 返回的是令牌哈希，比对前对输入令牌计算同样的 SHA-256 hash
+	if subtle.ConstantTimeCompare([]byte(storedToken.Token), []byte(common.HashToken(token))) != 1 {
 		return ErrVerificationCodeInvalid
 	}
 
@@ -288,7 +289,8 @@ func (s *UserService) ResetPasswordWithAudit(ctx context.Context, userID, token,
 		return ErrResetTokenUsed
 	}
 
-	if subtle.ConstantTimeCompare([]byte(storedToken.Token), []byte(token)) != 1 {
+	// T2：store 返回的是令牌哈希，比对前对输入令牌计算同样的 SHA-256 hash
+	if subtle.ConstantTimeCompare([]byte(storedToken.Token), []byte(common.HashToken(token))) != 1 {
 		return ErrResetTokenInvalid
 	}
 

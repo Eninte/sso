@@ -770,8 +770,9 @@ func (m *Store) StoreVerificationToken(ctx context.Context, userID string, token
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// T2：与 postgres 实现对齐，仅存 hash，不存明文
 	m.verificationTokens[userID] = &store.VerificationToken{
-		Token:     token,
+		Token:     hashTokenMock(token),
 		ExpiresAt: expiresAt,
 	}
 	return nil
@@ -815,8 +816,9 @@ func (m *Store) StoreResetToken(ctx context.Context, userID string, token string
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// T2：与 postgres 实现对齐，仅存 hash，不存明文
 	m.resetTokens[userID] = &store.ResetToken{
-		Token:     token,
+		Token:     hashTokenMock(token),
 		ExpiresAt: expiresAt,
 	}
 	return nil
