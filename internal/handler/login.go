@@ -43,8 +43,8 @@ func (h *LoginHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. 验证验证码
-	if !verifyCaptcha(w, r, h.captchaSvc) {
+	// 2. 验证验证码（T15：IP 与账号双维度触发判定）
+	if !verifyCaptcha(w, r, h.captchaSvc, req.Email) {
 		return
 	}
 
@@ -61,16 +61,19 @@ func (h *LoginHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		// 排除服务器内部错误(500)和限流错误(429)，避免影响合法用户
 		if isCredentialError(err) {
 			h.captchaSvc.RecordFailure(r.Context(), auditCtx.IPAddress)
+			// T15：同步记录账号维度失败计数，防止攻击者换 IP 绕过验证码
+			h.captchaSvc.RecordAccountFailure(r.Context(), req.Email)
 		}
 		// 统一处理所有错误
 		writeOAuthError(w, r, err)
 		return
 	}
 
-	// 5. 登录成功，清除失败计数
+	// 5. 登录成功，清除失败计数（IP 与账号双维度）
 	// 注意：MFA 第一阶段密码验证成功也视为登录成功（账户已通过凭据认证）
 	// 第二阶段失败由 mfa/verify 接口单独计数
 	h.captchaSvc.ClearFailures(r.Context(), auditCtx.IPAddress)
+	h.captchaSvc.ClearAccountFailures(r.Context(), req.Email)
 
 	// 6. 返回响应（Token 或 MFA Challenge）
 	writeJSON(w, http.StatusOK, resp)

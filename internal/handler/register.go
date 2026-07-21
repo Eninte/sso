@@ -35,8 +35,8 @@ func (h *RegisterHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. 验证验证码
-	if !verifyCaptcha(w, r, h.captchaSvc) {
+	// 2. 验证验证码（T15：IP 与账号双维度触发判定；注册失败不计数，仅登录计入账号维度）
+	if !verifyCaptcha(w, r, h.captchaSvc, req.Email) {
 		return
 	}
 

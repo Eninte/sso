@@ -5,6 +5,8 @@ package captcha
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"math/big"
 	"strings"
@@ -20,7 +22,10 @@ import (
 const (
 	// 缓存键前缀
 	CaptchaCachePrefix     = "captcha:"
-	CaptchaFailCountPrefix = "captcha:fail:" // 失败计数前缀
+	CaptchaFailCountPrefix = "captcha:fail:" // 失败计数前缀（IP 维度）
+	// CaptchaAccountFailPrefix 账号维度失败计数前缀（T15）
+	// 键中账号标识为归一化后的 SHA-256 哈希，明文邮箱不会进入缓存键
+	CaptchaAccountFailPrefix = "captcha:acctfail:"
 
 	// 默认验证码TTL
 	DefaultCaptchaTTL = 5 * time.Minute
@@ -266,6 +271,84 @@ func (s *Service) ClearFailures(ctx context.Context, key string) {
 // FailThreshold 返回当前触发阈值
 func (s *Service) FailThreshold() int {
 	return s.failThreshold
+}
+
+// ============================================================================
+// 自适应触发：账号（邮箱）维度失败计数（T15）
+// ============================================================================
+//
+// 背景（审计 L7）：仅按 IP 计数时，攻击者可不断更换 IP 对同一账号无限尝试，
+// 验证码永远不会升级。账号维度与 IP 维度并行计数，任一维度达到阈值即要求验证码。
+//
+// 键设计：账号标识（邮箱）先归一化（去首尾空白 + 小写），再做 SHA-256 哈希，
+// 明文邮箱不会出现在 Redis 键中（与 T1/T3 的日志脱敏同一原则）。
+//
+// 降级语义：与 IP 维度一致的 fail-open —— 缓存故障（如 Redis 不可用且内存
+// 降级也未命中）时 ShouldRequireCaptchaForAccount 返回 false、
+// RecordAccountFailure 静默丢弃本次计数，不影响合法用户登录。
+
+// accountFailKey 生成账号维度的失败计数缓存键
+// 归一化（去空白+小写）后取 SHA-256 十六进制，避免明文邮箱进入缓存键
+func accountFailKey(account string) string {
+	normalized := strings.ToLower(strings.TrimSpace(account))
+	sum := sha256.Sum256([]byte(normalized))
+	return CaptchaAccountFailPrefix + hex.EncodeToString(sum[:])
+}
+
+// ShouldRequireCaptchaForAccount 判断指定账号（邮箱）维度是否需要验证码
+// account 为空时返回 false（无账号标识的场景不参与账号维度判定）
+// 缓存未命中或缓存故障时返回 false（fail-open，与 IP 维度语义一致）
+func (s *Service) ShouldRequireCaptchaForAccount(ctx context.Context, account string) bool {
+	if !s.enabled {
+		return false
+	}
+	if strings.TrimSpace(account) == "" {
+		return false
+	}
+
+	cacheKey := accountFailKey(account)
+	var count int
+	if err := s.cache.Get(ctx, cacheKey, &count); err != nil {
+		return false // 无记录或缓存故障 = 不需要
+	}
+
+	return count >= s.failThreshold
+}
+
+// RecordAccountFailure 记录一次账号维度的失败（登录凭据错误处调用）
+// 与 RecordFailure 相同的滑动窗口语义：每次失败重置 TTL 为完整 failWindow。
+// account 为空或缓存写入失败时静默返回（fail-open，不阻断登录流程）
+func (s *Service) RecordAccountFailure(ctx context.Context, account string) {
+	if !s.enabled {
+		return
+	}
+	if strings.TrimSpace(account) == "" {
+		return
+	}
+
+	cacheKey := accountFailKey(account)
+	var count int
+	if err := s.cache.Get(ctx, cacheKey, &count); err != nil {
+		// 首次失败（或缓存故障时按首次计）
+		count = 1
+	} else {
+		count++
+	}
+
+	_ = s.cache.Set(ctx, cacheKey, count, s.failWindow)
+}
+
+// ClearAccountFailures 清除账号维度的失败计数（登录成功处调用）
+// account 为空或缓存故障时静默返回
+func (s *Service) ClearAccountFailures(ctx context.Context, account string) {
+	if !s.enabled {
+		return
+	}
+	if strings.TrimSpace(account) == "" {
+		return
+	}
+
+	_ = s.cache.Delete(ctx, accountFailKey(account))
 }
 
 // ============================================================================

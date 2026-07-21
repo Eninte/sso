@@ -30,9 +30,15 @@ const (
 type captchaVerifier interface {
 	IsEnabled() bool
 	ShouldRequireCaptcha(ctx context.Context, key string) bool
+	// ShouldRequireCaptchaForAccount T15：账号（邮箱）维度触发判定，与 IP 维度并行
+	ShouldRequireCaptchaForAccount(ctx context.Context, account string) bool
 	Verify(ctx context.Context, id, answer string) (bool, error)
 	RecordFailure(ctx context.Context, key string)
+	// RecordAccountFailure T15：账号维度失败计数（键为归一化邮箱的 SHA-256）
+	RecordAccountFailure(ctx context.Context, account string)
 	ClearFailures(ctx context.Context, key string)
+	// ClearAccountFailures T15：登录成功后清除账号维度失败计数
+	ClearAccountFailures(ctx context.Context, account string)
 }
 
 // isCredentialError 判断是否为凭据相关错误（401/403）
@@ -45,17 +51,20 @@ func isCredentialError(err error) bool {
 }
 
 // verifyCaptcha 自适应验证码校验逻辑
-// 仅当该标识（如IP）的失败次数达到阈值时才要求验证码
+// 仅当失败次数达到阈值时才要求验证码。
+// T15：IP 维度与账号（邮箱）维度并行判定，任一维度达到阈值即要求验证码，
+// 防止攻击者更换 IP 对同一账号无限尝试；account 为空时仅按 IP 维度判定
 // 返回 true 表示验证通过（或不需要验证码），false 表示验证失败（已写入响应）
-func verifyCaptcha(w http.ResponseWriter, r *http.Request, svc captchaVerifier) bool {
+func verifyCaptcha(w http.ResponseWriter, r *http.Request, svc captchaVerifier, account string) bool {
 	if !svc.IsEnabled() {
 		return true
 	}
 
-	// 自适应触发：检查该IP是否需要验证码
+	// 自适应触发：IP 维度或账号维度任一达到阈值即要求验证码
 	clientIP := extractClientIP(r)
-	if !svc.ShouldRequireCaptcha(r.Context(), clientIP) {
-		return true // 失败次数未达阈值，跳过验证码
+	if !svc.ShouldRequireCaptcha(r.Context(), clientIP) &&
+		!svc.ShouldRequireCaptchaForAccount(r.Context(), account) {
+		return true // 两个维度均未达阈值，跳过验证码
 	}
 
 	// 从请求头获取验证码信息

@@ -3,6 +3,8 @@ package captcha
 
 import (
 	"context"
+	"encoding/hex"
+	"strings"
 	"testing"
 	"time"
 
@@ -459,4 +461,175 @@ func TestService_FailThreshold(t *testing.T) {
 		svc.RecordFailure(ctx, ip)
 		assert.True(t, svc.ShouldRequireCaptcha(ctx, ip), "失败2次达到阈值2")
 	})
+}
+
+// ============================================================================
+// T15：账号（邮箱）维度失败计数测试
+// ============================================================================
+
+// errCache 所有操作都返回错误的缓存，模拟 Redis 故障（且无内存降级命中）的场景
+// 嵌入 cache.Cache 接口以满足完整接口，验证码服务只会调用 Get/Set/Delete
+type errCache struct {
+	cache.Cache
+}
+
+func (c *errCache) Get(_ context.Context, _ string, _ interface{}) error {
+	return assert.AnError
+}
+
+func (c *errCache) Set(_ context.Context, _ string, _ interface{}, _ time.Duration) error {
+	return assert.AnError
+}
+
+func (c *errCache) Delete(_ context.Context, _ string) error {
+	return assert.AnError
+}
+
+// TestAccountFailKey 验证账号维度计数键的归一化与哈希化
+func TestAccountFailKey(t *testing.T) {
+	t.Run("同一邮箱不同写法归一化为同一键", func(t *testing.T) {
+		key1 := accountFailKey("Victim@Example.com")
+		key2 := accountFailKey(" victim@example.com ")
+		key3 := accountFailKey("VICTIM@EXAMPLE.COM")
+		assert.Equal(t, key1, key2, "大小写与首尾空白差异应归一化为同一键")
+		assert.Equal(t, key1, key3)
+	})
+
+	t.Run("不同邮箱生成不同键", func(t *testing.T) {
+		assert.NotEqual(t, accountFailKey("a@example.com"), accountFailKey("b@example.com"))
+	})
+
+	t.Run("键为前缀加64位十六进制哈希", func(t *testing.T) {
+		key := accountFailKey("victim@example.com")
+		assert.True(t, strings.HasPrefix(key, CaptchaAccountFailPrefix), "键应带账号维度前缀")
+		suffix := strings.TrimPrefix(key, CaptchaAccountFailPrefix)
+		assert.Len(t, suffix, 64, "SHA-256 十六进制应为 64 字符")
+		_, err := hex.DecodeString(suffix)
+		assert.NoError(t, err, "后缀应为合法十六进制")
+	})
+
+	t.Run("键不包含明文邮箱", func(t *testing.T) {
+		email := "victim@example.com"
+		key := accountFailKey(email)
+		assert.NotContains(t, key, email, "明文邮箱不得出现在缓存键中")
+		assert.NotContains(t, key, "victim", "邮箱局部明文也不得出现在缓存键中")
+	})
+}
+
+// TestService_AccountDimension_Threshold 账号维度阈值触发
+func TestService_AccountDimension_Threshold(t *testing.T) {
+	svc := NewServiceWithAdaptive(newTestCache(t), true, 5*time.Minute, 3, 15*time.Minute)
+	ctx := context.Background()
+	email := "victim@example.com"
+
+	assert.False(t, svc.ShouldRequireCaptchaForAccount(ctx, email), "无记录时不需要验证码")
+
+	svc.RecordAccountFailure(ctx, email)
+	assert.False(t, svc.ShouldRequireCaptchaForAccount(ctx, email), "失败1次未达阈值3")
+
+	svc.RecordAccountFailure(ctx, email)
+	assert.False(t, svc.ShouldRequireCaptchaForAccount(ctx, email), "失败2次未达阈值3")
+
+	svc.RecordAccountFailure(ctx, email)
+	assert.True(t, svc.ShouldRequireCaptchaForAccount(ctx, email), "失败3次达到阈值应要求验证码")
+}
+
+// TestService_AccountDimension_Normalization 归一化：任一写法计数，任一写法判定
+func TestService_AccountDimension_Normalization(t *testing.T) {
+	svc := NewServiceWithAdaptive(newTestCache(t), true, 5*time.Minute, 3, 15*time.Minute)
+	ctx := context.Background()
+
+	// 用不同写法记录 3 次失败（模拟客户端大小写/空白差异）
+	svc.RecordAccountFailure(ctx, "Victim@Example.com")
+	svc.RecordAccountFailure(ctx, " victim@example.com ")
+	svc.RecordAccountFailure(ctx, "VICTIM@EXAMPLE.COM")
+
+	assert.True(t, svc.ShouldRequireCaptchaForAccount(ctx, "victim@example.com"),
+		"归一化后视为同一账号，应累计触发验证码")
+}
+
+// TestService_AccountDimension_Clear 登录成功后清除账号维度计数
+func TestService_AccountDimension_Clear(t *testing.T) {
+	svc := NewServiceWithAdaptive(newTestCache(t), true, 5*time.Minute, 3, 15*time.Minute)
+	ctx := context.Background()
+	email := "victim@example.com"
+
+	for i := 0; i < 3; i++ {
+		svc.RecordAccountFailure(ctx, email)
+	}
+	require.True(t, svc.ShouldRequireCaptchaForAccount(ctx, email))
+
+	svc.ClearAccountFailures(ctx, email)
+	assert.False(t, svc.ShouldRequireCaptchaForAccount(ctx, email), "清除后不应再要求验证码")
+
+	// 清除后重新计数：只失败 1 次不会触发
+	svc.RecordAccountFailure(ctx, email)
+	assert.False(t, svc.ShouldRequireCaptchaForAccount(ctx, email), "清除后计数应从头开始")
+}
+
+// TestService_AccountDimension_EmptyAccount 空账号标识不参与账号维度
+func TestService_AccountDimension_EmptyAccount(t *testing.T) {
+	svc := NewServiceWithAdaptive(newTestCache(t), true, 5*time.Minute, 3, 15*time.Minute)
+	ctx := context.Background()
+
+	for _, account := range []string{"", "   "} {
+		// 不应 panic，且判定始终为 false
+		svc.RecordAccountFailure(ctx, account)
+		svc.RecordAccountFailure(ctx, account)
+		svc.RecordAccountFailure(ctx, account)
+		assert.False(t, svc.ShouldRequireCaptchaForAccount(ctx, account),
+			"空账号标识不应参与账号维度判定")
+		svc.ClearAccountFailures(ctx, account)
+	}
+}
+
+// TestService_AccountDimension_Disabled 验证码未启用时账号维度全部 no-op
+func TestService_AccountDimension_Disabled(t *testing.T) {
+	svc := NewServiceWithAdaptive(newTestCache(t), false, 5*time.Minute, 3, 15*time.Minute)
+	ctx := context.Background()
+	email := "victim@example.com"
+
+	for i := 0; i < 5; i++ {
+		svc.RecordAccountFailure(ctx, email)
+	}
+	assert.False(t, svc.ShouldRequireCaptchaForAccount(ctx, email), "未启用时始终不需要验证码")
+	svc.ClearAccountFailures(ctx, email)
+}
+
+// TestService_AccountDimension_RedisDown 缓存故障降级（fail-open）
+func TestService_AccountDimension_RedisDown(t *testing.T) {
+	svc := NewServiceWithAdaptive(&errCache{}, true, 5*time.Minute, 3, 15*time.Minute)
+	ctx := context.Background()
+	email := "victim@example.com"
+
+	// 缓存全部操作失败：Record 静默丢弃，Should 返回 false，Clear 静默返回，均不 panic
+	for i := 0; i < 5; i++ {
+		svc.RecordAccountFailure(ctx, email)
+	}
+	assert.False(t, svc.ShouldRequireCaptchaForAccount(ctx, email),
+		"缓存故障时应 fail-open 放行，不影响合法用户登录")
+	svc.ClearAccountFailures(ctx, email)
+}
+
+// TestService_AccountDimension_IndependentOfIP 账号维度与 IP 维度互相独立
+func TestService_AccountDimension_IndependentOfIP(t *testing.T) {
+	svc := NewServiceWithAdaptive(newTestCache(t), true, 5*time.Minute, 3, 15*time.Minute)
+	ctx := context.Background()
+	email := "victim@example.com"
+	ip := "10.9.8.7"
+
+	// 账号维度触发不影响 IP 维度
+	for i := 0; i < 3; i++ {
+		svc.RecordAccountFailure(ctx, email)
+	}
+	assert.True(t, svc.ShouldRequireCaptchaForAccount(ctx, email))
+	assert.False(t, svc.ShouldRequireCaptcha(ctx, ip), "账号维度计数不应影响 IP 维度")
+
+	// IP 维度触发不影响账号维度
+	svc.ClearAccountFailures(ctx, email)
+	for i := 0; i < 3; i++ {
+		svc.RecordFailure(ctx, ip)
+	}
+	assert.True(t, svc.ShouldRequireCaptcha(ctx, ip))
+	assert.False(t, svc.ShouldRequireCaptchaForAccount(ctx, email), "IP 维度计数不应影响账号维度")
 }

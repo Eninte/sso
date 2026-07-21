@@ -45,6 +45,12 @@ func (m *trackingCaptchaVerifier) IsEnabled() bool { return m.enabled }
 func (m *trackingCaptchaVerifier) ShouldRequireCaptcha(_ context.Context, _ string) bool {
 	return m.requireCaptcha
 }
+
+// ShouldRequireCaptchaForAccount T15：tracking mock 不做账号维度触发，
+// 账号维度行为由 captcha.Service 真实实例的集成测试覆盖
+func (m *trackingCaptchaVerifier) ShouldRequireCaptchaForAccount(_ context.Context, _ string) bool {
+	return false
+}
 func (m *trackingCaptchaVerifier) Verify(_ context.Context, _, _ string) (bool, error) {
 	return m.verifyOK, nil
 }
@@ -52,10 +58,16 @@ func (m *trackingCaptchaVerifier) RecordFailure(_ context.Context, key string) {
 	m.recordFailureCalls.Add(1)
 	m.recordFailureKeys = append(m.recordFailureKeys, key)
 }
+
+// RecordAccountFailure T15：tracking mock 空实现（接口适配）
+func (m *trackingCaptchaVerifier) RecordAccountFailure(_ context.Context, _ string) {}
 func (m *trackingCaptchaVerifier) ClearFailures(_ context.Context, key string) {
 	m.clearFailuresCalls.Add(1)
 	m.clearFailuresKeys = append(m.clearFailuresKeys, key)
 }
+
+// ClearAccountFailures T15：tracking mock 空实现（接口适配）
+func (m *trackingCaptchaVerifier) ClearAccountFailures(_ context.Context, _ string) {}
 
 // ============================================================================
 // 测试辅助：创建带已知密码的测试用户
@@ -472,12 +484,24 @@ func TestFix_EndToEnd_DifferentIPsIndependent(t *testing.T) {
 	assert.True(t, captchaSvc.ShouldRequireCaptcha(ctx, ipA), "IP-A 3次失败后应需要验证码")
 	assert.False(t, captchaSvc.ShouldRequireCaptcha(ctx, ipB), "IP-B 无失败记录，不应需要验证码")
 
-	// IP-B 正常登录不受影响
+	// T15（行为变更）：同一账号从 IP-B 登录现在也要求验证码（账号维度已触发），
+	// 这正是 L7 修复目标——攻击者换 IP 无法绕过验证码
 	body := bytes.NewReader([]byte(`{"email":"fixtest@example.com","password":"Password123!"}`))
 	req := httptest.NewRequest("POST", "/api/v1/login", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.RemoteAddr = ipB + ":1234"
 	w := httptest.NewRecorder()
 	loginHandler.Handle(w, req)
-	assert.Equal(t, http.StatusOK, w.Code, "IP-B 应正常登录，不受 IP-A 失败影响")
+	assert.Equal(t, http.StatusBadRequest, w.Code,
+		"T15：账号维度已触发，同一账号换 IP 仍要求验证码")
+
+	// IP 维度独立性保持：IP-B 本身未被限制，换其他账号可到达凭据校验阶段（403 账户禁用）
+	body = bytes.NewReader([]byte(`{"email":"disabled-fixtest@example.com","password":"Password123!"}`))
+	req = httptest.NewRequest("POST", "/api/v1/login", body)
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = ipB + ":1234"
+	w = httptest.NewRecorder()
+	loginHandler.Handle(w, req)
+	assert.Equal(t, http.StatusForbidden, w.Code,
+		"IP-B 的 IP 维度未触发，换账号登录应到达凭据校验阶段")
 }

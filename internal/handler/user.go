@@ -90,8 +90,8 @@ func (h *UserHandler) HandleForgotPassword(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// 验证验证码
-	if !verifyCaptcha(w, r, h.captchaSvc) {
+	// 验证验证码（T15：IP 与账号双维度触发判定）
+	if !verifyCaptcha(w, r, h.captchaSvc, req.Email) {
 		return
 	}
 
@@ -130,8 +130,8 @@ func (h *UserHandler) HandleResetPassword(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// 验证验证码
-	if !verifyCaptcha(w, r, h.captchaSvc) {
+	// 验证验证码（重置请求不含邮箱，仅按 IP 维度判定）
+	if !verifyCaptcha(w, r, h.captchaSvc, "") {
 		return
 	}
 

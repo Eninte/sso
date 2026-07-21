@@ -45,9 +45,14 @@ type mockCaptchaVerifier struct{}
 
 func (m *mockCaptchaVerifier) IsEnabled() bool                                       { return false }
 func (m *mockCaptchaVerifier) ShouldRequireCaptcha(_ context.Context, _ string) bool { return false }
-func (m *mockCaptchaVerifier) Verify(_ context.Context, _, _ string) (bool, error)   { return true, nil }
-func (m *mockCaptchaVerifier) RecordFailure(_ context.Context, _ string)             {}
-func (m *mockCaptchaVerifier) ClearFailures(_ context.Context, _ string)             {}
+func (m *mockCaptchaVerifier) ShouldRequireCaptchaForAccount(_ context.Context, _ string) bool {
+	return false
+}
+func (m *mockCaptchaVerifier) Verify(_ context.Context, _, _ string) (bool, error) { return true, nil }
+func (m *mockCaptchaVerifier) RecordFailure(_ context.Context, _ string)           {}
+func (m *mockCaptchaVerifier) RecordAccountFailure(_ context.Context, _ string)    {}
+func (m *mockCaptchaVerifier) ClearFailures(_ context.Context, _ string)           {}
+func (m *mockCaptchaVerifier) ClearAccountFailures(_ context.Context, _ string)    {}
 
 var testCaptchaSvc = &mockCaptchaVerifier{}
 
