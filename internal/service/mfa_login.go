@@ -56,7 +56,7 @@ func (s *MFAService) VerifyMFALoginCode(ctx context.Context, userID, method, cod
 			return apperrors.ErrInvalidMFACode
 		}
 
-		if !s.validateTOTPWithReplayProtection(userID, user.MFASecret, code) {
+		if !s.validateTOTPWithReplayProtection(ctx, userID, user.MFASecret, code) {
 			return apperrors.ErrInvalidMFACode
 		}
 

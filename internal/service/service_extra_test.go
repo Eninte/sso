@@ -137,7 +137,7 @@ func TestMFAService_VerifyRecoveryCode(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, used)
 
-		assert.False(t, svc.checkRecoveryRateLimit("user-1"))
+		assert.False(t, svc.checkRecoveryRateLimit(context.Background(), "user-1"))
 	})
 }
 
@@ -182,7 +182,7 @@ func TestMFAService_checkRecoveryRateLimit(t *testing.T) {
 		m := mock.New()
 		svc := NewMFAService(m)
 
-		assert.False(t, svc.checkRecoveryRateLimit("user-1"))
+		assert.False(t, svc.checkRecoveryRateLimit(context.Background(), "user-1"))
 	})
 
 	t.Run("失败后未达上限未锁定", func(t *testing.T) {
@@ -190,10 +190,10 @@ func TestMFAService_checkRecoveryRateLimit(t *testing.T) {
 		svc := NewMFAService(m)
 
 		for i := 0; i < 3; i++ {
-			svc.recordRecoveryFailure("user-1")
+			svc.recordRecoveryFailure(context.Background(), "user-1")
 		}
 
-		assert.False(t, svc.checkRecoveryRateLimit("user-1"))
+		assert.False(t, svc.checkRecoveryRateLimit(context.Background(), "user-1"))
 	})
 
 	t.Run("达到上限后锁定", func(t *testing.T) {
@@ -201,10 +201,10 @@ func TestMFAService_checkRecoveryRateLimit(t *testing.T) {
 		svc := NewMFAService(m)
 
 		for i := 0; i < 5; i++ {
-			svc.recordRecoveryFailure("user-1")
+			svc.recordRecoveryFailure(context.Background(), "user-1")
 		}
 
-		assert.True(t, svc.checkRecoveryRateLimit("user-1"))
+		assert.True(t, svc.checkRecoveryRateLimit(context.Background(), "user-1"))
 	})
 
 	t.Run("clearRecoveryAttempts清除记录", func(t *testing.T) {
@@ -212,11 +212,11 @@ func TestMFAService_checkRecoveryRateLimit(t *testing.T) {
 		svc := NewMFAService(m)
 
 		for i := 0; i < 5; i++ {
-			svc.recordRecoveryFailure("user-1")
+			svc.recordRecoveryFailure(context.Background(), "user-1")
 		}
 
-		svc.clearRecoveryAttempts("user-1")
-		assert.False(t, svc.checkRecoveryRateLimit("user-1"))
+		svc.clearRecoveryAttempts(context.Background(), "user-1")
+		assert.False(t, svc.checkRecoveryRateLimit(context.Background(), "user-1"))
 	})
 }
 

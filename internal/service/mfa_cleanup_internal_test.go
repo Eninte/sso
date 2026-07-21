@@ -2,6 +2,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -20,7 +21,7 @@ func TestMFAService_cleanupTOTPUsage(t *testing.T) {
 	svc.recordTOTPUsage("user-expired", "123456", 100)
 	// 手动将过期记录回拨到 91 秒前
 	svc.totpMu.Lock()
-	svc.totpUsage["user-expired"].usedAt = time.Now().Add(-91 * time.Second)
+	svc.totpUsage[totpUsageKey("user-expired", 100)].usedAt = time.Now().Add(-91 * time.Second)
 	svc.totpMu.Unlock()
 
 	svc.recordTOTPUsage("user-fresh", "654321", 101)
@@ -30,8 +31,8 @@ func TestMFAService_cleanupTOTPUsage(t *testing.T) {
 
 	svc.totpMu.Lock()
 	defer svc.totpMu.Unlock()
-	assert.NotContains(t, svc.totpUsage, "user-expired", "超过90秒的记录应被清理")
-	assert.Contains(t, svc.totpUsage, "user-fresh", "未过期的记录应保留")
+	assert.NotContains(t, svc.totpUsage, totpUsageKey("user-expired", 100), "超过90秒的记录应被清理")
+	assert.Contains(t, svc.totpUsage, totpUsageKey("user-fresh", 101), "未过期的记录应保留")
 }
 
 // TestMFAService_cleanupRecoveryAttempts 测试恢复码尝试记录清理
@@ -84,7 +85,7 @@ func TestMFAService_recordTOTPUsage(t *testing.T) {
 
 	svc.totpMu.Lock()
 	defer svc.totpMu.Unlock()
-	rec, ok := svc.totpUsage["user-1"]
+	rec, ok := svc.totpUsage[totpUsageKey("user-1", 200)]
 	assert.True(t, ok, "记录应被写入")
 	assert.Equal(t, "111111", rec.code)
 	assert.Equal(t, uint64(200), rec.timeStep)
@@ -125,7 +126,7 @@ func TestMFAService_clearRecoveryAttempts(t *testing.T) {
 	svc.recoveryAttempts["user-2"] = &recoveryAttempt{count: 1, lastFail: time.Now()}
 	svc.recoveryMu.Unlock()
 
-	svc.clearRecoveryAttempts("user-1")
+	svc.clearRecoveryAttempts(context.Background(), "user-1")
 
 	svc.recoveryMu.Lock()
 	defer svc.recoveryMu.Unlock()

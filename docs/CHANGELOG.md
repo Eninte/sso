@@ -40,6 +40,7 @@
 
 ### Fixed
 
+- **T9 MFA 防护 Redis 化**（安全审查 M3+L1）：恢复码失败限流与 TOTP 重放记录迁入 Redis（`mfa:recovery:attempts:`/`mfa:totp:used:` 键，多副本一致）；TOTP 改按 timeStep 独立记录，修复 90 秒窗口内旧码可二次使用（L1）；Redis 不可用时降级为内存路径并记录 Error 日志
 - **T8 CORS credentials 策略收紧**（安全审查 M1）：仅精确匹配的 Origin 发送 `Access-Control-Allow-Credentials`，通配（`*`/`*.suffix`）命中不再发送；所有响应补 `Vary: Origin`；精确匹配优先于通配
 - **T7 JWT 轮换私钥信封加密**（安全审查 H3）：`key_versions.private_key` 落库前经 AES-256-GCM 加密（KEK 来自新配置 `JWT_KEY_ENCRYPTION_KEY`，64 位 hex）；读取按 `v1:gcm:` 前缀分派解密，存量明文行读取后自动懒加密回写；生产启用密钥轮换时 KEK 必填，否则拒绝启动
 - **T6 升级 golang.org/x/crypto 至 v0.52.0**（安全审查 L15）：消除 15 条已知漏洞的扫描噪音（代码路径本未触达）；govulncheck 复扫 0 项受影响

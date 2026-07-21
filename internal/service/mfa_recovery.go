@@ -56,13 +56,13 @@ func (s *MFAService) GenerateRecoveryCodes(ctx context.Context, userID string, c
 // ipAddress 用于审计日志，记录验证来源
 func (s *MFAService) VerifyRecoveryCode(ctx context.Context, userID, code, ipAddress string) (bool, error) {
 	// 检查限流
-	if s.checkRecoveryRateLimit(userID) {
+	if s.checkRecoveryRateLimit(ctx, userID) {
 		return false, ErrTooManyRecoveryAttempts
 	}
 
 	// 验证HMAC密钥已设置
 	if len(s.hmacKey) == 0 {
-		s.recordRecoveryFailure(userID)
+		s.recordRecoveryFailure(ctx, userID)
 		return false, ErrMFAHMACKeyNotSet
 	}
 
@@ -72,7 +72,7 @@ func (s *MFAService) VerifyRecoveryCode(ctx context.Context, userID, code, ipAdd
 	// 获取所有未使用的恢复码哈希
 	storedHashes, err := s.store.GetUnusedMFARecoveryCodes(ctx, userID)
 	if err != nil {
-		s.recordRecoveryFailure(userID)
+		s.recordRecoveryFailure(ctx, userID)
 		return false, ErrRecoveryCodeInvalid
 	}
 
@@ -87,7 +87,7 @@ func (s *MFAService) VerifyRecoveryCode(ctx context.Context, userID, code, ipAdd
 	}
 
 	if !matched {
-		s.recordRecoveryFailure(userID)
+		s.recordRecoveryFailure(ctx, userID)
 		return false, ErrRecoveryCodeInvalid
 	}
 
@@ -95,12 +95,12 @@ func (s *MFAService) VerifyRecoveryCode(ctx context.Context, userID, code, ipAdd
 	// 注意：这里直接传入原始code，store层会重新哈希
 	used, err := s.store.VerifyAndUseMFARecoveryCode(ctx, userID, code)
 	if err != nil || !used {
-		s.recordRecoveryFailure(userID)
+		s.recordRecoveryFailure(ctx, userID)
 		return false, ErrRecoveryCodeInvalid
 	}
 
 	// 验证成功，清除尝试记录
-	s.clearRecoveryAttempts(userID)
+	s.clearRecoveryAttempts(ctx, userID)
 
 	// 记录审计日志
 	auditutil.SafeAuditLog(ctx, s.auditSvc, "mfa_recovery_code_used", userID, map[string]interface{}{

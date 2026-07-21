@@ -73,7 +73,7 @@ func (s *MFAService) VerifyAndEnableMFAWithAudit(ctx context.Context, userID, co
 		return ErrInvalidMFASecret
 	}
 
-	if !s.validateTOTPWithReplayProtection(userID, user.MFASecret, code) {
+	if !s.validateTOTPWithReplayProtection(ctx, userID, user.MFASecret, code) {
 		return ErrInvalidTOTPCode
 	}
 
@@ -106,7 +106,7 @@ func (s *MFAService) DisableMFAWithAudit(ctx context.Context, userID, code strin
 		return ErrMFANotEnabled
 	}
 
-	if !s.validateTOTPWithReplayProtection(userID, user.MFASecret, code) {
+	if !s.validateTOTPWithReplayProtection(ctx, userID, user.MFASecret, code) {
 		return ErrInvalidTOTPCode
 	}
 
@@ -160,20 +160,14 @@ func generateTOTPURL(secret, email string) string {
 
 // validateTOTPWithReplayProtection 验证TOTP并防止重放攻击
 // 允许±1时间步（90秒窗口）但记录使用防止重放
-func (s *MFAService) validateTOTPWithReplayProtection(userID, secret, code string) bool {
+func (s *MFAService) validateTOTPWithReplayProtection(ctx context.Context, userID, secret, code string) bool {
 	timeStep, ok := findMatchingTimeStep(secret, code)
 	if !ok {
 		return false
 	}
 
-	// 检查是否已使用（防止重放攻击）
-	if s.isTOTPUsed(userID, code, timeStep) {
-		return false
-	}
-
-	// 记录使用
-	s.recordTOTPUsage(userID, code, timeStep)
-	return true
+	// 原子标记使用：首次放行，重放拒绝（T9：Redis 优先，内存降级）
+	return s.markTOTPUsed(ctx, userID, code, timeStep)
 }
 
 // findMatchingTimeStep 在 ±1 时间窗口内查找匹配的 TOTP 时间步

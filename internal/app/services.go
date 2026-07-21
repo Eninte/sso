@@ -145,6 +145,8 @@ func initServices(cfg *config.Config, version, buildTime string) (*Services, *sq
 	if cfg.MFARecoveryHMACKey != "" {
 		mfaSvc.SetHMACKey([]byte(cfg.MFARecoveryHMACKey))
 	}
+	// T9：注入缓存，恢复码限流与 TOTP 重放记录 Redis 化（多副本一致，故障时内存降级）
+	mfaSvc.SetCache(cacheSvc)
 
 	// ==== 初始化业务服务（带缓存） ====
 	// 阶段 4：邮件链接使用 PublicBaseURLOrFallback（生产环境强制 HTTPS）

@@ -2,6 +2,7 @@
 package service
 
 import (
+	"context"
 	"encoding/base32"
 	"strings"
 	"testing"
@@ -125,12 +126,12 @@ func TestValidateTOTPWithReplayProtection_ReplayAttack(t *testing.T) {
 	validCode := generateHOTP(rawSecret, baseTimeStep)
 
 	t.Run("首次验证_通过", func(t *testing.T) {
-		assert.True(t, svc.validateTOTPWithReplayProtection(userID, secret, validCode))
+		assert.True(t, svc.validateTOTPWithReplayProtection(context.Background(), userID, secret, validCode))
 	})
 
 	t.Run("同一码重复使用_拒绝", func(t *testing.T) {
 		// 同一时间步的同一码应被拒绝（重放保护）
-		assert.False(t, svc.validateTOTPWithReplayProtection(userID, secret, validCode))
+		assert.False(t, svc.validateTOTPWithReplayProtection(context.Background(), userID, secret, validCode))
 	})
 }
 
@@ -145,12 +146,12 @@ func TestValidateTOTPWithReplayProtection_InvalidCode(t *testing.T) {
 	userID := "user-invalid-test"
 
 	t.Run("无效码_返回false", func(t *testing.T) {
-		assert.False(t, svc.validateTOTPWithReplayProtection(userID, secret, "000000"))
+		assert.False(t, svc.validateTOTPWithReplayProtection(context.Background(), userID, secret, "000000"))
 	})
 
 	t.Run("无效码后仍可验证有效码", func(t *testing.T) {
 		baseTimeStep := uint64(time.Now().Unix() / 30)
 		validCode := generateHOTP(rawSecret, baseTimeStep)
-		assert.True(t, svc.validateTOTPWithReplayProtection(userID, secret, validCode))
+		assert.True(t, svc.validateTOTPWithReplayProtection(context.Background(), userID, secret, validCode))
 	})
 }
