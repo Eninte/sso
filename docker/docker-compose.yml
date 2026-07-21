@@ -27,7 +27,8 @@ services:
       - DB_USER=sso
       # ⚠️ 必须设置 DB_PASSWORD 环境变量
       # 设置方法: export DB_PASSWORD=your_secure_password
-      - DB_PASSWORD=${DB_PASSWORD}
+      # T17（L10）：未设置时 compose 直接报错，避免以空密码启动
+      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD is required}
       # prefer：尝试使用 SSL，若 PostgreSQL 未启用 SSL 则回退明文（容器间内网通信）
       # 生产环境必须通过 .env 设置为 require
       - DB_SSL_MODE=prefer
@@ -98,7 +99,8 @@ services:
       POSTGRES_DB: sso
       POSTGRES_USER: sso
       # ⚠️ 必须设置 DB_PASSWORD 环境变量
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      # T17（L10）：未设置时 compose 直接报错，避免以空密码启动
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
     ports:
       # 仅绑定到本机回环地址，禁止外部直接访问数据库
       - "127.0.0.1:5432:5432"
@@ -144,7 +146,20 @@ services:
       - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    environment:
+      # T17（L10）：密码通过环境变量传入，命令行与 healthcheck 中只引用变量名，
+      # 避免明文密码固化在容器配置的 Cmd/Healthcheck 字段中
+      # （docker inspect 的 Config.Cmd 不再直接暴露密码）
+      # 注意：环境变量本身对宿主机 root 仍可见（docker inspect 的 Config.Env），
+      # 这是 Compose 传密的固有残余风险；更彻底的方案是 redis unix socket +
+      # 容器内共享卷，或迁移到 Docker Secrets（需 Swarm 模式），此处先记录评估结论
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    # $$ 转义：Compose 不插值，容器内 shell 启动时从环境变量展开；
+    # exec 保证 redis-server 成为 PID 1，正常接收 docker stop 的 SIGTERM
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"
     restart: unless-stopped
     # 阶段 4 安全增强：最小权限 + 资源限制
     # redis 启动需要 CHOWN / SETUID / DAC_OVERRIDE（用于设置数据目录权限）
@@ -164,7 +179,12 @@ services:
         max-size: "10m"
         max-file: "3"
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD must be set}", "ping"]
+      # T17（L10）：$$ 转义，容器内运行时从环境变量展开密码，
+      # 明文密码不再出现在 healthcheck 的进程参数中；
+      # --no-auth-warning 抑制 redis-cli 的密码参数告警
+      test:
+        - CMD-SHELL
+        - redis-cli --no-auth-warning -a "$$REDIS_PASSWORD" ping | grep -q PONG
       interval: 10s
       timeout: 5s
       retries: 5

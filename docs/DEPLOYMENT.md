@@ -175,12 +175,14 @@ services:
       - DB_PORT=5432
       - DB_NAME=sso
       - DB_USER=sso
-      # ⚠️ 必须设置 DB_PASSWORD 环境变量
-      - DB_PASSWORD=${DB_PASSWORD}
+      # ⚠️ 必须设置 DB_PASSWORD 环境变量（未设置时 compose 直接报错）
+      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD is required}
       - DB_SSL_MODE=require
       # Redis配置
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      # ⚠️ 必须设置 REDIS_PASSWORD 环境变量（未设置时 compose 直接报错）
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
       # JWT配置
       - JWT_PRIVATE_KEY_PATH=/app/keys/private.pem
       - JWT_PUBLIC_KEY_PATH=/app/keys/public.pem
@@ -216,8 +218,8 @@ services:
     environment:
       POSTGRES_DB: sso
       POSTGRES_USER: sso
-      # ⚠️ 必须设置 DB_PASSWORD 环境变量
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      # ⚠️ 必须设置 DB_PASSWORD 环境变量（未设置时 compose 直接报错）
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
     ports:
       - "5432:5432"
     volumes:
@@ -238,10 +240,18 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    environment:
+      # ⚠️ 必须设置 REDIS_PASSWORD 环境变量（未设置时 compose 直接报错）
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    # $$ 转义：Compose 不插值，容器内运行时从环境变量展开，
+    # 明文密码不会固化在容器配置的 Cmd 字段中（docker inspect 不可见）
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 5

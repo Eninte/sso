@@ -34,7 +34,7 @@ SSO 服务是一个生产级单点登录（Single Sign-On）微服务，基于 G
 | `.github/workflows/ci.yml` | CI/CD 流水线：test、lint、security、e2e、build、docker |
 | `docker/Dockerfile` | 多阶段 Docker 构建，基于 `golang:1.26.5-alpine` |
 | `docker/docker-compose.yml` | 开发/部署 Compose，含 postgres、redis、sso 三服务 |
-| `docker/entrypoint.sh` | 容器启动脚本：自动构造 `DATABASE_URL` 并执行 `migrate up` |
+| `docker/entrypoint.sh` | 容器启动脚本：自动构造无密码迁移 DSN（密码经 `PGPASSWORD` 子进程环境传递）并执行 `migrate up` |
 | `migrations/` | 数据库迁移脚本，共 018 个版本（3 位序号命名） |
 | `keys/` | RSA 密钥对（脚本生成，Git 忽略） |
 
@@ -431,7 +431,7 @@ make docker-up
 make docker-logs
 ```
 
-容器启动时，`entrypoint.sh` 会自动构造 `DATABASE_URL` 并执行 `migrate up`（可通过 `AUTO_MIGRATE=false` 关闭）。
+容器启动时，`entrypoint.sh` 会自动构造无密码迁移 DSN（密码仅通过 `PGPASSWORD` 注入 migrate 子进程环境，不 export）并执行 `migrate up`（可通过 `AUTO_MIGRATE=false` 关闭）。
 
 ### 11.2 Kubernetes 部署
 

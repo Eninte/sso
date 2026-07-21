@@ -40,6 +40,10 @@
 
 ### Fixed
 
+- **安全修复（T17 / 报告 L9+L10）**：Docker 凭据卫生——entrypoint.sh 不再 export 含明文密码的 `DATABASE_URL`，密码仅经 `PGPASSWORD` 注入 migrate 子进程，sso 主进程不继承；docker-compose.yml 的 `DB_PASSWORD`/`REDIS_PASSWORD` 改为强制必填（`:?` 语法），Redis 启用 `--requirepass`，command/healthcheck 运行时展开避免 `docker inspect` 固化明文
+
+- **安全修复（T19 / 报告 I1）**：OIDC Discovery 与实际能力对齐——`authorization_endpoint` 修正为真实路由 `/api/v1/authorize`；`token_endpoint_auth_methods_supported` 移除未实现的 `client_secret_basic`（保留 `client_secret_post` 与 `none`）；docs/API.md 示例同步
+
 - **安全修复（T16 / 报告 L3）**：JWT kid 改为按 RFC 7638 JWK Thumbprint 从公钥内容派生（SHA-256 base64url 前 16 字符），同一密钥内容恒定同一 kid；修复原随机 kid 导致重启后旧 token 无匹配公钥、全员强制登出的问题；JWKS 与签发 token header 的 kid 保证一致，重复公钥在 JWKS 中幂等去重
 
 - **安全修复（T18 / 报告 L11）**：注册/登录入口邮箱仅接受纯 addr-spec——拒绝 display-name（`"Name" <a@b.c>`）、尖括号形式、尾部注释与前后空白（原实现 trim 后放行）；纯 addr-spec（含大小写、`+tag`）不受影响
