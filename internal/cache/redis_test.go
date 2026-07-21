@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/example/sso/internal/cache"
+	"github.com/example/sso/internal/common"
 	"github.com/example/sso/internal/util/testutil"
 )
 
@@ -149,8 +150,10 @@ func TestMemoryCache_DeletePattern(t *testing.T) {
 
 func TestCacheKeys(t *testing.T) {
 	t.Run("TokenKey", func(t *testing.T) {
+		// T1：key 使用 token 的 SHA-256 哈希，明文不出现在缓存键中
 		key := cache.TokenKey("access-token-123")
-		assert.Equal(t, "token:access-token-123", key)
+		assert.Equal(t, "token:"+common.HashToken("access-token-123"), key)
+		assert.NotContains(t, key, "access-token-123")
 	})
 
 	t.Run("UserIDKey", func(t *testing.T) {

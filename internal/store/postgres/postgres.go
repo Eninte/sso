@@ -167,10 +167,11 @@ var allowedUserFields = map[string]bool{
 }
 
 // allowedTokenFields 允许用于Token查询的字段白名单
+//
+// 安全设计（T1）：明文列 access_token / refresh_token 已移除，
+// 仅允许 hash 查询，防止明文出现在 WHERE 条件中
 var allowedTokenFields = map[string]bool{
 	"id":                 true,
-	"access_token":       true,
-	"refresh_token":      true,
 	"user_id":            true,
 	"access_token_hash":  true,
 	"refresh_token_hash": true,

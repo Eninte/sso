@@ -2,13 +2,15 @@
 
 // Package postgres_test Token hash 存储集成测试
 // 阶段 D 审查修复（H6）：验证 Token hash 字段在 Postgres 中的正确存储与查询
+// T1 安全修复（H1）：tokens 表去除明文存储，仅存/只查 hash
 //
 // 测试覆盖：
 //   - StoreToken 时 access_token_hash / refresh_token_hash 自动计算并存储
+//   - StoreToken 后明文列 access_token / refresh_token 为 NULL（不落库）
 //   - GetTokenByAccessToken / GetTokenByRefreshToken 通过 hash 查询命中
+//   - GetTokenByAccessToken / GetTokenByRefreshToken 对不存在 hash 返回 ErrNotFound
 //   - RevokeToken 通过 hash 查询定位并撤销
 //   - RotateRefreshToken 原子轮换使用 hash 查询定位旧 token
-//   - 兼容旧数据：hash 字段为 NULL 时回退到明文查询
 package postgres_test
 
 import (
@@ -66,29 +68,50 @@ func TestStore_TokenHash_StoreAndQuery(t *testing.T) {
 	}
 	require.NoError(t, store.StoreToken(ctx, token))
 
-	// 验证 hash 字段已存储
+	// 验证 hash 字段已存储，且明文列为 NULL（T1：明文不落库）
 	var accessHash, refreshHash *string
+	var accessPlain, refreshPlain *string
 	err := db.QueryRowContext(ctx,
-		"SELECT access_token_hash, refresh_token_hash FROM tokens WHERE id = $1",
+		"SELECT access_token_hash, refresh_token_hash, access_token, refresh_token FROM tokens WHERE id = $1",
 		token.ID,
-	).Scan(&accessHash, &refreshHash)
+	).Scan(&accessHash, &refreshHash, &accessPlain, &refreshPlain)
 	require.NoError(t, err)
 	require.NotNil(t, accessHash, "access_token_hash 必须已存储")
 	require.NotNil(t, refreshHash, "refresh_token_hash 必须已存储")
 	assert.Equal(t, common.HashToken(accessToken), *accessHash)
 	assert.Equal(t, common.HashToken(refreshToken), *refreshHash)
+	assert.Nil(t, accessPlain, "access_token 明文列必须为 NULL（T1 不落库）")
+	assert.Nil(t, refreshPlain, "refresh_token 明文列必须为 NULL（T1 不落库）")
 
 	// 通过 access_token 查询（应命中 hash 索引）
 	retrieved, err := store.GetTokenByAccessToken(ctx, accessToken)
 	require.NoError(t, err)
 	assert.Equal(t, token.ID, retrieved.ID)
-	assert.Equal(t, accessToken, retrieved.AccessToken)
+	assert.Empty(t, retrieved.AccessToken, "明文列不再读出（T1）")
+	assert.Equal(t, common.HashToken(accessToken), retrieved.AccessTokenHash)
 
 	// 通过 refresh_token 查询（应命中 hash 索引）
 	retrieved2, err := store.GetTokenByRefreshToken(ctx, refreshToken)
 	require.NoError(t, err)
 	assert.Equal(t, token.ID, retrieved2.ID)
-	assert.Equal(t, refreshToken, retrieved2.RefreshToken)
+	assert.Empty(t, retrieved2.RefreshToken, "明文列不再读出（T1）")
+	assert.Equal(t, common.HashToken(refreshToken), retrieved2.RefreshTokenHash)
+}
+
+// TestStore_TokenHash_GetByTokenNotFound 验证不存在的 token 返回 ErrNotFound
+// T1：hash 未命中不再回退明文查询，直接返回 store.ErrNotFound
+func TestStore_TokenHash_GetByTokenNotFound(t *testing.T) {
+	store, db := setupTestStore(t)
+	t.Cleanup(func() {
+		db.Close()
+	})
+	ctx := context.Background()
+
+	_, err := store.GetTokenByAccessToken(ctx, "nonexistent-access-"+uuid.New().String())
+	assert.ErrorIs(t, err, storepkg.ErrNotFound)
+
+	_, err = store.GetTokenByRefreshToken(ctx, "nonexistent-refresh-"+uuid.New().String())
+	assert.ErrorIs(t, err, storepkg.ErrNotFound)
 }
 
 // TestStore_TokenHash_RevokeByHash 验证 RevokeToken 通过 hash 定位记录
@@ -208,167 +231,4 @@ func TestStore_TokenHash_RotateByHash(t *testing.T) {
 	// 验证第二次轮换返回 ErrTokenRotated（已轮换的 token 不能再次轮换）
 	err = store.RotateRefreshToken(ctx, oldRefresh, newToken)
 	assert.ErrorIs(t, err, storepkg.ErrTokenRotated)
-}
-
-// TestStore_TokenHash_LegacyDataFallback 验证兼容旧数据：hash 字段为 NULL 时回退到明文查询
-// 阶段 D 修复（H6）：保证迁移期间旧数据仍可查询
-func TestStore_TokenHash_LegacyDataFallback(t *testing.T) {
-	store, db := setupTestStore(t)
-	t.Cleanup(func() {
-		cleanupTestData(t, db)
-		db.Close()
-	})
-	ctx := context.Background()
-
-	user := newTestUser("hash-legacy@example.com")
-	require.NoError(t, store.Create(ctx, user))
-
-	uniqueClientID := "test-hash-legacy-" + uuid.New().String()[:8]
-	testClient := &model.Client{
-		ID:           uuid.New().String(),
-		ClientID:     uniqueClientID,
-		ClientSecret: "secret",
-		Name:         "Hash Legacy Client",
-		RedirectURIs: []string{"http://localhost"},
-		GrantTypes:   []string{"authorization_code"},
-		Scopes:       []string{"openid"},
-		CreatedAt:    time.Now(),
-	}
-	require.NoError(t, store.CreateClient(ctx, testClient))
-
-	// 直接插入一行 hash 字段为 NULL 的记录，模拟旧数据
-	accessToken := "test-legacy-access-" + uuid.New().String()
-	refreshToken := "test-legacy-refresh-" + uuid.New().String()
-	tokenID := uuid.New().String()
-	_, err := db.ExecContext(ctx, `
-		INSERT INTO tokens (id, access_token, refresh_token, user_id, client_id, scopes, expires_at, created_at, access_token_hash, refresh_token_hash)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, NULL)
-	`,
-		tokenID, accessToken, refreshToken, user.ID, uniqueClientID,
-		[]string{"openid"},
-		time.Now().Add(1*time.Hour), time.Now(),
-	)
-	require.NoError(t, err)
-
-	// 通过 access_token 查询（hash 为 NULL 应回退到明文查询）
-	retrieved, err := store.GetTokenByAccessToken(ctx, accessToken)
-	require.NoError(t, err)
-	assert.Equal(t, tokenID, retrieved.ID)
-	assert.Equal(t, accessToken, retrieved.AccessToken)
-
-	// 通过 refresh_token 查询（hash 为 NULL 应回退到明文查询）
-	retrieved2, err := store.GetTokenByRefreshToken(ctx, refreshToken)
-	require.NoError(t, err)
-	assert.Equal(t, tokenID, retrieved2.ID)
-	assert.Equal(t, refreshToken, retrieved2.RefreshToken)
-}
-
-// TestStore_TokenHash_RevokeByLegacyFallback 验证 RevokeToken 在 hash 为 NULL 时回退到明文查询
-// 阶段 D 修复（H6）：覆盖 RevokeToken 的回退 UPDATE 路径
-func TestStore_TokenHash_RevokeByLegacyFallback(t *testing.T) {
-	store, db := setupTestStore(t)
-	t.Cleanup(func() {
-		cleanupTestData(t, db)
-		db.Close()
-	})
-	ctx := context.Background()
-
-	user := newTestUser("hash-revoke-legacy@example.com")
-	require.NoError(t, store.Create(ctx, user))
-
-	uniqueClientID := "test-hash-revoke-legacy-" + uuid.New().String()[:8]
-	testClient := &model.Client{
-		ID:           uuid.New().String(),
-		ClientID:     uniqueClientID,
-		ClientSecret: "secret",
-		Name:         "Hash Revoke Legacy Client",
-		RedirectURIs: []string{"http://localhost"},
-		GrantTypes:   []string{"authorization_code"},
-		Scopes:       []string{"openid"},
-		CreatedAt:    time.Now(),
-	}
-	require.NoError(t, store.CreateClient(ctx, testClient))
-
-	// 直接插入一行 hash 字段为 NULL 的记录，模拟旧数据
-	accessToken := "test-legacy-revoke-access-" + uuid.New().String()
-	tokenID := uuid.New().String()
-	_, err := db.ExecContext(ctx, `
-		INSERT INTO tokens (id, access_token, refresh_token, user_id, client_id, scopes, expires_at, created_at, access_token_hash, refresh_token_hash)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, NULL)
-	`,
-		tokenID, accessToken, "test-legacy-revoke-refresh-"+uuid.New().String(),
-		user.ID, uniqueClientID, []string{"openid"},
-		time.Now().Add(1*time.Hour), time.Now(),
-	)
-	require.NoError(t, err)
-
-	// 通过 access_token 撤销（hash 为 NULL 应回退到明文 UPDATE）
-	require.NoError(t, store.RevokeToken(ctx, accessToken))
-
-	// 验证 revoked_at 已设置
-	retrieved, err := store.GetTokenByAccessToken(ctx, accessToken)
-	require.NoError(t, err)
-	require.NotNil(t, retrieved.RevokedAt, "revoked_at 必须已设置")
-}
-
-// TestStore_TokenHash_RotateByLegacyFallback 验证 RotateRefreshToken 在 hash 为 NULL 时回退到明文查询
-// 阶段 D 修复（H6）：覆盖 RotateRefreshToken 的回退 UPDATE 命中路径
-func TestStore_TokenHash_RotateByLegacyFallback(t *testing.T) {
-	store, db := setupTestStore(t)
-	t.Cleanup(func() {
-		cleanupTestData(t, db)
-		db.Close()
-	})
-	ctx := context.Background()
-
-	user := newTestUser("hash-rotate-legacy@example.com")
-	require.NoError(t, store.Create(ctx, user))
-
-	uniqueClientID := "test-hash-rotate-legacy-" + uuid.New().String()[:8]
-	testClient := &model.Client{
-		ID:           uuid.New().String(),
-		ClientID:     uniqueClientID,
-		ClientSecret: "secret",
-		Name:         "Hash Rotate Legacy Client",
-		RedirectURIs: []string{"http://localhost"},
-		GrantTypes:   []string{"authorization_code"},
-		Scopes:       []string{"openid"},
-		CreatedAt:    time.Now(),
-	}
-	require.NoError(t, store.CreateClient(ctx, testClient))
-
-	// 直接插入一行 hash 字段为 NULL 的记录，模拟旧数据
-	oldRefresh := "test-legacy-rotate-refresh-" + uuid.New().String()
-	oldTokenID := uuid.New().String()
-	_, err := db.ExecContext(ctx, `
-		INSERT INTO tokens (id, access_token, refresh_token, user_id, client_id, scopes, expires_at, created_at, access_token_hash, refresh_token_hash)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, NULL)
-	`,
-		oldTokenID, "test-legacy-rotate-access-"+uuid.New().String(), oldRefresh,
-		user.ID, uniqueClientID, []string{"openid"},
-		time.Now().Add(1*time.Hour), time.Now(),
-	)
-	require.NoError(t, err)
-
-	// 构造新 token
-	newToken := &model.Token{
-		ID:           uuid.New().String(),
-		AccessToken:  "test-legacy-rotate-new-access-" + uuid.New().String(),
-		RefreshToken: "test-legacy-rotate-new-refresh-" + uuid.New().String(),
-		UserID:       user.ID,
-		ClientID:     ptrTo(uniqueClientID),
-		Scopes:       []string{"openid"},
-		ExpiresAt:    time.Now().Add(1 * time.Hour),
-		CreatedAt:    time.Now(),
-	}
-
-	// 轮换（hash 为 NULL 应回退到明文 UPDATE 命中）
-	require.NoError(t, store.RotateRefreshToken(ctx, oldRefresh, newToken))
-
-	// 验证旧 token 已标记轮换
-	oldRetrieved, err := store.GetTokenByRefreshToken(ctx, oldRefresh)
-	require.NoError(t, err)
-	require.NotNil(t, oldRetrieved.RotatedAt, "rotated_at 必须已设置")
-	require.NotNil(t, oldRetrieved.RevokedAt, "revoked_at 必须已设置")
-	assert.Equal(t, newToken.ID, *oldRetrieved.ReplacedByTokenID)
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/singleflight"
 
+	"github.com/example/sso/internal/common"
 	apperrors "github.com/example/sso/internal/errors"
 )
 
@@ -66,8 +67,19 @@ const (
 var nilCacheValue = []byte("NULL")
 
 // TokenKey 生成Token缓存键
+//
+// 安全设计（T1）：key 使用 token 的 SHA-256 哈希而非明文，
+// 避免 access token 明文出现在 Redis key 中（与 tokens 表去除明文存储一致）
 func TokenKey(accessToken string) string {
-	return TokenCachePrefix + accessToken
+	return TokenKeyByHash(common.HashToken(accessToken))
+}
+
+// TokenKeyByHash 根据 token 哈希生成Token缓存键
+//
+// 供只持有 hash 的调用方使用（如 RefreshToken 轮换后清除旧 token 缓存：
+// 明文不落库，store 返回的记录仅有 AccessTokenHash）
+func TokenKeyByHash(accessTokenHash string) string {
+	return TokenCachePrefix + accessTokenHash
 }
 
 // UserTokenKey 生成用户维度 token 缓存键前缀

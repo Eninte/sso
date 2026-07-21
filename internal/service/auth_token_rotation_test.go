@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/example/sso/internal/cache"
+	"github.com/example/sso/internal/common"
 	"github.com/example/sso/internal/crypto"
 	"github.com/example/sso/internal/metrics"
 	"github.com/example/sso/internal/model"
@@ -81,6 +82,9 @@ func addActiveUserAndToken(storeInst *mock.Store, refreshToken, accessToken stri
 		RefreshExpiresAt: &refreshExpiresAt,
 		CreatedAt:        time.Now(),
 	}
+	// T1：与 postgres StoreToken 行为对齐——hash 始终存在（AddToken 测试辅助不自动计算）
+	tok.AccessTokenHash = common.HashToken(accessToken)
+	tok.RefreshTokenHash = common.HashToken(refreshToken)
 	storeInst.AddToken(tok)
 	return tok
 }

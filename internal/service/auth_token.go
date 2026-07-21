@@ -240,13 +240,14 @@ func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken, c
 	}
 
 	// 8. 清除旧 token 缓存（失败不影响主流程）
-	if s.cache != nil {
-		cacheKey := cache.TokenKey(tokenRecord.AccessToken)
+	// T1：明文不落库，tokenRecord.AccessToken 为空，改用 AccessTokenHash 构造缓存键
+	if s.cache != nil && tokenRecord.AccessTokenHash != "" {
+		cacheKey := cache.TokenKeyByHash(tokenRecord.AccessTokenHash)
 		if err := s.cache.Delete(ctx, cacheKey); err != nil {
 			// 阶段 D 审查修复（H5）：cache 错误可能含 DSN
 			logger.Warn("清除旧Token缓存失败",
 				"error", logging.SanitizeDBURL(err.Error()),
-				"token_prefix", maskToken(tokenRecord.AccessToken),
+				"token_hash_prefix", maskToken(tokenRecord.AccessTokenHash),
 			)
 		}
 	}

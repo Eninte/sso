@@ -40,6 +40,7 @@
 
 ### Fixed
 
+- **T1 tokens 表去除明文存储**（安全审查 H1）：`access_token`/`refresh_token` 明文列改为仅写 NULL，查询/轮换/撤销全部走 SHA-256 hash，删除全部明文回退路径；Redis token 缓存键同步改为 hash。**注意**：迁移 019 执行后，迁移 018 之前签发且仍在有效期内的 refresh token 将失效，用户需重新登录一次
 - **修复 mock `RotateRefreshToken` 原地写数据竞争**（CI `-race` 检出）：mock 的 map 存 `*model.Token` 共享指针且 getter 返回同一指针，原地修改 `oldToken` 与 service 层锁外读取 `tokenRecord.RevokedAt` 产生竞争；改为拷贝-替换，语义与真实 DB 行更新一致。防范规范已写入 `AGENTS.md` §7.5
 - 修复 `internal/config` 两个测试在 Windows 下因 `t.Cleanup(os.Chdir)` 注册早于 `t.TempDir()` 导致的临时目录清理失败（cleanup LIFO 顺序问题）
 - 修复 `Makefile test-coverage-full` 调用不存在的 `go tool cover -merge`：新增 `scripts/merge_coverage.go` 实现 coverprofile 块级并集合并
