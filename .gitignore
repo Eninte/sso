@@ -26,10 +26,21 @@
 *~
 
 # 测试覆盖率（所有变体）
-*_coverage.out
-coverage_*.out
+# Makefile 产物：coverage.out / e2e-coverage.out / unit-coverage.out / full-coverage.out
+# 及对应 .html；手动测试可能产生 cov_full.out / coverage-postgres / integration-coverage.out 等变体
 coverage.out
 coverage.html
+coverage
+coverage-*
+coverage.*
+e2e-coverage.out
+e2e-coverage.html
+unit-coverage.out
+full-coverage.out
+full-coverage.html
+cov_*.out
+integration-coverage.out
+*_coverage.out
 test-results.xml
 
 # 依赖

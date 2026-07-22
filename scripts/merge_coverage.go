@@ -1,129 +1,33 @@
 //go:build ignore
 
-// Package main merges multiple Go coverage profiles (mode: set) into one.
+// Package main 合并多个 Go 覆盖率 profile（支持 set/count/atomic）。
 //
-// `go tool cover` has no built-in merge support, so `make test-coverage-full`
-// uses this script instead of the non-existent `go tool cover -merge`.
+// `go tool cover` 没有内置 merge 子命令，本脚本调用 scripts/mergecoverage 包完成实际工作。
+// 之所以保留 //go:build ignore 的 main 包装，是为了让 go run scripts/merge_coverage.go ...
+// 这种用法不被 go build ./... / go test ./... / go vet ./... 编译，
+// 而真正的合并逻辑放在 scripts/mergecoverage 包内被正常测试覆盖。
 //
 // Usage:
 //
 //	go run scripts/merge_coverage.go -o <output> <input1> <input2> [inputN...]
 //
-// Each input must be a coverage profile whose first line is `mode: set`.
-// Blocks are keyed by (file, startLine, startCol, endLine, endCol, numStmt);
-// a block is covered (count=1) in the output when any input covers it.
+// 输入 profile 模式必须一致（set/count/atomic），输出保留该模式。
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"os"
-	"sort"
-	"strings"
+
+	"github.com/example/sso/scripts/mergecoverage"
 )
-
-// blockKey uniquely identifies a coverage block across input profiles.
-type blockKey struct {
-	file                                 string
-	startLine, startCol, endLine, endCol int
-	numStmt                              int
-}
-
-// parseBlock parses a profile line of the form
-// "file.go:startLine.startCol,endLine.endCol numStmt count".
-func parseBlock(line string) (blockKey, int, error) {
-	var key blockKey
-
-	lastSpace := strings.LastIndex(line, " ")
-	if lastSpace < 0 {
-		return key, 0, fmt.Errorf("malformed profile line: %q", line)
-	}
-	head := line[:lastSpace]
-	var count int
-	if _, err := fmt.Sscanf(line[lastSpace+1:], "%d", &count); err != nil {
-		return key, 0, fmt.Errorf("invalid block count in line %q: %w", line, err)
-	}
-
-	secondSpace := strings.LastIndex(head, " ")
-	if secondSpace < 0 {
-		return key, 0, fmt.Errorf("malformed profile line: %q", line)
-	}
-	pos := head[:secondSpace]
-	if _, err := fmt.Sscanf(head[secondSpace+1:], "%d", &key.numStmt); err != nil {
-		return key, 0, fmt.Errorf("invalid statement count in line %q: %w", line, err)
-	}
-
-	// The file path itself may contain ':' (e.g. Windows drive letters),
-	// so split the position part at the last ':'.
-	colon := strings.LastIndex(pos, ":")
-	if colon < 0 {
-		return key, 0, fmt.Errorf("missing position range in line %q", line)
-	}
-	key.file = pos[:colon]
-	rng := pos[colon+1:]
-
-	var start, end string
-	if comma := strings.Index(rng, ","); comma >= 0 {
-		start, end = rng[:comma], rng[comma+1:]
-	} else {
-		start, end = rng, rng
-	}
-	if _, err := fmt.Sscanf(start, "%d.%d", &key.startLine, &key.startCol); err != nil {
-		return key, 0, fmt.Errorf("invalid start position in line %q: %w", line, err)
-	}
-	if _, err := fmt.Sscanf(end, "%d.%d", &key.endLine, &key.endCol); err != nil {
-		return key, 0, fmt.Errorf("invalid end position in line %q: %w", line, err)
-	}
-	return key, count, nil
-}
-
-// readProfile loads a mode:set coverage profile into the merged block map.
-func readProfile(path string, blocks map[blockKey]bool) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("failed to open profile %s: %w", path, err)
-	}
-	defer func() { _ = f.Close() }()
-
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-
-	if !scanner.Scan() {
-		return fmt.Errorf("profile %s is empty", path)
-	}
-	if mode := strings.TrimSpace(scanner.Text()); mode != "mode: set" {
-		return fmt.Errorf("profile %s has unsupported mode %q (only \"mode: set\" is supported)", path, mode)
-	}
-
-	lineNo := 1
-	for scanner.Scan() {
-		lineNo++
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		key, count, err := parseBlock(line)
-		if err != nil {
-			return fmt.Errorf("profile %s line %d: %w", path, lineNo, err)
-		}
-		if count > 0 {
-			blocks[key] = true
-		} else if _, seen := blocks[key]; !seen {
-			blocks[key] = false
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("failed to read profile %s: %w", path, err)
-	}
-	return nil
-}
 
 func main() {
 	output := flag.String("o", "", "output profile path (required)")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: go run scripts/merge_coverage.go -o <output> <input1> <input2> [inputN...]\n")
-		fmt.Fprintf(os.Stderr, "Merges mode:set coverage profiles into a single union profile.\n")
+		fmt.Fprintf(os.Stderr, "Merges coverage profiles (set/count/atomic) into a single profile.\n")
+		fmt.Fprintf(os.Stderr, "All inputs must share the same mode; the output preserves it.\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -134,54 +38,24 @@ func main() {
 		os.Exit(2)
 	}
 
-	blocks := make(map[blockKey]bool)
+	profiles := make([]*mergecoverage.Profile, 0, len(inputs))
 	for _, in := range inputs {
-		if err := readProfile(in, blocks); err != nil {
+		p, err := mergecoverage.ParseProfileFile(in)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
+		profiles = append(profiles, p)
 	}
 
-	keys := make([]blockKey, 0, len(blocks))
-	for k := range blocks {
-		keys = append(keys, k)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		a, b := keys[i], keys[j]
-		if a.file != b.file {
-			return a.file < b.file
-		}
-		if a.startLine != b.startLine {
-			return a.startLine < b.startLine
-		}
-		return a.startCol < b.startCol
-	})
-
-	out, err := os.Create(*output)
+	merged, err := mergecoverage.Merge(profiles)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to create output %s: %v\n", *output, err)
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	defer func() { _ = out.Close() }()
 
-	w := bufio.NewWriter(out)
-	if _, err := fmt.Fprintln(w, "mode: set"); err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to write output %s: %v\n", *output, err)
-		os.Exit(1)
-	}
-	for _, k := range keys {
-		count := 0
-		if blocks[k] {
-			count = 1
-		}
-		if _, err := fmt.Fprintf(w, "%s:%d.%d,%d.%d %d %d\n",
-			k.file, k.startLine, k.startCol, k.endLine, k.endCol, k.numStmt, count); err != nil {
-			fmt.Fprintf(os.Stderr, "error: failed to write output %s: %v\n", *output, err)
-			os.Exit(1)
-		}
-	}
-	if err := w.Flush(); err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to flush output %s: %v\n", *output, err)
+	if err := mergecoverage.WriteProfileFile(*output, merged); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
