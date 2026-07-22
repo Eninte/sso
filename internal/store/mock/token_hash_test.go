@@ -172,6 +172,9 @@ func TestRevokeToken_LegacyFallback(t *testing.T) {
 }
 
 // TestRevokeToken_Idempotent 验证 RevokeToken 幂等性（不覆盖原撤销时间）
+//
+// 阶段 D 修复后 RevokeToken 采用拷贝-替换：输入 token 指针不再被原地修改，
+// 测试需重新查询才能拿到最新状态。
 func TestRevokeToken_Idempotent(t *testing.T) {
 	m := New()
 	ctx := context.Background()
@@ -187,12 +190,17 @@ func TestRevokeToken_Idempotent(t *testing.T) {
 
 	// 第一次撤销
 	require.NoError(t, m.RevokeToken(ctx, "access-idempotent"))
-	firstRevoke := token.RevokedAt
+	// 拷贝-替换语义：输入 token 不再反映最新状态，需重新查询
+	got, err := m.GetTokenByAccessToken(ctx, "access-idempotent")
+	require.NoError(t, err)
+	firstRevoke := got.RevokedAt
 	require.NotNil(t, firstRevoke)
 
-	// 第二次撤销不应报错，且不应覆盖原撤销时间
+	// 第二次撤销不应报错，且不应覆盖原撤销时间（幂等性）
 	require.NoError(t, m.RevokeToken(ctx, "access-idempotent"))
-	assert.Equal(t, firstRevoke, token.RevokedAt, "二次撤销不应覆盖原撤销时间")
+	got2, err := m.GetTokenByAccessToken(ctx, "access-idempotent")
+	require.NoError(t, err)
+	assert.Equal(t, firstRevoke, got2.RevokedAt, "二次撤销不应覆盖原撤销时间")
 }
 
 // TestRotateRefreshToken_HashPriority 验证 RotateRefreshToken 优先 hash 匹配

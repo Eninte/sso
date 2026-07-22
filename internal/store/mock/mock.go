@@ -599,6 +599,11 @@ func (m *Store) GetTokenByAccessToken(ctx context.Context, accessToken string) (
 //   - 仅当 RevokeTokenErr 注入时返回注入错误
 //
 // 阶段 3.2：优先使用 hash 查询，回退到明文
+//
+// 阶段 D 修复（竞态）：采用拷贝-替换，不原地修改已存入 map 的对象。
+// mock 的 map 存的是共享指针，getter 释放 RLock 后调用方仍持有同一指针并读字段；
+// 若原地改 RevokedAt 会与该锁外读产生数据竞争（CI -race 会检出）。
+// 拷贝替换后旧指针成为不可变快照，与真实 DB 行更新语义一致。
 func (m *Store) RevokeToken(ctx context.Context, accessToken string) error {
 	if m.RevokeTokenErr != nil {
 		return m.RevokeTokenErr
@@ -609,13 +614,17 @@ func (m *Store) RevokeToken(ctx context.Context, accessToken string) error {
 
 	hash := hashTokenMock(accessToken)
 	// 优先 hash 匹配
-	for _, token := range m.tokens {
+	for key, token := range m.tokens {
 		if token.AccessTokenHash == hash && token.AccessTokenHash != "" {
-			// 仅在未撤销时设置撤销时间，避免覆盖首次撤销时间戳
-			if token.RevokedAt == nil {
-				now := time.Now()
-				token.RevokedAt = &now
+			// 已撤销则保持原撤销时间（幂等），不覆盖首次撤销时间戳
+			if token.RevokedAt != nil {
+				return nil
 			}
+			// 拷贝-替换：修改副本再写回 map，旧指针保持不可变
+			now := time.Now()
+			updated := *token
+			updated.RevokedAt = &now
+			m.tokens[key] = &updated
 			return nil
 		}
 	}
@@ -632,11 +641,16 @@ func (m *Store) RevokeToken(ctx context.Context, accessToken string) error {
 	}
 
 	now := time.Now()
-	token.RevokedAt = &now
+	updated := *token
+	updated.RevokedAt = &now
+	m.tokens[accessToken] = &updated
 	return nil
 }
 
 // RevokeAllUserTokens 撤销用户所有Token
+//
+// 阶段 D 修复（竞态）：与 RevokeToken 同样采用拷贝-替换，不原地修改已存入 map 的对象。
+// 详见 RevokeToken 注释。
 func (m *Store) RevokeAllUserTokens(ctx context.Context, userID string) error {
 	if m.RevokeAllUserTokensErr != nil {
 		return m.RevokeAllUserTokensErr
@@ -646,9 +660,12 @@ func (m *Store) RevokeAllUserTokens(ctx context.Context, userID string) error {
 	defer m.mu.Unlock()
 
 	now := time.Now()
-	for _, token := range m.tokens {
+	for key, token := range m.tokens {
 		if token.UserID == userID && token.RevokedAt == nil {
-			token.RevokedAt = &now
+			// 拷贝-替换：修改副本再写回 map，旧指针保持不可变
+			updated := *token
+			updated.RevokedAt = &now
+			m.tokens[key] = &updated
 		}
 	}
 	return nil
