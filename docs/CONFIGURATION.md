@@ -67,6 +67,8 @@ KEY_ROTATION_ENABLED=false  # 是否启用密钥轮换
 KEY_ROTATION_INTERVAL=2160h # 密钥轮换周期
 KEY_TRANSITION_PERIOD=24h   # 密钥过渡期时长
 JWT_TRANSITION_PUBKEY_PATHS=  # 密钥轮换期间的旧公钥路径（逗号分隔）
+JWT_KEY_ENCRYPTION_KEY=     # DB 中私钥的 AES-256-GCM 信封加密密钥（64 位 hex）
+                            # 启用密钥轮换时生产环境必填：openssl rand -hex 32
 ```
 
 ### 5. 安全配置
@@ -77,6 +79,9 @@ RATE_LIMIT_WINDOW=1m        # 限流时间窗口
 MAX_LOGIN_ATTEMPTS=5        # 最大登录失败次数
 LOCKOUT_DURATION=30m        # 账户锁定时长
 MFA_RECOVERY_HMAC_KEY=     # MFA恢复码HMAC密钥（生产必须设置强密钥）
+MFA_CHALLENGE_TTL=5m       # MFA 登录挑战有效期
+SOCIAL_STATE_COOKIE_BINDING=true  # 社交登录 state 绑定发起方会话（login CSRF 防护）
+                            # 纯 API 客户端可设 false（生产关闭会告警）
 TRUSTED_PROXIES=            # 受信代理IP（CIDR，逗号分隔，留空则不信任 X-Real-IP 头）
 ```
 
@@ -126,6 +131,9 @@ E2E_ADMIN_PASSWORD=Admin1234!        # 测试管理员密码
 ```bash
 LAN_DEPLOYMENT=false        # LAN部署模式：放宽生产环境部分校验（DB_SSL_MODE、CORS、JWT_ISSUER 等）
                             # 仅用于内网部署场景，正式生产环境不要启用
+INIT_ENABLED=true           # 初始化面板（/init），初始化完成后建议设为 false 永久关闭
+INIT_LISTEN=                # 初始化面板独立监听地址（默认 127.0.0.1:9091，强制 loopback，
+                            # 拒绝绑定非回环地址；格式 host:port 或 port）
 SHUTDOWN_TIMEOUT=30s        # 优雅关闭超时时间
 ENV_FILE_PATH=              # 自定义 .env 文件路径（默认当前目录或 /app/.env）
 SKIP_ENV_FILE=              # 非空时跳过加载 .env 文件
@@ -171,8 +179,8 @@ vim .env.test
 # 运行测试
 make test
 
-# 或指定配置文件运行
-go run ./cmd/server -env .env.test
+# 或指定配置文件运行（通过 ENV_FILE_PATH 环境变量，服务不支持 -env 命令行参数）
+ENV_FILE_PATH=.env.test go run ./cmd/server
 ```
 
 ### 3. 生产环境
@@ -192,8 +200,8 @@ cp .env.example .env.production
 # 生成生产环境JWT密钥
 make generate-keys
 
-# 启动服务
-go run ./cmd/server -env .env.production
+# 启动服务（通过 ENV_FILE_PATH 环境变量指定配置文件）
+ENV_FILE_PATH=.env.production go run ./cmd/server
 ```
 
 ## 安全注意事项
@@ -265,17 +273,18 @@ make generate-keys
 
 ## 配置验证
 
-运行配置验证脚本：
 ```bash
-# 验证测试环境配置
-./scripts/test-env-check.sh
-
-# 验证生产环境配置
-./scripts/prod-env-check.sh  # 待实现
+# 生产环境配置检查（校验 MFA密钥 / BCRYPT_COST / DB_SSL_MODE / CORS 等必检项）
+./scripts/check_production_env.sh
 ```
+
+> 服务启动时也会自动执行配置校验：`SERVER_ENV=production` 下
+> `DB_SSL_MODE`、`BCRYPT_COST`、`CORS_ALLOWED_ORIGINS`、`JWT_ISSUER`、
+> `SMTP_HOST`、`MFA_RECOVERY_HMAC_KEY` 不满足要求会拒绝启动
+> （`LAN_DEPLOYMENT=true` 可放宽部分校验）。
 
 ## 参考文档
 
 - [AGENTS.md](../AGENTS.md) - AI代理协作指南
-- [TESTING.md](../TESTING.md) - 测试指南
+- [TESTING.md](./TESTING.md) - 测试指南
 - [DEPLOYMENT.md](./DEPLOYMENT.md) - 部署指南

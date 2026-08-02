@@ -4,11 +4,10 @@
 
 ## ⚠️ 测试前必读
 
-**在运行任何测试之前，请先运行环境检查：**
+**在运行任何测试之前，请先完成环境检查：**
 
-```bash
-bash scripts/test-env-check.sh
-```
+> 仓库未提供一键环境检查脚本，请按下方清单逐项确认；
+> 生产环境配置校验可使用 `scripts/check_production_env.sh`。
 
 详细的环境要求和配置请参考：[TEST_ENVIRONMENT_CHECKLIST.md](./TEST_ENVIRONMENT_CHECKLIST.md)
 

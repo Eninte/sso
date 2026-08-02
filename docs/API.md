@@ -237,6 +237,19 @@ Content-Type: application/json
 }
 ```
 
+**MFA 两阶段登录**：若用户已启用 MFA，第一阶段不返回 Token，而是返回挑战信息：
+
+```json
+{
+  "mfa_required": true,
+  "mfa_challenge": "一次性高熵随机令牌",
+  "mfa_methods": ["totp", "recovery_code"],
+  "expires_in": 300
+}
+```
+
+客户端需携带 `mfa_challenge` 调用 [登录MFA验证](#登录mfa验证) 完成第二阶段。
+
 **错误响应**:
 
 | 状态码 | 说明 |
@@ -244,6 +257,53 @@ Content-Type: application/json
 | 400 | 请求格式错误 |
 | 401 | 邮箱或密码错误 |
 | 403 | 账户已锁定或已禁用 |
+| 500 | 服务器内部错误 |
+
+---
+
+### 登录MFA验证
+
+MFA 两阶段登录的第二阶段：提交挑战令牌与验证码换取 Token。无需认证（敏感限流）。
+
+```
+POST /api/v1/login/mfa/verify
+Content-Type: application/json
+```
+
+**请求参数**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| mfa_challenge | string | 是 | 第一阶段返回的一次性挑战令牌（默认 5 分钟内有效） |
+| method | string | 是 | 验证方法：`totp` 或 `recovery_code` |
+| code | string | 是 | TOTP 6 位数字或恢复码 |
+
+**请求示例**:
+```json
+{
+  "mfa_challenge": "一次性高熵随机令牌",
+  "method": "totp",
+  "code": "123456"
+}
+```
+
+**成功响应** `200 OK`（与登录成功响应一致）:
+```json
+{
+  "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refresh_token": "dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4...",
+  "token_type": "Bearer",
+  "expires_in": 900,
+  "scopes": ["openid", "profile", "email"]
+}
+```
+
+**错误响应**:
+
+| 状态码 | 说明 |
+|--------|------|
+| 400 | 缺少 mfa_challenge / code，或 method 无效 |
+| 401 | 验证码错误或挑战已过期/失效（连续失败 5 次后挑战作废，需重新登录） |
 | 500 | 服务器内部错误 |
 
 ---
@@ -669,6 +729,76 @@ Authorization: Bearer <access_token>
 
 ---
 
+### 生成恢复码
+
+为当前用户生成一批 MFA 恢复码（HMAC-SHA256 哈希存储，仅本次响应可见明文）。需要认证。
+
+```
+POST /api/v1/mfa/recovery-codes/generate
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**请求参数**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| count | int | 否 | 生成数量（默认 8，最大 20） |
+
+**成功响应** `200 OK`:
+```json
+{
+  "data": {
+    "codes": ["xxxx-xxxx-xxxx", "yyyy-yyyy-yyyy"]
+  }
+}
+```
+
+### 验证恢复码
+
+验证一个恢复码（验证成功后该恢复码立即失效）。需要认证。
+
+```
+POST /api/v1/mfa/recovery-codes/verify
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**请求参数**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| code | string | 是 | 恢复码 |
+
+**成功响应** `200 OK`:
+```json
+{
+  "data": {
+    "valid": true
+  }
+}
+```
+
+### 恢复码状态
+
+查询当前用户剩余的恢复码数量。需要认证。
+
+```
+GET /api/v1/mfa/recovery-codes/status
+Authorization: Bearer <access_token>
+```
+
+**成功响应** `200 OK`:
+```json
+{
+  "data": {
+    "remaining": 6
+  }
+}
+```
+
+---
+
 ## OAuth端点
 
 ### 授权端点
@@ -721,18 +851,56 @@ Content-Type: application/json
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| client_id | string | 是 | 客户端ID |
-| redirect_uri | string | 是 | 回调地址 |
-| scope | string | 否 | 权限范围（空格分隔） |
-| state | string | 是 | 状态参数 |
-| code_challenge | string | 否 | PKCE挑战 |
-| code_challenge_method | string | 否 | PKCE方法 |
+| consent_token | string | 是 | 授权端点（GET /api/v1/authorize）下发的同意令牌 |
+| state | string | 是 | 状态参数（至少 16 字符，须与 consent_token 内 state 一致） |
+
+**请求示例**:
+```json
+{
+  "consent_token": "eyJhbGciOi...",
+  "state": "random_state_string"
+}
+```
 
 **成功响应** `200 OK`:
 ```json
 {
   "code": "authorization_code",
-  "state": "xyz"
+  "state": "random_state_string"
+}
+```
+
+**错误响应**:
+
+| 状态码 | 说明 |
+|--------|------|
+| 400 | consent_token 缺失或 state 无效 |
+| 401 | 未认证 |
+| 500 | 服务器内部错误 |
+
+### 拒绝授权
+
+用户在同意页面拒绝授权请求。需要认证。
+
+```
+POST /api/v1/authorize/deny
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**请求参数**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| consent_token | string | 是 | 授权端点下发的同意令牌 |
+| state | string | 是 | 状态参数 |
+
+**响应** `403 Forbidden`（前端应据此向客户端应用回传 `?error=access_denied&state=xxx`）:
+```json
+{
+  "error": "access_denied",
+  "error_description": "用户拒绝授权",
+  "state": "random_state_string"
 }
 ```
 

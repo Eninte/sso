@@ -209,7 +209,7 @@ sso/
 ├── test/                       # E2E测试
 │   └── e2e/                    # 端到端测试（//go:build e2e）
 │
-├── migrations/                 # 数据库迁移（001-015，3位序号命名）
+├── migrations/                 # 数据库迁移（001-020，3位序号命名）
 │
 ├── docker/                     # Docker配置
 │   ├── Dockerfile

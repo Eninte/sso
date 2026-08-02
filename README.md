@@ -341,7 +341,7 @@ sso/
 │   ├── store/                   # 数据存储层（Postgres 实现 + Mock）
 │   ├── util/                    # 工具模块（auditutil/handlerutil/serviceutil/retryutil/testutil/safego）
 │   └── validator/               # 输入验证
-├── migrations/                  # 数据库迁移脚本（001-015）
+├── migrations/                  # 数据库迁移脚本（001-020）
 ├── scripts/                     # 工具脚本
 ├── docker/                      # Docker配置
 ├── sdks/                        # 多语言 SDK（Go/JS/Kotlin/Python/Rust/Swift）

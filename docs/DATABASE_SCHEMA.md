@@ -298,15 +298,16 @@ users (1) ────< (N) tokens (N) >──── (1) oauth_clients
 
 ```bash
 make migrate-up         # 执行所有待执行的迁移
-make migrate-down       # 回滚最后一次迁移
+# ⚠️ migrate-down 会回滚【全部】迁移并清空业务数据，仅限开发/测试环境使用；
+# 生产回滚请使用 migrate goto <版本号> 回退到指定版本
 make migrate-create NAME=xxx  # 创建新的迁移文件
 ```
 
 ### 迁移文件命名
 
 ```
-<timestamp>_<name>.up.sql
-<timestamp>_<name>.down.sql
+<3位序号>_<name>.up.sql    # 例如 001_init.up.sql
+<3位序号>_<name>.down.sql
 ```
 
 迁移按时间戳顺序执行，确保可重复和可回滚。
