@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+### Documentation
+
+- **部署文档与代码实现对齐**（commit `176a510`）：
+  - `PRODUCTION_DEPLOYMENT_CHECKLIST.md` 整体重写（v1.1）——环境变量名更正为代码实际读取的 `LOCKOUT_DURATION` / `JWT_ACCESS_TOKEN_TTL` / `JWT_REFRESH_TOKEN_TTL`，端口统一为 9090，API 路径更正为 `/api/v1/register` 等真实路由，移除不存在的脚本与文档引用，回滚方案由 `make migrate-down`（回滚全部迁移）改为 `migrate goto <版本号>`
+  - `DEPLOYMENT.md`——删除与 `docker/docker-compose.yml` 脱节的配置副本；K8s 示例补齐生产校验必需环境变量（`MFA_RECOVERY_HMAC_KEY` / `CORS_ALLOWED_ORIGINS` / `JWT_ISSUER` 等），Redis 由 `emptyDir` 改为 PVC；裸机部署补充迁移工具复制步骤；移除废弃的 `X-XSS-Protection` 头
+  - `TRUENAS.md`——密钥挂载点与 `docker-compose.truenas.yml` 对齐（`/keys`）；迁移命令改用 `PGPASSWORD` 传密；方式二模板补充 `LAN_DEPLOYMENT=true`
+- **配置/API/迁移文档漂移修正**（commit `98532e1`）：
+  - `CONFIGURATION.md`——`-env` 启动参数改为 `ENV_FILE_PATH` 环境变量；替换不存在的环境检查脚本引用；补充 `JWT_KEY_ENCRYPTION_KEY`、`MFA_CHALLENGE_TTL`、`SOCIAL_STATE_COOKIE_BINDING`、`INIT_ENABLED`、`INIT_LISTEN` 配置项文档
+  - `API.md`——批准授权端点参数更正为 `consent_token` + `state`（与处理器一致）；补全 `login/mfa/verify`、`authorize/deny`、`mfa/recovery-codes/*` 五个未文档化端点
+  - `ARCHITECTURE.md` / `README.md`——迁移版本号 001-015 更新为 001-020
+  - `DATABASE_SCHEMA.md`——更正 `migrate-down` 为回滚全部迁移的危险提示，迁移命名说明改为 3 位序号
+  - `TESTING.md`——移除不存在的 `test-env-check.sh` 引用
+
 ## [1.1.0] - 2026-07-21
 
 ### Added
