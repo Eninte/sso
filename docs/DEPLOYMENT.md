@@ -130,14 +130,17 @@ docker-compose -f docker/docker-compose.yml up -d
 
 5. **运行数据库迁移**
 
+> 容器 entrypoint 默认已自动执行迁移（`AUTO_MIGRATE=true`），正常启动后此步骤可跳过。
+> 仅在设置了 `AUTO_MIGRATE=false` 或需要手动控制迁移时机时执行以下命令：
+
 ```bash
 # 使用环境变量 DATABASE_URL
 export DATABASE_URL='postgres://sso:your_strong_password_here@postgres:5432/sso?sslmode=require'
-docker-compose -f docker/docker-compose.yml exec sso \
+docker compose -f docker/docker-compose.yml exec sso \
   migrate -path /app/migrations -database "$DATABASE_URL" up
 ```
 
-或使用 Makefile（需要在宿主机安装 migrate 工具）：
+或使用 Makefile（需要在宿主机安装 migrate 工具，且数据库端口映射到宿主机）：
 ```bash
 export DATABASE_URL='postgres://sso:your_strong_password_here@localhost:5432/sso?sslmode=require'
 make migrate-up
@@ -151,123 +154,17 @@ curl http://localhost:9090/health
 
 ### Docker Compose配置说明
 
-完整配置请参考 `docker/docker-compose.yml`，以下是关键配置说明：
+完整且唯一权威的配置请直接参考仓库中的 `docker/docker-compose.yml`（本文不复制全文，避免与源文件脱节）。需要注意的关键点：
 
-```yaml
-# docker/docker-compose.yml
+- **端口仅绑定回环地址**：`127.0.0.1:9090/5432/6379`，外部访问必须经反向代理
+- **强制密码**：`DB_PASSWORD` 与 `REDIS_PASSWORD` 必须作为环境变量提供，未设置时 compose 直接报错，不会以空密码启动
+- **`DB_SSL_MODE=prefer`**：容器间内网通信默认 prefer；生产环境请在 `.env` 中改为 `require`
+- **最小权限运行**：SSO 容器启用 `read_only`、`cap_drop: ALL`、`no-new-privileges`，并限制内存/CPU 与日志大小
+- **自动迁移**：容器 entrypoint 默认自动执行数据库迁移（`AUTO_MIGRATE=true`），密码仅通过 `PGPASSWORD` 注入 migrate 子进程，不出现在命令行或容器环境中
+- Redis 密码通过 `$$REDIS_PASSWORD` 在容器内运行时展开，不明文固化在容器配置中
 
-version: '3.8'
-
-services:
-  sso:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-    ports:
-      - "9090:9090"
-    environment:
-      # 服务器配置
-      - SERVER_HOST=0.0.0.0
-      - SERVER_PORT=9090
-      - SERVER_ENV=production
-      # 数据库配置
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_NAME=sso
-      - DB_USER=sso
-      # ⚠️ 必须设置 DB_PASSWORD 环境变量（未设置时 compose 直接报错）
-      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD is required}
-      - DB_SSL_MODE=require
-      # Redis配置
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      # ⚠️ 必须设置 REDIS_PASSWORD 环境变量（未设置时 compose 直接报错）
-      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
-      # JWT配置
-      - JWT_PRIVATE_KEY_PATH=/app/keys/private.pem
-      - JWT_PUBLIC_KEY_PATH=/app/keys/public.pem
-      - JWT_ACCESS_TOKEN_TTL=15m
-      - JWT_REFRESH_TOKEN_TTL=168h
-      - JWT_ISSUER=sso
-      # 安全配置
-      - BCRYPT_COST=12
-      - RATE_LIMIT_REQUESTS=100
-      - RATE_LIMIT_WINDOW=1m
-      - MAX_LOGIN_ATTEMPTS=5
-      - LOCKOUT_DURATION=30m
-    volumes:
-      # 挂载密钥文件 (生产环境应使用Secrets)
-      - ../keys:/app/keys:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-    networks:
-      - sso-network
-
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_DB: sso
-      POSTGRES_USER: sso
-      # ⚠️ 必须设置 DB_PASSWORD 环境变量（未设置时 compose 直接报错）
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sso -d sso"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    networks:
-      - sso-network
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    environment:
-      # ⚠️ 必须设置 REDIS_PASSWORD 环境变量（未设置时 compose 直接报错）
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
-    # $$ 转义：Compose 不插值，容器内运行时从环境变量展开，
-    # 明文密码不会固化在容器配置的 Cmd 字段中（docker inspect 不可见）
-    command:
-      - sh
-      - -c
-      - exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - sso-network
-
-volumes:
-  postgres_data:
-    driver: local
-  redis_data:
-    driver: local
-
-networks:
-  sso-network:
-    driver: bridge
-```
+生产部署时请在 `.env` 中覆盖 compose 里的开发默认值（`SERVER_ENV=production`、`DB_SSL_MODE=require`、`JWT_ISSUER`、
+`MFA_RECOVERY_HMAC_KEY`、`CORS_ALLOWED_ORIGINS`、`SMTP_*`、`METRICS_*` 等，见上文快速部署一节）。
 
 ---
 
@@ -290,10 +187,12 @@ kubectl create namespace sso
 2. **创建Secret**
 
 ```bash
-# 数据库密码
+# 数据库 / Redis 密码与 MFA HMAC 密钥（一个 Secret 集中管理）
 kubectl create secret generic sso-db-secret \
   --namespace sso \
-  --from-literal=password=your_strong_password
+  --from-literal=password=your_strong_password \
+  --from-literal=redis-password=your_redis_password \
+  --from-literal=mfa-hmac-key=$(openssl rand -hex 32)
 
 # JWT密钥
 kubectl create secret generic sso-jwt-secret \
@@ -384,14 +283,25 @@ spec:
       containers:
       - name: redis
         image: redis:7-alpine
+        # 密码经环境变量传入，与 Docker Compose 部署保持一致的安全基线
+        args: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$REDIS_PASSWORD\""]
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: sso-db-secret
+              key: redis-password
         ports:
         - containerPort: 6379
         volumeMounts:
         - name: redis-data
           mountPath: /data
       volumes:
+      # 持久化存储（emptyDir 会在 Pod 重建时丢失全部缓存数据，禁止使用）
+      # 需另行创建 redis-data PVC，或改用 StatefulSet + volumeClaimTemplates
       - name: redis-data
-        emptyDir: {}
+        persistentVolumeClaim:
+          claimName: redis-data
 ---
 apiVersion: v1
 kind: Service
@@ -439,8 +349,27 @@ spec:
             secretKeyRef:
               name: sso-db-secret
               key: password
+        # 生产环境配置校验要求以下项，缺失时服务拒绝启动
+        - name: DB_SSL_MODE
+          value: require
+        - name: JWT_ISSUER
+          value: sso.yourdomain.com  # 不能使用默认值 sso
+        - name: CORS_ALLOWED_ORIGINS
+          value: https://yourdomain.com  # 不能为 * 或 localhost
+        - name: MFA_RECOVERY_HMAC_KEY  # >= 32 字节强随机密钥
+          valueFrom:
+            secretKeyRef:
+              name: sso-db-secret
+              key: mfa-hmac-key
+        - name: SMTP_HOST  # 不能为 localhost
+          value: smtp.example.com
         - name: REDIS_HOST
           value: redis
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: sso-db-secret
+              key: redis-password
         - name: JWT_PRIVATE_KEY_PATH
           value: /app/keys/private.pem
         - name: JWT_PUBLIC_KEY_PATH
@@ -514,6 +443,10 @@ spec:
 
 6. **应用配置**
 
+> 仓库中不包含 `k8s/` 目录，请先将上述 YAML 示例分别保存为
+> `k8s/postgres.yaml`、`k8s/redis.yaml`、`k8s/sso.yaml`，并为 Redis 创建
+> `redis-data` PVC 后再执行：
+
 ```bash
 kubectl apply -f k8s/postgres.yaml
 kubectl apply -f k8s/redis.yaml
@@ -583,6 +516,9 @@ sudo chown -R sso:sso /opt/sso
 sudo cp ./bin/sso /opt/sso/
 sudo cp keys/*.pem /opt/sso/keys/
 sudo cp .env /opt/sso/
+# 数据库迁移所需的工具与脚本（步骤8会用到）
+sudo cp -r migrations /opt/sso/
+sudo cp "$(command -v migrate)" /opt/sso/migrate 2>/dev/null || true
 sudo chmod 600 /opt/sso/keys/private.pem
 ```
 
@@ -627,6 +563,8 @@ sudo systemctl status sso
 
 ```bash
 cd /opt/sso
+# 若步骤5未能复制 migrate（宿主机未安装），请先安装 golang-migrate
+sudo chmod +x /opt/sso/migrate 2>/dev/null || true
 export DATABASE_URL='postgres://sso:your_password@localhost:5432/sso?sslmode=require'
 ./migrate -path ./migrations -database "$DATABASE_URL" up
 ```
@@ -663,7 +601,6 @@ server {
     # 安全头
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
     # 请求大小限制
@@ -709,7 +646,6 @@ sso.yourdomain.com {
     header {
         X-Frame-Options "SAMEORIGIN"
         X-Content-Type-Options "nosniff"
-        X-XSS-Protection "1; mode=block"
         Strict-Transport-Security "max-age=31536000; includeSubDomains"
     }
 
@@ -765,12 +701,16 @@ pg_dump -U sso -h localhost sso > backup_$(date +%Y%m%d_%H%M%S).sql
 # 压缩备份
 pg_dump -U sso -h localhost sso | gzip > backup_$(date +%Y%m%d_%H%M%S).sql.gz
 
-# 自动备份脚本
+# 自动备份脚本（写入 cron 所引用的路径 /opt/sso/scripts/backup.sh）
+sudo mkdir -p /opt/sso/scripts
+sudo tee /opt/sso/scripts/backup.sh > /dev/null << 'EOF'
 #!/bin/bash
 BACKUP_DIR="/backup/sso"
 mkdir -p $BACKUP_DIR
 pg_dump -U sso -h localhost sso | gzip > $BACKUP_DIR/sso_$(date +%Y%m%d_%H%M%S).sql.gz
 find $BACKUP_DIR -name "*.sql.gz" -mtime +30 -delete
+EOF
+sudo chmod +x /opt/sso/scripts/backup.sh
 ```
 
 ### 数据库恢复
@@ -800,7 +740,7 @@ gunzip -c backup.sql.gz | psql -U sso -h localhost sso
 
 ```bash
 # 查看日志
-docker-compose logs sso
+docker compose -f docker/docker-compose.yml logs sso
 journalctl -u sso -f
 
 # 检查配置

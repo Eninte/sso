@@ -123,7 +123,8 @@ services:
     env_file:
       - .env
     volumes:
-      - /mnt/pool/sso/keys:/app/keys:ro
+      # 注意：与 docker/docker-compose.truenas.yml 保持一致，密钥挂载到 /keys
+      - /mnt/pool/sso/keys:/keys:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
       interval: 30s
@@ -154,10 +155,15 @@ docker compose up -d
 go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 ```
 
-在本地运行迁移（需将项目 `migrations` 目录放在当前目录下）：
+> **提示**：SSO 容器 entrypoint 默认自动执行迁移（`AUTO_MIGRATE=true`），
+> 容器正常启动后通常无需手动执行本步骤。以下仅在关闭自动迁移或需要手动控制时使用。
+>
+> 密码不要写进 DSN（会暴露在命令行 / 进程列表中），改用 `PGPASSWORD` 传递；
+> 跨网络时把 `sslmode` 改为 `require`：
 
 ```bash
-migrate -path ./migrations -database "postgres://sso:YourPassword@postgres-host:5432/sso?sslmode=disable" up
+PGPASSWORD='YourPassword' migrate -path ./migrations \
+  -database "postgres://sso@postgres-host:5432/sso?sslmode=require" up
 ```
 
 ### 步骤7：验证部署
@@ -190,8 +196,6 @@ docker compose up -d
 ## 方式二：Custom App部署（直接构建）
 
 > 注意：此方式需要在TrueNAS上直接构建Docker镜像，适用于没有Docker Hub账号或内网部署场景。
-
-### 前置要求
 
 ### 步骤1：准备数据集
 
@@ -244,6 +248,9 @@ cat > /mnt/pool/sso/config/.env << 'EOF'
 SERVER_HOST=0.0.0.0
 SERVER_PORT=9090
 SERVER_ENV=production
+# 内网部署：DB_SSL_MODE=disable 需要 LAN_DEPLOYMENT=true 放宽生产校验，
+# 否则服务会拒绝启动（与 docker/.env.truenas.example 保持一致）
+LAN_DEPLOYMENT=true
 
 # 数据库配置（指向已部署的 PostgreSQL）
 DB_HOST=your-postgres-host  # 修改为您的 PostgreSQL 主机地址
@@ -251,7 +258,7 @@ DB_PORT=5432
 DB_NAME=sso
 DB_USER=sso
 DB_PASSWORD=YourStrongPassword123!
-DB_SSL_MODE=disable  # 内网可使用 disable，生产环境建议 require
+DB_SSL_MODE=disable  # 内网可 disable（需 LAN_DEPLOYMENT=true），跨网络必须 require
 
 # 数据库连接池配置
 DB_MAX_OPEN_CONNS=100
@@ -270,9 +277,9 @@ REDIS_CONN_TIMEOUT=5s
 REDIS_POOL_SIZE=10
 REDIS_MIN_IDLE_CONNS=5
 
-# JWT配置
-JWT_PRIVATE_KEY_PATH=/app/keys/private.pem
-JWT_PUBLIC_KEY_PATH=/app/keys/public.pem
+# JWT配置（与 docker-compose.truenas.yml 的挂载点 /keys 对应）
+JWT_PRIVATE_KEY_PATH=/keys/private.pem
+JWT_PUBLIC_KEY_PATH=/keys/public.pem
 JWT_ACCESS_TOKEN_TTL=15m
 JWT_REFRESH_TOKEN_TTL=168h
 JWT_ISSUER=sso
@@ -299,7 +306,7 @@ SMTP_USER=your_smtp_username
 SMTP_PASSWORD=your_smtp_password
 SMTP_FROM=noreply@yourdomain.com
 
-# CORS配置（根据您的域名修改）
+# CORS配置（根据您的域名修改；正式对外提供服务时请移除 localhost 条目）
 CORS_ALLOWED_ORIGINS=http://localhost:3000,https://yourdomain.com
 
 # Metrics配置 (Prometheus指标端点认证)
@@ -328,7 +335,8 @@ services:
     env_file:
       - /mnt/pool/sso/config/.env
     volumes:
-      - /mnt/pool/sso/keys:/app/keys:ro
+      # 注意：与 docker/docker-compose.truenas.yml 保持一致，密钥挂载到 /keys
+      - /mnt/pool/sso/keys:/keys:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
       interval: 30s
@@ -411,7 +419,9 @@ docker compose logs -f
 ```bash
 # 在本地运行迁移（需要安装 migrate 工具）
 # go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
-migrate -path ./migrations -database "postgres://sso:YourStrongPassword123!@your-postgres-host:5432/sso?sslmode=disable" up
+# 密码通过 PGPASSWORD 传递，不写入 DSN；跨网络时将 sslmode 改为 require
+PGPASSWORD='YourStrongPassword123!' migrate -path ./migrations \
+  -database "postgres://sso@your-postgres-host:5432/sso?sslmode=require" up
 ```
 
 ### 步骤8：验证部署
@@ -426,7 +436,7 @@ curl http://localhost:9090/health
 
 ---
 
-## 方式二：分别部署各个服务（可选）
+## 方式三：分别部署各个服务（可选）
 
 > **注意**：您的 TrueNAS 25.04 已经部署了 PostgreSQL 和 Redis，可以跳过此部分。
 > 此部分仅作为参考，如果需要重新部署或在其他环境部署时使用。
@@ -674,7 +684,8 @@ services:
     volumes:
       - /mnt/pool/sso/grafana:/var/lib/grafana
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      # ⚠️ 请勿使用 admin 等弱密码，部署前替换为强密码
+      - GF_SECURITY_ADMIN_PASSWORD=change_me_strong_password
     networks:
       - sso-network
 ```
@@ -767,8 +778,9 @@ rm -rf /mnt/pool/sso/config/*
 # 重新启动
 docker compose up -d
 
-# 重新运行迁移
-migrate -path ./migrations -database "postgres://sso:YourStrongPassword123!@your-postgres-host:5432/sso?sslmode=disable" up
+# 重新运行迁移（密码经 PGPASSWORD 传递）
+PGPASSWORD='YourStrongPassword123!' migrate -path ./migrations \
+  -database "postgres://sso@your-postgres-host:5432/sso?sslmode=require" up
 ```
 
 ---
@@ -819,8 +831,9 @@ docker compose -f /mnt/pool/sso/docker-compose.yml restart
 docker compose -f /mnt/pool/sso/docker-compose.yml pull
 docker compose -f /mnt/pool/sso/docker-compose.yml up -d
 
-# 运行数据库迁移（需要本地安装 migrate 工具）
-migrate -path ./migrations -database "postgres://sso:PASSWORD@your-postgres-host:5432/sso?sslmode=disable" up
+# 运行数据库迁移（需要本地安装 migrate 工具，密码经 PGPASSWORD 传递）
+PGPASSWORD='PASSWORD' migrate -path ./migrations \
+  -database "postgres://sso@your-postgres-host:5432/sso?sslmode=require" up
 
 # 备份数据库（替换 your-postgres-container 为您的 PostgreSQL 容器名称）
 docker exec your-postgres-container pg_dump -U sso sso | gzip > backup.sql.gz

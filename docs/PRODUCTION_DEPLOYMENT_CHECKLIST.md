@@ -1,8 +1,11 @@
 # 生产环境部署检查清单
 
-**版本**: 1.0  
-**更新日期**: 2026-05-26  
+**版本**: 1.1
+**更新日期**: 2026-08-02
 **适用版本**: v1.x（包含所有安全修复）
+
+> 本文档中的环境变量名、端口与 API 路径均已与 `internal/config/config.go` 和 `internal/app/router.go` 核对。
+> 服务默认端口为 **9090**（`SERVER_PORT`）。
 
 ## 📋 部署前检查
 
@@ -11,11 +14,12 @@
 #### 必须配置项 ✅
 
 - [ ] `SERVER_ENV=production` - 生产环境标识
-- [ ] `MFA_RECOVERY_HMAC_KEY` - MFA恢复码HMAC密钥（32字节）
+- [ ] `MFA_RECOVERY_HMAC_KEY` - MFA恢复码HMAC密钥（>= 32 字节，`LAN_DEPLOYMENT=true` 除外，未设置时生产环境拒绝启动）
 - [ ] `BCRYPT_COST>=12` - 密码哈希成本（推荐14）
-- [ ] `DB_SSL_MODE=require` - 数据库SSL连接
-- [ ] `CORS_ALLOWED_ORIGINS` - CORS允许的域名（不能使用*）
-- [ ] `SMTP_HOST` - 生产SMTP服务器
+- [ ] `DB_SSL_MODE=require` - 数据库SSL连接（`LAN_DEPLOYMENT=true` 除外）
+- [ ] `CORS_ALLOWED_ORIGINS` - CORS允许的域名（不能使用 `*`，不能包含 `localhost`，不能为默认值）
+- [ ] `JWT_ISSUER` - JWT签发者标识（不能使用默认值 `sso`）
+- [ ] `SMTP_HOST` - 生产SMTP服务器（不能为 `localhost`）
 - [ ] `SMTP_PASSWORD` - 生产SMTP密码/授权码
 - [ ] `JWT_PRIVATE_KEY_PATH` - JWT私钥路径
 - [ ] `JWT_PUBLIC_KEY_PATH` - JWT公钥路径
@@ -23,21 +27,25 @@
 #### 推荐配置项 ⚠️
 
 - [ ] `RATE_LIMIT_REQUESTS=100` - 限流请求数（默认100/分钟）
-- [ ] `RATE_LIMIT_WINDOW=60s` - 限流时间窗口
+- [ ] `RATE_LIMIT_WINDOW=1m` - 限流时间窗口
 - [ ] `MAX_LOGIN_ATTEMPTS=5` - 最大登录尝试次数
-- [ ] `ACCOUNT_LOCKOUT_DURATION=30m` - 账户锁定时长
-- [ ] `ACCESS_TOKEN_TTL=15m` - Access Token有效期
-- [ ] `REFRESH_TOKEN_TTL=168h` - Refresh Token有效期（7天）
+- [ ] `LOCKOUT_DURATION=30m` - 账户锁定时长
+- [ ] `JWT_ACCESS_TOKEN_TTL=15m` - Access Token有效期
+- [ ] `JWT_REFRESH_TOKEN_TTL=168h` - Refresh Token有效期（7天）
 - [ ] `REDIS_ENABLE=true` - 启用Redis缓存
 - [ ] `REDIS_HOST` - Redis主机地址
 - [ ] `REDIS_PORT=6379` - Redis端口
 - [ ] `REDIS_PASSWORD` - Redis密码
+- [ ] `METRICS_USERNAME` / `METRICS_PASSWORD` - Metrics端点Basic Auth凭据
+
+> 密钥轮换（`KEY_ROTATION_ENABLED=true`）启用时，生产环境还必须设置
+> `JWT_KEY_ENCRYPTION_KEY`（64 位 hex，`openssl rand -hex 32` 生成）。
 
 ### 2. 数据库检查
 
 - [ ] 数据库已备份
 - [ ] 数据库迁移已在测试环境验证
-- [ ] 数据库连接池配置合理（推荐: max_connections=25）
+- [ ] 数据库连接池配置合理（应用侧 `DB_MAX_OPEN_CONNS`，参考值 25-100；PostgreSQL 服务端 `max_connections` 必须大于应用连接池上限 × 实例数）
 - [ ] 数据库SSL证书已配置
 - [ ] 数据库用户权限最小化
 
@@ -73,28 +81,27 @@
 pg_dump -U sso -d sso > backup_$(date +%Y%m%d_%H%M%S).sql
 
 # 2. 执行迁移
+export DATABASE_URL='postgres://sso:YOUR_PASSWORD@DB_HOST:5432/sso?sslmode=require'
 make migrate-up
 
-# 3. 验证迁移
+# 3. 验证迁移版本（以 migrations/ 目录中最大序号为准）
 psql -U sso -d sso -c "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1;"
-
-# 预期输出: 012
 ```
+
+> Docker 部署时容器 entrypoint 默认自动执行迁移（`AUTO_MIGRATE=true`），
+> 通常无需手动执行本步骤；如需关闭自动迁移，设置 `AUTO_MIGRATE=false`。
 
 ### 步骤2: 配置验证
 
 ```bash
-# 1. 检查环境变量
+# 1. 运行生产环境检查脚本（校验 MFA密钥/BCRYPT_COST/DB_SSL_MODE/CORS 等必检项）
 ./scripts/check_production_env.sh
 
-# 2. 验证配置文件
-./scripts/validate_config.sh
+# 2. 测试数据库连接
+psql "$DATABASE_URL" -c "SELECT 1;"
 
-# 3. 测试数据库连接
-./scripts/test_db_connection.sh
-
-# 4. 测试Redis连接（如启用）
-./scripts/test_redis_connection.sh
+# 3. 测试Redis连接（如启用）
+redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" -a "$REDIS_PASSWORD" --no-auth-warning ping
 ```
 
 ### 步骤3: 构建和部署
@@ -120,94 +127,55 @@ make test-security
 ./bin/sso
 
 # 2. 检查服务状态
-curl -f http://localhost:8080/health || exit 1
+curl -f http://localhost:9090/health || exit 1
 
-# 3. 检查日志
-tail -f /var/log/sso/app.log
+# 3. 检查日志（systemd 部署）
+journalctl -u sso -f
 ```
 
 ### 步骤5: 验证部署
 
 ```bash
 # 1. 健康检查
-curl http://localhost:8080/health
+curl http://localhost:9090/health
 
 # 2. 测试注册
-curl -X POST http://localhost:8080/api/v1/auth/register \
+curl -X POST http://localhost:9090/api/v1/register \
   -H "Content-Type: application/json" \
-  -d '{"email":"test@example.com","password":"Test123456!"}'
+  -d '{"email":"test@example.com","password":"Test123456!","username":"testuser"}'
 
 # 3. 测试登录
-curl -X POST http://localhost:8080/api/v1/auth/login \
+curl -X POST http://localhost:9090/api/v1/login \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com","password":"Test123456!"}'
 
-# 4. 测试JWT验证
-curl -X GET http://localhost:8080/api/v1/user/profile \
+# 4. 测试JWT验证（使用上一步返回的 access_token）
+curl -X GET http://localhost:9090/api/v1/userinfo \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
 ## 🔒 安全配置检查
 
+以下检查项已由 `scripts/check_production_env.sh` 自动化覆盖（MFA 密钥、bcrypt 成本、
+数据库 SSL、CORS 等），推荐直接运行脚本；如需手动核对，可参考以下要点：
+
 ### 1. MFA恢复码配置
 
-```bash
-# 验证HMAC密钥已设置
-if [ -z "$MFA_RECOVERY_HMAC_KEY" ]; then
-  echo "❌ MFA_RECOVERY_HMAC_KEY未设置"
-  exit 1
-fi
-
-# 验证密钥长度
-if [ ${#MFA_RECOVERY_HMAC_KEY} -lt 32 ]; then
-  echo "❌ MFA_RECOVERY_HMAC_KEY长度不足32字节"
-  exit 1
-fi
-
-echo "✅ MFA恢复码配置正确"
-```
+- `MFA_RECOVERY_HMAC_KEY` 必须已设置且长度 >= 32 字节
+- 生产环境未满足时服务会拒绝启动（`LAN_DEPLOYMENT=true` 除外）
 
 ### 2. CORS配置检查
 
-```bash
-# 验证CORS不使用通配符
-if [[ "$CORS_ALLOWED_ORIGINS" == "*" ]]; then
-  echo "❌ 生产环境禁止使用CORS通配符"
-  exit 1
-fi
-
-# 验证不包含localhost
-if [[ "$CORS_ALLOWED_ORIGINS" == *"localhost"* ]]; then
-  echo "❌ 生产环境禁止使用localhost"
-  exit 1
-fi
-
-echo "✅ CORS配置正确"
-```
+- 生产环境禁止 `CORS_ALLOWED_ORIGINS=*`
+- 生产环境禁止包含 `localhost` / `127.0.0.1`
 
 ### 3. bcrypt成本检查
 
-```bash
-# 验证bcrypt成本
-if [ "$BCRYPT_COST" -lt 12 ]; then
-  echo "❌ 生产环境BCRYPT_COST必须>=12"
-  exit 1
-fi
-
-echo "✅ bcrypt成本配置正确"
-```
+- 生产环境 `BCRYPT_COST` 必须 >= 12，且 <= 31（bcrypt 算法上限）
 
 ### 4. 数据库SSL检查
 
-```bash
-# 验证数据库SSL
-if [ "$DB_SSL_MODE" != "require" ]; then
-  echo "❌ 生产环境必须启用数据库SSL"
-  exit 1
-fi
-
-echo "✅ 数据库SSL配置正确"
-```
+- 生产环境 `DB_SSL_MODE` 必须为 `require` 或更高（`LAN_DEPLOYMENT=true` 除外）
 
 ## 📊 监控指标
 
@@ -237,7 +205,7 @@ journalctl -u sso -f
 psql -U sso -d sso -c "SELECT count(*) FROM pg_stat_activity WHERE datname='sso';"
 
 # 4. 检查Redis连接
-redis-cli -h $REDIS_HOST -p $REDIS_PORT ping
+redis-cli -h $REDIS_HOST -p $REDIS_PORT -a "$REDIS_PASSWORD" --no-auth-warning ping
 
 # 5. 检查内存使用
 ps aux | grep sso | awk '{print $6}'
@@ -251,8 +219,9 @@ ps aux | grep sso | awk '{print $6}'
 # 1. 停止服务
 systemctl stop sso
 
-# 2. 回滚数据库迁移
-make migrate-down
+# 2. 回滚数据库迁移（⚠️ 仅回滚到指定版本，切勿使用 make migrate-down——
+#    它会回滚全部迁移并清空业务数据）
+migrate -path ./migrations -database "$DATABASE_URL" goto <上一个稳定版本号>
 
 # 3. 恢复旧版本
 cp /backup/sso-old /usr/local/bin/sso
@@ -261,7 +230,7 @@ cp /backup/sso-old /usr/local/bin/sso
 systemctl start sso
 
 # 5. 验证服务
-curl http://localhost:8080/health
+curl http://localhost:9090/health
 ```
 
 ### 回滚决策标准
@@ -321,11 +290,12 @@ curl http://localhost:8080/health
 
 - `docs/DEPLOYMENT.md` - 详细部署指南
 - `docs/CONFIGURATION.md` - 配置说明
-- `docs/SECURITY_FIX_COMPLETE_REPORT.md` - 安全修复报告
-- `docs/TROUBLESHOOTING.md` - 故障排查指南
+- `docs/SECURITY.md` - 安全特性说明
+- `docs/SECURITY_FIX_PLAN.md` - 安全修复计划
+- `scripts/check_production_env.sh` - 生产环境配置自动检查脚本
 
 ---
 
-**检查清单版本**: 1.0  
-**最后更新**: 2026-05-26  
-**下次审查**: 2026-06-26
+**检查清单版本**: 1.1
+**最后更新**: 2026-08-02
+**下次审查**: 2026-09-02
