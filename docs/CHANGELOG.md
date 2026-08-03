@@ -16,6 +16,7 @@
 
 ### Documentation
 
+- **性能基准测试基线报告**（commit `a51527f`）：首次生成并提交全量基准测试报告（`docs/reports/performance-benchmark.md`），涵盖缓存、JWT、密码哈希、HMAC、AuthService 等性能指标，作为后续性能回归的对比基线
 - **部署文档与代码实现对齐**（commit `176a510`）：
   - `PRODUCTION_DEPLOYMENT_CHECKLIST.md` 整体重写（v1.1）——环境变量名更正为代码实际读取的 `LOCKOUT_DURATION` / `JWT_ACCESS_TOKEN_TTL` / `JWT_REFRESH_TOKEN_TTL`，端口统一为 9090，API 路径更正为 `/api/v1/register` 等真实路由，移除不存在的脚本与文档引用，回滚方案由 `make migrate-down`（回滚全部迁移）改为 `migrate goto <版本号>`
   - `DEPLOYMENT.md`——删除与 `docker/docker-compose.yml` 脱节的配置副本；K8s 示例补齐生产校验必需环境变量（`MFA_RECOVERY_HMAC_KEY` / `CORS_ALLOWED_ORIGINS` / `JWT_ISSUER` 等），Redis 由 `emptyDir` 改为 PVC；裸机部署补充迁移工具复制步骤；移除废弃的 `X-XSS-Protection` 头
