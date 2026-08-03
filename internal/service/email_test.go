@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -304,7 +305,11 @@ func TestEmailService_SendPasswordResetEmail_Mock(t *testing.T) {
 }
 
 // ============================================================================
-// 集成测试 - 使用真实默认sender (localhost端口1快速拒绝)
+// 集成测试 - 使用真实默认sender
+// 使用 localhost 端口 1/2 触发失败场景
+// 注意：Windows 上 localhost:1 的 TCP 连接会被系统接受但不发 SMTP banner，
+// smtp.SendMail 内部 net.Dial / banner Read 无超时会永久 hang。
+// 通过 EmailConfig.DialTimeout / TotalTimeout 设置短超时让被卡住的会话快速失败。
 // ============================================================================
 
 func TestEmailService_DefaultSender_Integration(t *testing.T) {
@@ -312,9 +317,11 @@ func TestEmailService_DefaultSender_Integration(t *testing.T) {
 
 	t.Run("STARTTLS端口连接失败", func(t *testing.T) {
 		config := &service.EmailConfig{
-			SMTPHost: "localhost",
-			SMTPPort: 1,
-			From:     "test@example.com",
+			SMTPHost:     "localhost",
+			SMTPPort:     1,
+			From:         "test@example.com",
+			DialTimeout:  200 * time.Millisecond,
+			TotalTimeout: 500 * time.Millisecond,
 		}
 		svc, err := service.NewEmailService(config)
 		require.NoError(t, err)
@@ -327,9 +334,11 @@ func TestEmailService_DefaultSender_Integration(t *testing.T) {
 
 	t.Run("SSL端口连接失败", func(t *testing.T) {
 		config := &service.EmailConfig{
-			SMTPHost: "localhost",
-			SMTPPort: 2,
-			From:     "test@example.com",
+			SMTPHost:     "localhost",
+			SMTPPort:     2,
+			From:         "test@example.com",
+			DialTimeout:  200 * time.Millisecond,
+			TotalTimeout: 500 * time.Millisecond,
 		}
 		svc, err := service.NewEmailService(config)
 		require.NoError(t, err)
@@ -341,9 +350,11 @@ func TestEmailService_DefaultSender_Integration(t *testing.T) {
 
 	t.Run("验证邮件模板渲染并发送失败", func(t *testing.T) {
 		config := &service.EmailConfig{
-			SMTPHost: "localhost",
-			SMTPPort: 1,
-			From:     "test@example.com",
+			SMTPHost:     "localhost",
+			SMTPPort:     1,
+			From:         "test@example.com",
+			DialTimeout:  200 * time.Millisecond,
+			TotalTimeout: 500 * time.Millisecond,
 		}
 		svc, err := service.NewEmailService(config)
 		require.NoError(t, err)
@@ -355,9 +366,11 @@ func TestEmailService_DefaultSender_Integration(t *testing.T) {
 
 	t.Run("重置邮件模板渲染并发送失败", func(t *testing.T) {
 		config := &service.EmailConfig{
-			SMTPHost: "localhost",
-			SMTPPort: 1,
-			From:     "test@example.com",
+			SMTPHost:     "localhost",
+			SMTPPort:     1,
+			From:         "test@example.com",
+			DialTimeout:  200 * time.Millisecond,
+			TotalTimeout: 500 * time.Millisecond,
 		}
 		svc, err := service.NewEmailService(config)
 		require.NoError(t, err)

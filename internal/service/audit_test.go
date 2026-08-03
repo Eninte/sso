@@ -20,9 +20,13 @@ import (
 // ============================================================================
 
 // createTestAuditService 创建测试用的审计服务
-func createTestAuditService() (*service.AuditService, *mock.Store) {
+// t.Cleanup 注册 Close，防止 AuditService 的 5 个 worker goroutine 在测试结束后泄漏
+// （race detector 会保留泄漏 goroutine 的状态）
+func createTestAuditService(t *testing.T) (*service.AuditService, *mock.Store) {
+	t.Helper()
 	store := mock.New()
 	auditSvc := service.NewAuditService(store)
+	t.Cleanup(func() { auditSvc.Close() })
 	return auditSvc, store
 }
 
@@ -43,7 +47,7 @@ func waitForAuditLogs(ctx context.Context, t *testing.T, store *mock.Store, user
 // ============================================================================
 
 func TestAuditService_Log(t *testing.T) {
-	auditSvc, store := createTestAuditService()
+	auditSvc, store := createTestAuditService(t)
 	ctx := context.Background()
 
 	t.Run("记录审计日志", func(t *testing.T) {
@@ -87,7 +91,7 @@ func TestAuditService_Log(t *testing.T) {
 // ============================================================================
 
 func TestAuditService_LogUserRegister(t *testing.T) {
-	auditSvc, store := createTestAuditService()
+	auditSvc, store := createTestAuditService(t)
 	ctx := context.Background()
 
 	t.Run("记录用户注册成功", func(t *testing.T) {
@@ -112,7 +116,7 @@ func TestAuditService_LogUserRegister(t *testing.T) {
 // ============================================================================
 
 func TestAuditService_LogUserLogin(t *testing.T) {
-	auditSvc, store := createTestAuditService()
+	auditSvc, store := createTestAuditService(t)
 	ctx := context.Background()
 
 	t.Run("记录用户登录成功", func(t *testing.T) {
@@ -137,7 +141,7 @@ func TestAuditService_LogUserLogin(t *testing.T) {
 // ============================================================================
 
 func TestAuditService_LogTokenIssued(t *testing.T) {
-	auditSvc, store := createTestAuditService()
+	auditSvc, store := createTestAuditService(t)
 	ctx := context.Background()
 
 	t.Run("记录Token签发", func(t *testing.T) {
@@ -154,7 +158,7 @@ func TestAuditService_LogTokenIssued(t *testing.T) {
 // ============================================================================
 
 func TestAuditService_LogAuthCodeCreated(t *testing.T) {
-	auditSvc, store := createTestAuditService()
+	auditSvc, store := createTestAuditService(t)
 	ctx := context.Background()
 
 	t.Run("记录授权码创建", func(t *testing.T) {
@@ -171,7 +175,7 @@ func TestAuditService_LogAuthCodeCreated(t *testing.T) {
 // ============================================================================
 
 func TestAuditService_ListAuditLogs(t *testing.T) {
-	_, store := createTestAuditService()
+	_, store := createTestAuditService(t)
 	ctx := context.Background()
 
 	t.Run("列出审计日志", func(t *testing.T) {
@@ -262,7 +266,7 @@ func TestAuditService_ListAuditLogs(t *testing.T) {
 }
 
 func TestAuditService_NewMethods(t *testing.T) {
-	auditSvc, store := createTestAuditService()
+	auditSvc, store := createTestAuditService(t)
 	ctx := context.Background()
 
 	t.Run("LogUserLogout", func(t *testing.T) {
@@ -363,7 +367,7 @@ func TestAuditService_NewMethods(t *testing.T) {
 }
 
 func TestAuditService_Close(t *testing.T) {
-	auditSvc, _ := createTestAuditService()
+	auditSvc, _ := createTestAuditService(t)
 
 	t.Run("关闭审计服务", func(t *testing.T) {
 		// Close应该不会panic

@@ -21,6 +21,17 @@ import (
 //go:embed email/templates email/templates/* email/templates/*/*
 var templateFS embed.FS
 
+// SMTP 超时默认值
+// 生产环境通过 EmailConfig.DialTimeout / EmailConfig.TotalTimeout 覆盖
+const (
+	// defaultSMTPDialTimeout TCP/TLS 拨号超时
+	defaultSMTPDialTimeout = 10 * time.Second
+	// defaultSMTPTotalTimeout 整个 SMTP 会话总超时（banner/STARTTLS/AUTH/DATA）
+	// smtp.SendMail / tls.Dial 内部无超时，SMTP 服务端卡 banner 会让会话永久挂起，
+	// 必须用 conn.SetDeadline 设置总超时
+	defaultSMTPTotalTimeout = 30 * time.Second
+)
+
 // ============================================================================
 // 邮件配置
 // ============================================================================
@@ -32,6 +43,35 @@ type EmailConfig struct {
 	Username string // SMTP用户名
 	Password string // SMTP密码
 	From     string // 发件人地址
+
+	// DialTimeout 拨号超时，零值用 defaultSMTPDialTimeout
+	// 测试可设置 100ms 让被卡住的连接快速失败
+	DialTimeout time.Duration
+	// TotalTimeout 整个 SMTP 会话总超时，零值用 defaultSMTPTotalTimeout
+	// 覆盖 banner/STARTTLS/AUTH/DATA 所有阶段，防止 SMTP 服务器卡 banner 导致 hang
+	TotalTimeout time.Duration
+}
+
+// dialTimeout 返回生效的拨号超时
+func (c *EmailConfig) dialTimeout() time.Duration {
+	if c.DialTimeout > 0 {
+		return c.DialTimeout
+	}
+	return defaultSMTPDialTimeout
+}
+
+// totalTimeout 返回生效的会话总超时
+func (c *EmailConfig) totalTimeout() time.Duration {
+	if c.TotalTimeout > 0 {
+		return c.TotalTimeout
+	}
+	return defaultSMTPTotalTimeout
+}
+
+// isLocalhostSMTP 判断主机是否本地回环
+// 与 stdlib smtp.SendMail 一致：localhost 跳过 STARTTLS 检查，便于本地 SMTP 测试
+func isLocalhostSMTP(host string) bool {
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 // ============================================================================
@@ -146,8 +186,8 @@ func (s *EmailService) SendEmail(ctx context.Context, to, subject, htmlBody stri
 }
 
 // sendEmailSSL 使用 SSL/TLS 发送邮件 (端口 465)
+// 用 tls.DialTimeout + conn.SetDeadline 替代 stdlib tls.Dial，避免 SMTP 服务端卡 banner 导致会话永久 hang
 func sendEmailSSL(addr, from string, to []string, msg []byte, config *EmailConfig) error {
-	// 建立 TLS 连接
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return err
@@ -158,69 +198,112 @@ func sendEmailSSL(addr, from string, to []string, msg []byte, config *EmailConfi
 		MinVersion: tls.VersionTLS12,
 	}
 
-	conn, err := tls.Dial("tcp", addr, tlsConfig)
+	// 带超时的 TLS 拨号（tls.Dial 内部无超时）
+	dialer := &net.Dialer{Timeout: config.dialTimeout()}
+	conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsConfig)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 
-	// 创建 SMTP 客户端
+	// 设置整个 SMTP 会话的总超时，覆盖 banner/AUTH/DATA 所有读写阶段
+	// TLS 握手已完成，剩余阶段由该 deadline 保护
+	if err := conn.SetDeadline(time.Now().Add(config.totalTimeout())); err != nil {
+		return err
+	}
+
 	client, err := smtp.NewClient(conn, host)
 	if err != nil {
 		return err
 	}
 	defer client.Close()
 
-	// 认证
-	if config.Username != "" {
-		auth := smtp.PlainAuth("", config.Username, config.Password, host)
-		if err = client.Auth(auth); err != nil {
-			return err
-		}
-	}
-
-	// 发送邮件
-	if err = client.Mail(from); err != nil {
+	if err := smtpSendPipeline(client, from, to, msg, config, host); err != nil {
 		return err
 	}
-	for _, addr := range to {
-		if err = client.Rcpt(addr); err != nil {
-			return err
-		}
-	}
-
-	w, err := client.Data()
-	if err != nil {
-		return err
-	}
-	_, err = w.Write(msg)
-	if err != nil {
-		return err
-	}
-	err = w.Close()
-	if err != nil {
-		return err
-	}
-
 	return client.Quit()
 }
 
 // sendEmailSTARTTLS 使用 STARTTLS 发送邮件 (端口 587/25)
+// 用 net.DialTimeout + smtp.NewClient + conn.SetDeadline 替代 stdlib smtp.SendMail，
+// 避免 SMTP 服务端卡 banner 导致会话永久 hang
 func sendEmailSTARTTLS(addr, from string, to []string, msg []byte, config *EmailConfig) error {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return err
 	}
 
-	// 认证
-	var auth smtp.Auth
-	if config.Username != "" {
-		auth = smtp.PlainAuth("", config.Username, config.Password, host)
+	// 带超时的 TCP 拨号（smtp.SendMail 内部用 net.Dial 无超时）
+	conn, err := net.DialTimeout("tcp", addr, config.dialTimeout())
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	// 设置整个 SMTP 会话的总超时，覆盖 banner/STARTTLS/AUTH/DATA 所有读写阶段
+	if err := conn.SetDeadline(time.Now().Add(config.totalTimeout())); err != nil {
+		return err
 	}
 
-	// 发送邮件 (smtp.SendMail 会自动处理 STARTTLS)
-	// 安全设计：不允许 TLS 降级，证书验证失败直接返回错误
-	return smtp.SendMail(addr, auth, from, to, msg)
+	client, err := smtp.NewClient(conn, host)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	// 安全设计：远程主机必须使用 STARTTLS（与 stdlib smtp.SendMail 一致，localhost 跳过便于本地测试）
+	// 证书验证失败直接返回错误，不允许 TLS 降级
+	if !isLocalhostSMTP(host) {
+		if ok, _ := client.Extension("STARTTLS"); ok {
+			if err := client.StartTLS(&tls.Config{
+				ServerName: host,
+				MinVersion: tls.VersionTLS12,
+			}); err != nil {
+				return err
+			}
+		}
+	}
+
+	if err := smtpSendPipeline(client, from, to, msg, config, host); err != nil {
+		return err
+	}
+	return client.Quit()
+}
+
+// smtpSendPipeline 执行 SMTP 会话的 AUTH/MAIL/RCPT/DATA 阶段
+// 抽出共用逻辑供 sendEmailSSL / sendEmailSTARTTLS 复用
+func smtpSendPipeline(client *smtp.Client, from string, to []string, msg []byte, config *EmailConfig, host string) error {
+	// 认证
+	if config.Username != "" {
+		auth := smtp.PlainAuth("", config.Username, config.Password, host)
+		if err := client.Auth(auth); err != nil {
+			return err
+		}
+	}
+
+	// 发件人
+	if err := client.Mail(from); err != nil {
+		return err
+	}
+	// 收件人
+	for _, rcpt := range to {
+		if err := client.Rcpt(rcpt); err != nil {
+			return err
+		}
+	}
+
+	// 邮件正文
+	w, err := client.Data()
+	if err != nil {
+		return err
+	}
+	if _, err := w.Write(msg); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // ============================================================================
