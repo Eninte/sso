@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-08-03
+
 ### Fixed
 
 - **JWKS 端点默认模式返回空数组**（commits `ee510c8` / `172d898` / `a01d88b`）：标准（非密钥轮换）模式下 `NewJWTService` 仅将密钥存入结构体字段，`GetJWKS()` 只读取 `publicKeys` 映射，导致 `/.well-known/jwks.json` 始终返回 `{"keys": []}`，依赖 JWKS 的外部验证方（SDK、API 网关）无法验证 token 签名。修复：构造时用 `DeriveKeyID`（RFC 7638 thumbprint，与轮换路径一致）派生 kid 并同步写入 `keys`/`publicKeys`/`activeKeyID`；旧无 kid token 仍可验证，向后兼容
