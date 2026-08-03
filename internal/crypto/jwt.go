@@ -52,7 +52,7 @@ func NewJWTService(
 	accessTokenTTL time.Duration,
 	refreshTokenTTL time.Duration,
 ) *JWTService {
-	return &JWTService{
+	svc := &JWTService{
 		privateKey:      privateKey,
 		publicKey:       publicKey,
 		keys:            make(map[string]*rsa.PrivateKey),
@@ -61,6 +61,16 @@ func NewJWTService(
 		accessTokenTTL:  accessTokenTTL,
 		refreshTokenTTL: refreshTokenTTL,
 	}
+	// 将主密钥加入映射，确保 GetJWKS() 能返回公钥
+	if publicKey != nil {
+		kid := "sso-key-1"
+		svc.publicKeys[kid] = publicKey
+		if privateKey != nil {
+			svc.keys[kid] = privateKey
+		}
+		svc.activeKeyID = kid
+	}
+	return svc
 }
 
 func NewJWTServiceWithKeyStore(
