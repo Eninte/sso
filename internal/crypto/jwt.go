@@ -62,13 +62,16 @@ func NewJWTService(
 		refreshTokenTTL: refreshTokenTTL,
 	}
 	// 将主密钥加入映射，确保 GetJWKS() 能返回公钥
+	// 使用 DeriveKeyID 派生 kid，与密钥轮换路径保持一致，避免同一密钥重复注册
 	if publicKey != nil {
-		kid := "sso-key-1"
-		svc.publicKeys[kid] = publicKey
-		if privateKey != nil {
-			svc.keys[kid] = privateKey
+		kid := DeriveKeyID(publicKey)
+		if kid != "" {
+			svc.publicKeys[kid] = publicKey
+			if privateKey != nil {
+				svc.keys[kid] = privateKey
+			}
+			svc.activeKeyID = kid
 		}
-		svc.activeKeyID = kid
 	}
 	return svc
 }

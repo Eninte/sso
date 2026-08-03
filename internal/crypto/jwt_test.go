@@ -424,20 +424,29 @@ func TestJWTService_GenerateAccessTokenWithKeyID(t *testing.T) {
 }
 
 func TestJWTService_GetPublicKeys(t *testing.T) {
-	svc := createTestJWTService(t)
+		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+		svc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test-issuer", 15*time.Minute, 7*24*time.Hour)
 
-	// 添加多个公钥
-	key1, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
-	key2, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
+		// NewJWTService 默认将主密钥加入映射，kid 由 DeriveKeyID 派生
+		initialKid := crypto.DeriveKeyID(&privateKey.PublicKey)
+		require.NotEmpty(t, initialKid)
 
-	svc.AddVerificationKey("key1", &key1.PublicKey)
-	svc.AddVerificationKey("key2", &key2.PublicKey)
+		// 添加多个公钥
+		key1, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+		key2, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
 
-	publicKeys := svc.GetPublicKeys()
-	assert.Len(t, publicKeys, 2)
-}
+		svc.AddVerificationKey("key1", &key1.PublicKey)
+		svc.AddVerificationKey("key2", &key2.PublicKey)
+
+		publicKeys := svc.GetPublicKeys()
+		assert.Len(t, publicKeys, 3)
+		assert.Contains(t, publicKeys, initialKid)
+		assert.Contains(t, publicKeys, "key1")
+		assert.Contains(t, publicKeys, "key2")
+	}
 
 func TestJWTService_GetJWKS(t *testing.T) {
 	svc := createTestJWTService(t)
