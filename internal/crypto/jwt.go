@@ -45,6 +45,11 @@ type JWTService struct {
 	refreshTokenTTL time.Duration
 }
 
+// NewJWTService 创建 JWT 服务实例
+// 将主密钥同步加入 keys/publicKeys 映射并用 DeriveKeyID 派生 kid，
+// 确保 GetJWKS() 能正确返回公钥，同时设置 activeKeyID。
+// 与密钥轮换路径使用相同的 kid 派生逻辑（RFC 7638 JWK Thumbprint），
+// 同一密钥在不同模式下具有一致的 kid。
 func NewJWTService(
 	privateKey *rsa.PrivateKey,
 	publicKey *rsa.PublicKey,
