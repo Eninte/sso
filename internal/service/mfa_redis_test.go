@@ -40,7 +40,13 @@ func setupMFABrokenRedis(t *testing.T) *MFAService {
 	mr, err := miniredis.Run()
 	require.NoError(t, err)
 
-	rc, err := cache.NewRedisCacheWithOptions(&redis.Options{Addr: mr.Addr()})
+	rc, err := cache.NewRedisCacheWithOptions(&redis.Options{
+		Addr:         mr.Addr(),
+		DialTimeout:  100 * time.Millisecond,
+		ReadTimeout:  100 * time.Millisecond,
+		WriteTimeout: 100 * time.Millisecond,
+		PoolTimeout:  200 * time.Millisecond,
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() { rc.Close() })
 

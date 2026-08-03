@@ -3,8 +3,9 @@
 package service
 
 import (
-	"context"
-	"testing"
+		"context"
+		"testing"
+		"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
@@ -19,7 +20,13 @@ func setupBrokenRedisCache(t *testing.T) cache.Cache {
 	t.Helper()
 	mr, err := miniredis.Run()
 	require.NoError(t, err)
-	rc, err := cache.NewRedisCacheWithOptions(&redis.Options{Addr: mr.Addr()})
+	rc, err := cache.NewRedisCacheWithOptions(&redis.Options{
+		Addr:         mr.Addr(),
+		DialTimeout:  100 * time.Millisecond,
+		ReadTimeout:  100 * time.Millisecond,
+		WriteTimeout: 100 * time.Millisecond,
+		PoolTimeout:  200 * time.Millisecond,
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() { rc.Close() })
 	mr.Close() // 关闭服务端，后续操作必然失败
