@@ -454,6 +454,14 @@ func TestJWTService_GetJWKS(t *testing.T) {
 	jwks := svc.GetJWKS()
 	assert.NotNil(t, jwks)
 	assert.Contains(t, jwks, "keys")
+
+	// 默认（非密钥轮换）模式下，主公钥必须出现在 JWKS 中
+	keys, ok := jwks["keys"].([]map[string]interface{})
+	require.True(t, ok, "JWKS 应包含 keys 数组")
+	require.Len(t, keys, 1, "默认模式下 JWKS 应包含主公钥")
+	assert.Equal(t, svc.GetActiveKeyID(), keys[0]["kid"], "JWKS kid 应与活跃密钥 ID 一致")
+	assert.Equal(t, "RSA", keys[0]["kty"])
+	assert.Equal(t, "RS256", keys[0]["alg"])
 }
 
 // ============================================================================
