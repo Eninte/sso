@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **JWKS 端点默认模式返回空数组**（commits `ee510c8` / `172d898` / `a01d88b`）：标准（非密钥轮换）模式下 `NewJWTService` 仅将密钥存入结构体字段，`GetJWKS()` 只读取 `publicKeys` 映射，导致 `/.well-known/jwks.json` 始终返回 `{"keys": []}`，依赖 JWKS 的外部验证方（SDK、API 网关）无法验证 token 签名。修复：构造时用 `DeriveKeyID`（RFC 7638 thumbprint，与轮换路径一致）派生 kid 并同步写入 `keys`/`publicKeys`/`activeKeyID`；旧无 kid token 仍可验证，向后兼容
+- **SMTP 会话无超时导致潜在生产 hang**（commit `954083f`）：Windows 上 localhost:1 会接受连接但不发 banner，stdlib `smtp.SendMail`/`tls.Dial` 无超时，SMTP 服务端卡 banner 会让 SSO 服务永久挂起。修复：`sendEmailSTARTTLS`/`sendEmailSSL` 改用 `net.DialTimeout` + `tls.DialWithDialer` + `conn.SetDeadline`；`EmailConfig` 新增 `DialTimeout`/`TotalTimeout` 字段（默认 10s/30s）
+- **internal/service 包测试超时卡死（280s → ~23s）**（commits `117a474` / `263916f` / `954083f`）：Redis 故障降级测试的 broken cache 未设超时与重试限制，go-redis 默认 `MaxRetries=3` + 5s 拨号超时，`LoginRateLimitMax=20` 循环单测试累计 40s+，4 个 RedisDownFallback 测试串跑使整包频繁超过 120s 包超时。修复：broken cache 加 100ms 短超时，SMTP 集成子测试加 200ms/500ms 短超时
+
+### Test
+
+- **GetJWKS 回归测试加强**（commit `817cfab`）：原测试仅断言 `keys` 字段存在，在 JWKS 空数组缺陷存在时也能通过。补充断言：默认模式下 JWKS 恰含一个主公钥、`kid == GetActiveKeyID()`、`kty=RSA`、`alg=RS256`，防止修复被回退后 JWKS 再次静默返回空数组
+
 ### Documentation
 
 - **部署文档与代码实现对齐**（commit `176a510`）：
