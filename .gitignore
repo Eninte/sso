@@ -89,3 +89,6 @@ start_server.sh
 integration-test-results.xml
 /reports/
 .zcode/
+.trae/
+.kilocode
+.kilo
