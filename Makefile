@@ -389,7 +389,7 @@ bench-report: ## 生成基准测试报告
 # ============================================================================
 # 压力测试 (k6)
 # ============================================================================
-K6_LOADTEST_DIR=./loadtest
+K6_LOADTEST_DIR=./test/loadtest
 K6_DATA_DIR=$(K6_LOADTEST_DIR)/data
 K6_RESULTS_DIR=$(K6_LOADTEST_DIR)/results
 K6 ?= k6

@@ -230,7 +230,9 @@ sso/
 ├── keys/                       # RSA密钥（脚本生成，不提交）
 │
 ├── sdks/                       # SDK客户端（Go/JS/Kotlin/Python/Rust/Swift）
-├── loadtest/                   # 压力测试（k6脚本）
+├── test/
+│   ├── loadtest/               # 压力测试（k6脚本）
+│   └── e2e/                    # E2E 端到端测试
 └── docs/                       # 文档
 ```
 

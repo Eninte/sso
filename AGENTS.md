@@ -106,8 +106,9 @@ SSO/
 ├── scripts/                       # 工具脚本（密钥生成、E2E 数据准备、部署等）
 ├── docker/                        # Docker 配置与入口脚本
 ├── sdks/                          # 多语言 SDK（Go/JS/Kotlin/Python/Rust/Swift）
-├── loadtest/                      # k6 压力测试脚本与数据
-├── test/e2e/                      # E2E 端到端测试
+├── test/
+│   ├── loadtest/                    # k6 压力测试脚本与数据
+│   └── e2e/                         # E2E 端到端测试
 └── docs/                          # 项目文档
 ```
 
@@ -494,7 +495,7 @@ make analyze-clean            # 清理分析报告
 
 ### 13.2 压力测试（k6）
 
-脚本目录：`loadtest/scenarios/`，数据目录：`loadtest/data/`，结果目录：`loadtest/results/`。
+脚本目录：`test/loadtest/scenarios/`，数据目录：`test/loadtest/data/`，结果目录：`test/loadtest/results/`。
 
 ```bash
 make loadtest-prepare          # 生成压测数据池

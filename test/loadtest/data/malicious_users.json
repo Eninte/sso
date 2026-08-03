@@ -1,0 +1,52 @@
+[
+  {
+    "id": "db671f24-705c-4c94-986b-c4d815674b83",
+    "email": "malicious-0-1775303308@example.com",
+    "password": "TestPassword123!"
+  },
+  {
+    "id": "3b284621-e89e-4f9a-8200-e2f2a9f9088f",
+    "email": "malicious-1-1775303308@example.com",
+    "password": "TestPassword123!"
+  },
+  {
+    "id": "5aa3b35b-f3b8-4d9b-a6e4-f3b3a3bd1638",
+    "email": "malicious-2-1775303308@example.com",
+    "password": "TestPassword123!"
+  },
+  {
+    "id": "e3c08134-b961-499c-8157-d0ae659ad401",
+    "email": "malicious-3-1775303308@example.com",
+    "password": "TestPassword123!"
+  },
+  {
+    "id": "21b6701b-f1a4-4f0b-8341-bf53dbcb3aa6",
+    "email": "malicious-4-1775303308@example.com",
+    "password": "TestPassword123!"
+  },
+  {
+    "id": "4791ff3e-d6b7-4bd4-9dea-02d306b67c09",
+    "email": "malicious-5-1775303308@example.com",
+    "password": "TestPassword123!"
+  },
+  {
+    "id": "f5cb1ebf-1002-4b0a-bec4-9619ac7d2cfb",
+    "email": "malicious-6-1775303308@example.com",
+    "password": "TestPassword123!"
+  },
+  {
+    "id": "5708c1f2-71cb-4ce8-8b82-604f878263dc",
+    "email": "malicious-7-1775303308@example.com",
+    "password": "TestPassword123!"
+  },
+  {
+    "id": "e070cb1f-2a6a-4f16-872c-0b8d73f8105d",
+    "email": "malicious-8-1775303308@example.com",
+    "password": "TestPassword123!"
+  },
+  {
+    "id": "ff886c26-5950-40c7-8017-f449b70122dd",
+    "email": "malicious-9-1775303308@example.com",
+    "password": "TestPassword123!"
+  }
+]

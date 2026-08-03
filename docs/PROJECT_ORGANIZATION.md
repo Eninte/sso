@@ -64,15 +64,10 @@
 │   │   └── testutil/   # 测试辅助工具（DB/Redis 连接）
 │   └── validator/      # 输入验证
 ├── keys/                # JWT 密钥（.pem 文件在 .gitignore）
-├── loadtest/            # 压力测试（k6 脚本）
-├── migrations/          # 数据库迁移
+├── test/
+│   ├── loadtest/            # 压力测试（k6 脚本）
+│   └── e2e/                 # E2E 端到端测试（//go:build e2e）
 ├── scripts/             # 工具脚本
-│   ├── prepare-e2e-test.sh     # E2E 测试数据准备
-│   ├── cleanup-e2e-test.sh     # E2E 测试数据清理
-│   └── run_e2e_no_ratelimit.sh # E2E 服务启动（处理限流）
-├── sdks/                # SDK 客户端（Go, JS, Python, Rust）
-├── test/                # 测试文件
-│   └── e2e/            # E2E 端到端测试（//go:build e2e）
 ├── testdata/            # 测试数据
 ├── .env.example         # 环境配置模板
 ├── .gitignore           # Git 忽略规则

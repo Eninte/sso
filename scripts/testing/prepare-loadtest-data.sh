@@ -26,7 +26,7 @@ ADMIN_EMAIL="${E2E_ADMIN_EMAIL:-}"
 ADMIN_PASSWORD="${E2E_ADMIN_PASSWORD:-}"
 TEST_PASSWORD="${TEST_PASSWORD:-}"
 
-DATA_DIR="loadtest/data"
+DATA_DIR="test/loadtest/data"
 TIMESTAMP=$(date +%s)
 
 mkdir -p "$DATA_DIR"

@@ -345,8 +345,9 @@ sso/
 ├── scripts/                     # 工具脚本
 ├── docker/                      # Docker配置
 ├── sdks/                        # 多语言 SDK（Go/JS/Kotlin/Python/Rust/Swift）
-├── loadtest/                    # k6 压力测试脚本
-├── test/e2e/                    # E2E 端到端测试
+├── test/                        # 测试
+│   ├── loadtest/                 # k6 压力测试脚本
+│   └── e2e/                      # E2E 端到端测试
 ├── keys/                        # RSA密钥（脚本生成，不提交）
 └── docs/                        # 项目文档
 ```

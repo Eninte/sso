@@ -12,7 +12,7 @@ ADMIN_EMAIL="system@eninte.com"
 ADMIN_PASSWORD="Admin123!"
 TEST_PASSWORD="TestPassword123!"
 
-DATA_DIR="loadtest/data"
+DATA_DIR="test/loadtest/data"
 TIMESTAMP=$(date +%s)
 
 mkdir -p "$DATA_DIR"
