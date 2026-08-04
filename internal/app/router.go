@@ -41,7 +41,7 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 	adminHandler := handler.NewAdminHandler(svc.Admin)
 	captchaHandler := handler.NewCaptchaHandler(svc.Captcha)
 	// API 文档调试前端（Scalar + OpenAPI），仅管理员可访问
-	apiDocsHandler := handler.NewAPIDocsHandler(cfg.BaseURL(), version)
+	apiDocsHandler := handler.NewAPIDocsHandler(cfg.PublicBaseURLOrFallback(), version)
 
 	// ==== 创建路由器 ====
 	router := mux.NewRouter()
