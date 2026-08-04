@@ -149,8 +149,9 @@ func initServices(cfg *config.Config, version, buildTime string) (*Services, *sq
 	mfaSvc.SetCache(cacheSvc)
 
 	// ==== 初始化业务服务（带缓存） ====
-	// 阶段 4：邮件链接使用 PublicBaseURLOrFallback（生产环境强制 HTTPS）
-	userSvc := service.NewUserService(store, passwordSvc, emailSvc, cfg.PublicBaseURLOrFallback())
+		// 阶段 4：邮件链接使用 PublicBaseURLOrFallback（生产环境强制 HTTPS）
+		// 拼接 APIPrefix 使邮件链接路径与路由前缀保持一致
+		userSvc := service.NewUserService(store, passwordSvc, emailSvc, cfg.PublicBaseURLOrFallback()+APIPrefix)
 	// 阶段 2.4：注入 cache 用于 ChangePassword/ResetPassword 时清 token 缓存
 	userSvc.WithCache(cacheSvc)
 	// 仅在限流启用时配置邮件限流器（RATE_LIMIT_REQUESTS <= 0 表示禁用所有限流）

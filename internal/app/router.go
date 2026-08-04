@@ -18,6 +18,9 @@ import (
 	"github.com/example/sso/internal/store"
 )
 
+// APIPrefix API 路由前缀，同时用于邮件链接等对外暴露场景
+const APIPrefix = "/api/v1"
+
 // initHandlers 初始化HTTP处理器和路由
 // 职责: 创建路由器、注册所有HTTP处理器、配置中间件
 // CORS 配置校验失败时返回 error，由调用方决定退出方式
@@ -118,7 +121,7 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 	router.HandleFunc("/auth/providers", socialHandler.HandleProviders).Methods("GET")
 
 	// API端点
-	api := router.PathPrefix("/api/v1").Subrouter()
+		api := router.PathPrefix(APIPrefix).Subrouter()
 
 	// 创建敏感端点独立限流器（更严格的限额：全局限额的1/10，窗口1分钟）
 	// 确保至少为1，防止全局限流配置过低时敏感端点完全无限流
