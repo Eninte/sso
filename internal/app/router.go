@@ -121,7 +121,7 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 	router.HandleFunc("/auth/providers", socialHandler.HandleProviders).Methods("GET")
 
 	// API端点
-		api := router.PathPrefix(APIPrefix).Subrouter()
+	api := router.PathPrefix(APIPrefix).Subrouter()
 
 	// 创建敏感端点独立限流器（更严格的限额：全局限额的1/10，窗口1分钟）
 	// 确保至少为1，防止全局限流配置过低时敏感端点完全无限流
