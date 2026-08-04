@@ -147,7 +147,7 @@ func (s *UserService) SendVerificationEmail(ctx context.Context, userID string) 
 		return serviceutil.WrapServiceError("存储验证令牌", err)
 	}
 
-	verifyLink := fmt.Sprintf("%s/verify-email?token=%s&user_id=%s", s.baseURL, token, userID)
+	verifyLink := fmt.Sprintf("%s/api/v1/verify-email?token=%s&user_id=%s", s.baseURL, token, userID)
 
 	if s.emailSvc != nil {
 		if err := s.emailSvc.SendVerificationEmail(ctx, user.Email, user.Email, verifyLink); err != nil {
@@ -243,7 +243,7 @@ func (s *UserService) ForgotPassword(ctx context.Context, email string) error {
 		return nil
 	}
 
-	resetLink := fmt.Sprintf("%s/reset-password?token=%s&user_id=%s", s.baseURL, token, user.ID)
+	resetLink := fmt.Sprintf("%s/api/v1/reset-password?token=%s&user_id=%s", s.baseURL, token, user.ID)
 
 	// 阶段 D 修复（L9）：密码重置邮件异步发送
 	// 原实现同步发送，SMTP 调用慢（数百 ms 到数秒）会阻塞请求，且 SMTP 故障会放大影响面
