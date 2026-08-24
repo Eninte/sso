@@ -7,6 +7,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -59,6 +60,12 @@ type Store struct {
 	CreateAdminAtomicErr       error
 	GetClientByClientIDErr     error
 	CreateClientErr            error
+	ListClientsErr             error
+	UpdateClientErr            error
+	DeleteClientErr            error
+	RotateClientSecretErr      error
+	SetClientActiveErr         error
+	RevokeAllClientTokensErr   error
 	StoreAuthorizationCodeErr  error
 	GetAuthorizationCodeErr    error
 	StoreTokenErr              error
@@ -444,6 +451,171 @@ func (m *Store) ValidateRedirectURI(ctx context.Context, clientID string, redire
 		}
 	}
 	return false
+}
+
+// ============================================================================
+// 客户端管理（管理员 API）
+// ============================================================================
+
+// ListClients 分页列出客户端（按创建时间倒序）
+func (m *Store) ListClients(ctx context.Context, offset, limit int) ([]*model.Client, int, error) {
+	if m.ListClientsErr != nil {
+		return nil, 0, m.ListClientsErr
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	clients := make([]*model.Client, 0, len(m.clients))
+	for _, client := range m.clients {
+		clients = append(clients, client)
+	}
+	// 按创建时间倒序，与 Postgres ORDER BY created_at DESC 一致
+	sort.SliceStable(clients, func(i, j int) bool {
+		return clients[i].CreatedAt.After(clients[j].CreatedAt)
+	})
+
+	total := len(clients)
+	if offset >= total {
+		return []*model.Client{}, total, nil
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	return clients[offset:end], total, nil
+}
+
+// UpdateClient 更新客户端配置（拷贝-替换）
+// 仅更新 name/redirect_uris/grant_types/scopes 与 updated_at，与 Postgres 实现一致
+func (m *Store) UpdateClient(ctx context.Context, client *model.Client) error {
+	if m.UpdateClientErr != nil {
+		return m.UpdateClientErr
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	existing, ok := m.clients[client.ClientID]
+	if !ok {
+		return store.ErrNotFound
+	}
+
+	// 拷贝-替换：不原地修改已存入 map 的对象（-race 语义与真实 DB 行更新一致）
+	updated := *existing
+	updated.Name = client.Name
+	updated.RedirectURIs = client.RedirectURIs
+	updated.GrantTypes = client.GrantTypes
+	updated.Scopes = client.Scopes
+	updated.UpdatedAt = time.Now()
+	m.clients[client.ClientID] = &updated
+	return nil
+}
+
+// RotateClientSecret 轮换客户端密钥（拷贝-替换）
+func (m *Store) RotateClientSecret(ctx context.Context, clientID, secretHash string) error {
+	if m.RotateClientSecretErr != nil {
+		return m.RotateClientSecretErr
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	existing, ok := m.clients[clientID]
+	if !ok {
+		return store.ErrNotFound
+	}
+
+	updated := *existing
+	updated.ClientSecret = secretHash
+	updated.UpdatedAt = time.Now()
+	m.clients[clientID] = &updated
+	return nil
+}
+
+// SetClientActive 设置客户端启用/禁用状态（拷贝-替换）
+func (m *Store) SetClientActive(ctx context.Context, clientID string, active bool) error {
+	if m.SetClientActiveErr != nil {
+		return m.SetClientActiveErr
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	existing, ok := m.clients[clientID]
+	if !ok {
+		return store.ErrNotFound
+	}
+
+	updated := *existing
+	updated.IsActive = active
+	updated.UpdatedAt = time.Now()
+	m.clients[clientID] = &updated
+	return nil
+}
+
+// RevokeAllClientTokens 撤销客户端全部未撤销 Token（拷贝-替换）
+func (m *Store) RevokeAllClientTokens(ctx context.Context, clientID string) error {
+	if m.RevokeAllClientTokensErr != nil {
+		return m.RevokeAllClientTokensErr
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now()
+	for key, token := range m.tokens {
+		if token.ClientID != nil && *token.ClientID == clientID && token.RevokedAt == nil {
+			// 拷贝-替换：修改副本再写回 map，旧指针保持不可变
+			updated := *token
+			updated.RevokedAt = &now
+			m.tokens[key] = &updated
+		}
+	}
+	return nil
+}
+
+// DeleteClient 删除客户端（拷贝-替换）
+//
+// 与 021 迁移的 FK 语义一致：
+//  1. 撤销该客户端全部未撤销 Token
+//  2. 删除其授权码（FK CASCADE）
+//  3. 删除客户端行；该客户端的 token 行保留但 client_id 置空（FK SET NULL）
+func (m *Store) DeleteClient(ctx context.Context, clientID string) error {
+	if m.DeleteClientErr != nil {
+		return m.DeleteClientErr
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, ok := m.clients[clientID]; !ok {
+		return store.ErrNotFound
+	}
+
+	// 1. 撤销全部未撤销 Token + client_id 置空（拷贝-替换）
+	now := time.Now()
+	for key, token := range m.tokens {
+		if token.ClientID != nil && *token.ClientID == clientID {
+			updated := *token
+			updated.ClientID = nil
+			if updated.RevokedAt == nil {
+				updated.RevokedAt = &now
+			}
+			m.tokens[key] = &updated
+		}
+	}
+
+	// 2. 删除授权码（FK CASCADE）
+	for code, authCode := range m.authorizationCodes {
+		if authCode.ClientID == clientID {
+			delete(m.authorizationCodes, code)
+		}
+	}
+
+	// 3. 删除客户端行
+	delete(m.clients, clientID)
+	return nil
 }
 
 // ============================================================================
@@ -1150,6 +1322,12 @@ func (m *Store) Reset() {
 	m.CreateAdminAtomicErr = nil
 	m.GetClientByClientIDErr = nil
 	m.CreateClientErr = nil
+	m.ListClientsErr = nil
+	m.UpdateClientErr = nil
+	m.DeleteClientErr = nil
+	m.RotateClientSecretErr = nil
+	m.SetClientActiveErr = nil
+	m.RevokeAllClientTokensErr = nil
 	m.StoreAuthorizationCodeErr = nil
 	m.GetAuthorizationCodeErr = nil
 	m.StoreTokenErr = nil

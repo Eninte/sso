@@ -220,7 +220,9 @@ func TestCacheConstants(t *testing.T) {
 	t.Run("前缀常量值", func(t *testing.T) {
 		assert.Equal(t, "token:", cache.TokenCachePrefix)
 		assert.Equal(t, "user:", cache.UserCachePrefix)
-		assert.Equal(t, "client:", cache.ClientCachePrefix)
+		// client:v2: 版本化前缀：旧键（client:）反序列化到含 is_active 的结构体会误判为禁用，
+		// 版本化后旧键自然失配（见 客户端管理实施文档 Phase 4.4）
+		assert.Equal(t, "client:v2:", cache.ClientCachePrefix)
 		assert.Equal(t, "nil:", cache.NilCachePrefix)
 	})
 }

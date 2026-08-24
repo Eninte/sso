@@ -427,6 +427,15 @@ func TestAuditEventTypeConstants(t *testing.T) {
 		assert.Equal(t, "system.start", string(model.EventSystemStart))
 		assert.Equal(t, "system.stop", string(model.EventSystemStop))
 	})
+
+	t.Run("Admin客户端管理事件类型", func(t *testing.T) {
+		assert.Equal(t, "admin.client_created", string(model.EventClientCreated))
+		assert.Equal(t, "admin.client_updated", string(model.EventClientUpdated))
+		assert.Equal(t, "admin.client_deleted", string(model.EventClientDeleted))
+		assert.Equal(t, "admin.client_secret_rotated", string(model.EventClientSecretRotated))
+		assert.Equal(t, "admin.client_enabled", string(model.EventClientEnabled))
+		assert.Equal(t, "admin.client_disabled", string(model.EventClientDisabled))
+	})
 }
 
 func TestRequestModels_JSONMarshaling(t *testing.T) {
@@ -490,6 +499,82 @@ func TestRequestModels_JSONMarshaling(t *testing.T) {
 		err = json.Unmarshal(data, &decoded)
 		require.NoError(t, err)
 		assert.Equal(t, req.GrantType, decoded.GrantType)
+	})
+}
+
+func TestIsSupportedGrantType(t *testing.T) {
+	t.Run("支持的授权类型返回true", func(t *testing.T) {
+		assert.True(t, model.IsSupportedGrantType(model.GrantTypeAuthorizationCode))
+		assert.True(t, model.IsSupportedGrantType(model.GrantTypeRefreshToken))
+	})
+
+	t.Run("不支持的授权类型返回false", func(t *testing.T) {
+		assert.False(t, model.IsSupportedGrantType(model.GrantTypeClientCredentials))
+		assert.False(t, model.IsSupportedGrantType(""))
+		assert.False(t, model.IsSupportedGrantType("password"))
+		assert.False(t, model.IsSupportedGrantType("implicit"))
+	})
+}
+
+func TestClientRequestModels_JSONMarshaling(t *testing.T) {
+	t.Run("ClientCreateRequest序列化与反序列化", func(t *testing.T) {
+		req := model.ClientCreateRequest{
+			Name:         "内部 Wiki",
+			RedirectURIs: []string{"https://wiki.example.com/oauth/callback"},
+			GrantTypes:   []string{"authorization_code", "refresh_token"},
+			Scopes:       []string{"openid", "profile", "email"},
+			PublicClient: false,
+		}
+
+		data, err := json.Marshal(req)
+		require.NoError(t, err)
+
+		jsonStr := string(data)
+		assert.Contains(t, jsonStr, `"name":"内部 Wiki"`)
+		assert.Contains(t, jsonStr, `"redirect_uris":["https://wiki.example.com/oauth/callback"]`)
+		assert.Contains(t, jsonStr, `"grant_types":["authorization_code","refresh_token"]`)
+		assert.Contains(t, jsonStr, `"scopes":["openid","profile","email"]`)
+		assert.Contains(t, jsonStr, `"public_client":false`)
+
+		var decoded model.ClientCreateRequest
+		err = json.Unmarshal(data, &decoded)
+		require.NoError(t, err)
+		assert.Equal(t, req, decoded)
+	})
+
+	t.Run("ClientUpdateRequest的PublicClient为nil时不出现在JSON中", func(t *testing.T) {
+		req := model.ClientUpdateRequest{
+			Name:         "内部 Wiki v2",
+			RedirectURIs: []string{"https://wiki.example.com/oauth/callback"},
+			GrantTypes:   []string{"authorization_code", "refresh_token"},
+			Scopes:       []string{"openid", "email"},
+			PublicClient: nil,
+		}
+
+		data, err := json.Marshal(req)
+		require.NoError(t, err)
+		assert.NotContains(t, string(data), "public_client")
+	})
+
+	t.Run("ClientUpdateRequest的PublicClient非nil时出现在JSON中", func(t *testing.T) {
+		publicClient := false
+		req := model.ClientUpdateRequest{
+			Name:         "内部 Wiki v2",
+			RedirectURIs: []string{"https://wiki.example.com/oauth/callback"},
+			GrantTypes:   []string{"authorization_code", "refresh_token"},
+			Scopes:       []string{"openid", "email"},
+			PublicClient: &publicClient,
+		}
+
+		data, err := json.Marshal(req)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), `"public_client":false`)
+
+		var decoded model.ClientUpdateRequest
+		err = json.Unmarshal(data, &decoded)
+		require.NoError(t, err)
+		require.NotNil(t, decoded.PublicClient)
+		assert.False(t, *decoded.PublicClient)
 	})
 }
 

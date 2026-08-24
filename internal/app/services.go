@@ -188,7 +188,7 @@ func initServices(cfg *config.Config, version, buildTime string) (*Services, *sq
 		authSvcOpts...,
 	)
 	oauthSvc := service.NewOAuthServiceWithOptions(store, tokenSvc, service.WithOAuthCache(cacheSvc), service.WithOAuthPassword(passwordSvc))
-	adminSvc := service.NewAdminServiceWithOptions(store, service.WithAdminCache(cacheSvc), service.WithAdminVersion(version, buildTime), service.WithAdminAudit(auditSvc))
+	adminSvc := service.NewAdminServiceWithOptions(store, service.WithAdminCache(cacheSvc), service.WithAdminVersion(version, buildTime), service.WithAdminAudit(auditSvc), service.WithAdminPasswordService(passwordSvc))
 
 	// ==== 初始化第三方登录服务 ====
 	socialSvc := service.NewSocialLoginService(store, jwtSvc, cfg.PublicBaseURLOrFallback(), cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GitHubClientID, cfg.GitHubClientSecret)

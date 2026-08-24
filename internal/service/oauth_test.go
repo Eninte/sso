@@ -63,6 +63,7 @@ func createTestClient() *model.Client {
 		GrantTypes:   []string{model.GrantTypeAuthorizationCode, model.GrantTypeRefreshToken},
 		Scopes:       []string{"openid", "profile", "email"},
 		PublicClient: false,
+		IsActive:     true,
 		CreatedAt:    time.Now(),
 	}
 }

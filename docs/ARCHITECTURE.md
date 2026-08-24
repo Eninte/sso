@@ -473,15 +473,20 @@ type Token struct {
 
 ```go
 type Client struct {
-    ID           string   `json:"id"`
-    ClientID     string   `json:"client_id"`
-    ClientSecret string   `json:"-"`
-    Name         string   `json:"name"`
-    RedirectURIs []string `json:"redirect_uris"`
-    GrantTypes   []string `json:"grant_types"`
-    PublicClient bool     `json:"public_client"`
+    ID           string    `json:"id"`
+    ClientID     string    `json:"client_id"`
+    ClientSecret string    `json:"-"`
+    Name         string    `json:"name"`
+    RedirectURIs []string  `json:"redirect_uris"`
+    GrantTypes   []string  `json:"grant_types"`
+    PublicClient bool      `json:"public_client"`
+    IsActive     bool      `json:"is_active"`    // 客户端管理（021 迁移新增）：禁用客户端阻断授权/换 Token
+    CreatedAt    time.Time `json:"created_at"`
+    UpdatedAt    time.Time `json:"updated_at"`   // 客户端管理（021 迁移新增）
 }
 ```
+
+> 客户端管理（`/api/v1/admin/clients` 系列）：管理员可创建（机密/公共）、查询、分页列表、更新、禁用/启用、删除与密钥轮换。禁用/删除/轮换会先撤销该客户端全部未撤销 Token；`is_active` 在 `getClient`（缓存命中与 DB 路径）统一检查，禁用客户端对公网返回 `INVALID_CLIENT`。
 
 ## 安全设计
 

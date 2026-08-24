@@ -32,7 +32,7 @@ SSO 服务是一个生产级单点登录（Single Sign-On）微服务，基于 G
 | `.env.test` | 测试环境配置（含真实凭据，**不可提交/分发**） |
 | `.golangci.yml` | golangci-lint 配置，`enable-all: true` 并显式禁用部分规则 |
 | `.github/workflows/ci.yml` | CI/CD 流水线：test、lint、security、e2e、build、docker |
-| `docker/Dockerfile` | 多阶段 Docker 构建，基于 `golang:1.26.5-alpine` |
+| `docker/Dockerfile` | 多阶段 Docker 构建，基于 `golang:1.26.6-alpine` |
 | `docker/docker-compose.yml` | 开发/部署 Compose，含 postgres、redis、sso 三服务 |
 | `docker/entrypoint.sh` | 容器启动脚本：自动构造无密码迁移 DSN（密码经 `PGPASSWORD` 子进程环境传递）并执行 `migrate up` |
 | `migrations/` | 数据库迁移脚本，共 018 个版本（3 位序号命名） |
@@ -42,7 +42,7 @@ SSO 服务是一个生产级单点登录（Single Sign-On）微服务，基于 G
 
 | 层级 | 技术 | 版本/说明 |
 |------|------|----------|
-| 语言 | Go | 1.26.5（CI 固定版本） |
+| 语言 | Go | 1.26.6（CI 固定版本） |
 | HTTP 路由 | gorilla/mux | 1.8.1 |
 | 数据库 | PostgreSQL | 15+（pgx/v5 驱动） |
 | 缓存 | Redis | 7+（go-redis/v9），也支持内存回退 |
@@ -414,7 +414,15 @@ apperrors.Is(err, store.ErrNotFound)              // 判断错误类型
 | `/api/v1/authorize` | GET | 是 | OAuth 授权端点 |
 | `/api/v1/authorize/approve` | POST | 是 | 批准授权 |
 | `/api/v1/mfa/*` | - | 是 | MFA 设置/验证/禁用/状态 |
-| `/api/v1/admin/*` | - | 是 + admin | 管理员接口 |
+| `/api/v1/admin/clients` | POST | 是 + admin | 创建 OAuth 客户端（机密/公共） |
+| `/api/v1/admin/clients` | GET | 是 + admin | 客户端列表（分页，不含 secret） |
+| `/api/v1/admin/clients/{client_id}` | GET | 是 + admin | 客户端详情 |
+| `/api/v1/admin/clients/{client_id}` | PUT | 是 + admin | 更新客户端（public_client 不可变） |
+| `/api/v1/admin/clients/{client_id}` | DELETE | 是 + admin | 删除客户端（撤销 Token + 清授权码） |
+| `/api/v1/admin/clients/{client_id}/rotate-secret` | POST | 是 + admin | 轮换客户端密钥 |
+| `/api/v1/admin/clients/{client_id}/enable` | POST | 是 + admin | 启用客户端 |
+| `/api/v1/admin/clients/{client_id}/disable` | POST | 是 + admin | 禁用客户端（撤销 Token） |
+| `/api/v1/admin/*` | - | 是 + admin | 管理员接口（用户/审计日志/系统） |
 | `/api/v1/admin/quality/api/*` | GET | 是 + admin | 代码质量指标 API |
 
 ## 11. 部署与运维

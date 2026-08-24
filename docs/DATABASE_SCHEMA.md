@@ -66,7 +66,18 @@ active ──(5次登录失败)──> locked ──(30分钟后)──> active
 | `grant_types` | TEXT[] | NOT NULL | `'{authorization_code}'` | 允许的授权类型 |
 | `scopes` | TEXT[] | NOT NULL | `'{openid,profile,email}'` | 允许的权限范围 |
 | `public_client` | BOOLEAN | NOT NULL | FALSE | 是否为公开客户端（SPA/移动应用） |
+| `is_active` | BOOLEAN | NOT NULL | TRUE | 是否启用（021 迁移新增；禁用阻断授权/换 Token） |
 | `created_at` | TIMESTAMP | NOT NULL | `NOW()` | 创建时间 |
+| `updated_at` | TIMESTAMP | NULLABLE | `NOW()` | 更新时间（021 迁移新增，配置变更时刷新） |
+
+### 外键（021 迁移调整）
+
+| 子表 | 列 | 引用 | 删除动作 |
+|------|-----|------|---------|
+| `authorization_codes` | `client_id` | `oauth_clients(client_id)` | `ON DELETE CASCADE`（授权码为短命数据，删除客户端时级联清理） |
+| `tokens` | `client_id` | `oauth_clients(client_id)` | `ON DELETE SET NULL`（历史 token 行保留，删除客户端后归属置空并撤销） |
+
+> 迁移 `021_add_client_management`（up/down 可逆）：新增 `is_active`/`updated_at` 列，并把 003 迁移建立的两个外键从默认（无删除动作）分别调整为 `CASCADE` 与 `SET NULL`，支撑管理员删除客户端的硬删除语义。
 
 ### 索引
 

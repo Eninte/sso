@@ -68,6 +68,14 @@ const (
 	// 阶段 4 安全增强：管理员查看审计日志这一动作本身也需要被审计，防止审计日志被静默窃取
 	EventAuditLogsViewed AuditEventType = "admin.audit_logs_viewed" // 管理员查看审计日志
 
+	// 客户端管理（管理员 API）事件
+	EventClientCreated       AuditEventType = "admin.client_created"        // 管理员创建客户端
+	EventClientUpdated       AuditEventType = "admin.client_updated"        // 管理员更新客户端
+	EventClientDeleted       AuditEventType = "admin.client_deleted"        // 管理员删除客户端
+	EventClientSecretRotated AuditEventType = "admin.client_secret_rotated" // 管理员轮换客户端密钥
+	EventClientEnabled       AuditEventType = "admin.client_enabled"        // 管理员启用客户端
+	EventClientDisabled      AuditEventType = "admin.client_disabled"       // 管理员禁用客户端
+
 	EventSystemStart AuditEventType = "system.start" // 系统启动
 	EventSystemStop  AuditEventType = "system.stop"  // 系统停止
 )

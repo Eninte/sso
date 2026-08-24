@@ -673,3 +673,29 @@ func TestGetHTTPStatus_WithWrappedAppError(t *testing.T) {
 	assert.Equal(t, 404, apperrors.GetHTTPStatus(outerErr))
 	assert.Equal(t, apperrors.ErrCodeNotFound, apperrors.GetErrorCode(outerErr))
 }
+
+// ============================================================================
+// 客户端管理（管理员 API）错误
+// ============================================================================
+
+func TestClientManagementErrors(t *testing.T) {
+	t.Run("错误码与 HTTP 状态码", func(t *testing.T) {
+		assert.Equal(t, "CLIENT_NOT_FOUND", string(apperrors.ErrCodeClientNotFound))
+		assert.Equal(t, 404, apperrors.GetHTTPStatus(apperrors.ErrClientNotFound))
+
+		assert.Equal(t, "PUBLIC_CLIENT_IMMUTABLE", string(apperrors.ErrCodePublicImmutable))
+		assert.Equal(t, 400, apperrors.GetHTTPStatus(apperrors.ErrPublicClientImmutable))
+
+		assert.Equal(t, "SECRET_NOT_SUPPORTED_FOR_PUBLIC_CLIENT", string(apperrors.ErrCodeNoSecretForPublic))
+		assert.Equal(t, 400, apperrors.GetHTTPStatus(apperrors.ErrNoSecretForPublic))
+
+		// ErrUnsupportedGrant 复用已有的 UNSUPPORTED_GRANT_TYPE 错误码
+		assert.Equal(t, "UNSUPPORTED_GRANT_TYPE", string(apperrors.GetErrorCode(apperrors.ErrUnsupportedGrant)))
+		assert.Equal(t, 400, apperrors.GetHTTPStatus(apperrors.ErrUnsupportedGrant))
+	})
+
+	t.Run("Is 判断", func(t *testing.T) {
+		wrapped := fmt.Errorf("客户端管理: %w", apperrors.ErrClientNotFound)
+		assert.True(t, errors.Is(wrapped, apperrors.ErrClientNotFound))
+	})
+}

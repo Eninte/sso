@@ -168,7 +168,7 @@ func TestCacheKeys(t *testing.T) {
 
 	t.Run("ClientKey", func(t *testing.T) {
 		key := cache.ClientKey("client-123")
-		assert.Equal(t, "client:client-123", key)
+		assert.Equal(t, "client:v2:client-123", key)
 	})
 
 	t.Run("Set非序列化值", func(t *testing.T) {

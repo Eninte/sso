@@ -49,7 +49,7 @@
 ### 2.2 非目标（本期不做，防止范围蔓延）
 
 - **RFC 7591 动态客户端注册**（开放注册端点安全面大：需 initial access token、注册速率限制、software statement 校验）。留待后续单独任务。
-- **`client_credentials` 授权类型**：Token 端点未实现该流程（`internal/handler/token.go:47` 的 switch 只处理 `refresh_token`），注册时必须**拒绝**该 grant，避免注册出不可用的客户端。
+- **`client_credentials` 授权类型**：Token 端点未实现该流程（`internal/handler/token.go:46-54` 的 switch 仅处理 `refresh_token` 与 `authorization_code`，无 `client_credentials` 分支），注册时必须**拒绝**该 grant，避免注册出不可用的客户端。
 - 客户端自有管理门户（自助注册 UI），本期只做管理员 API。
 - OIDC Discovery 文档变更（不新增 `registration_endpoint`）。
 
@@ -66,7 +66,7 @@
 | D7 | 启用/禁用接口**幂等**（对已禁用客户端再次禁用返回成功） | 与现有用户启用/禁用实现保持一致（执行前阅读 `handleUserStatusChange` 确认语义并与之对齐） |
 | D8 | secret 生成复用 `internal/service/init.go` 的 `generateRandomHex(32)` + `passwordSvc.HashPassword`（bcrypt）哈希后存储，明文**仅创建/轮换响应中返回一次** | 与初始化流程完全一致 |
 | D9 | 校验复用：redirect URI 校验复用 `service` 包内 `validateRedirectURI`（`internal/service/init.go:189`）；scope 校验复用 `model.IsSupportedScope`（全局白名单） | 不重复造轮子 |
-| D10 | `getClient`（`internal/service/oauth.go:99`）是客户端读取唯一入口，`is_active` 检查加在此处（缓存命中与未命中都要检查） | 单一咽喉点，覆盖授权码签发、授权码交换、刷新全部路径 |
+| D10 | `getClient`（`internal/service/oauth.go:99`）是客户端读取唯一入口，`is_active` 检查加在此处（缓存命中与未命中都要检查） | 单一咽喉点，覆盖授权码签发与交换两条路径（`CreateAuthorizationCode` / `CreateAuthorizationCodeWithConsent` / `validateClientSecret` 均经 `getClient`）；刷新路径（`auth_token.go` 的 `RefreshTokenWithAudit`）不做客户端读取、仅比对 client_id 归属，由禁用/轮换/删除时先行的 Token 撤销兜底（见 D3/D4） |
 
 ## 4. 变更总览
 
@@ -364,17 +364,18 @@ set -a && source .env.test && set +a && make test-integration
 
 - `ErrCodeInvalidRedirectURI` / `ErrInvalidRedirectURI`（errors.go:66、255，400）——redirect URI 校验失败
 - `ErrCodeInvalidScope` / `ErrInvalidScope`（errors.go:74、263，400）——scope 不在白名单
+- `ErrCodeUnsupportedGrantType`（errors.go:384，Handler 消息区常量，值 `UNSUPPORTED_GRANT_TYPE`，token.go:53 的 default 分支已用它返回 400）——**已存在，勿重复定义**；新增 `ErrUnsupportedGrant` 错误值时直接复用该常量
 
 **新增（已核实不存在）**，按现有 `ErrCode*` / `Err*` 成对模式（错误消息中文、HTTP 状态码见括号）：
 
 ```go
 ErrCodeClientNotFound    ErrorCode = "CLIENT_NOT_FOUND"      // 404
-ErrCodeUnsupportedGrant  ErrorCode = "UNSUPPORTED_GRANT_TYPE" // 400
 ErrCodePublicImmutable   ErrorCode = "PUBLIC_CLIENT_IMMUTABLE" // 400
 ErrCodeNoSecretForPublic ErrorCode = "SECRET_NOT_SUPPORTED_FOR_PUBLIC_CLIENT" // 400
+// 另补错误值：ErrUnsupportedGrant = New(ErrCodeUnsupportedGrantType, "...", 400)（常量已存在，勿新建同名常量）
 ```
 
-> 新增前仍需 grep 一遍确认无重名（`grep -n "CLIENT_NOT_FOUND\|UNSUPPORTED_GRANT\|PUBLIC_CLIENT_IMMUTABLE\|SECRET_NOT_SUPPORTED" internal/errors/errors.go` 应无结果）。
+> 新增前仍需 grep 一遍确认无重名（`grep -n "CLIENT_NOT_FOUND\|PUBLIC_CLIENT_IMMUTABLE\|SECRET_NOT_SUPPORTED" internal/errors/errors.go` 应无结果；`UNSUPPORTED_GRANT` 会命中已有的 `ErrCodeUnsupportedGrantType`，属预期）。
 
 **3.2 审计事件** — `internal/model/audit.go`，在 `admin.user_*` 之后按同模式新增：
 

@@ -79,6 +79,8 @@ type Client struct {
 	Scopes       []string  `json:"scopes" db:"scopes"`
 	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 	PublicClient bool      `json:"public_client" db:"public_client"`
+	IsActive     bool      `json:"is_active" db:"is_active"`
+	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
 }
 
 const (
@@ -86,6 +88,35 @@ const (
 	GrantTypeRefreshToken      = "refresh_token"
 	GrantTypeClientCredentials = "client_credentials"
 )
+
+// IsSupportedGrantType 判断授权类型是否被服务端支持
+// 服务端仅实现 authorization_code 与 refresh_token（client_credentials 未实现，注册时必须拒绝）
+func IsSupportedGrantType(g string) bool {
+	switch g {
+	case GrantTypeAuthorizationCode, GrantTypeRefreshToken:
+		return true
+	default:
+		return false
+	}
+}
+
+// ClientCreateRequest 管理员创建客户端请求
+type ClientCreateRequest struct {
+	Name         string   `json:"name"`
+	RedirectURIs []string `json:"redirect_uris"`
+	GrantTypes   []string `json:"grant_types"`
+	Scopes       []string `json:"scopes"`
+	PublicClient bool     `json:"public_client"`
+}
+
+// ClientUpdateRequest 管理员更新客户端请求（public_client 不可变）
+type ClientUpdateRequest struct {
+	Name         string   `json:"name"`
+	RedirectURIs []string `json:"redirect_uris"`
+	GrantTypes   []string `json:"grant_types"`
+	Scopes       []string `json:"scopes"`
+	PublicClient *bool    `json:"public_client,omitempty"` // 非空时必须与当前值一致
+}
 
 type AuthorizeRequest struct {
 	ClientID            string `json:"client_id"`

@@ -551,6 +551,7 @@ func TestTokenHandler_HandleToken_AuthorizationCode(t *testing.T) {
 		RedirectURIs: []string{"http://localhost:3000/callback"},
 		GrantTypes:   []string{model.GrantTypeAuthorizationCode},
 		PublicClient: false,
+		IsActive:     true,
 	}
 	store.AddClient(client)
 

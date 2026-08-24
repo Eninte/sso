@@ -78,6 +78,11 @@ const (
 	ErrCodeConsentInvalid  ErrorCode = "CONSENT_INVALID"  // consent_token 无效或已过期
 	ErrCodeClientMismatch  ErrorCode = "CLIENT_MISMATCH"  // refresh_token 客户端归属不一致
 
+	// 客户端管理（管理员 API）错误
+	ErrCodeClientNotFound    ErrorCode = "CLIENT_NOT_FOUND"                       // 客户端不存在
+	ErrCodePublicImmutable   ErrorCode = "PUBLIC_CLIENT_IMMUTABLE"                // 公共客户端属性不可修改
+	ErrCodeNoSecretForPublic ErrorCode = "SECRET_NOT_SUPPORTED_FOR_PUBLIC_CLIENT" // #nosec G101 -- 错误码常量，非凭证 // 公共客户端不支持密钥
+
 	// MFA相关错误
 	ErrCodeMFAAlreadyEnabled      ErrorCode = "MFA_ALREADY_ENABLED"      // MFA已启用
 	ErrCodeMFANotEnabled          ErrorCode = "MFA_NOT_ENABLED"          // MFA未启用
@@ -266,6 +271,13 @@ var (
 	ErrConsentDenied   = New(ErrCodeConsentDenied, "用户拒绝授权", 403)
 	ErrConsentInvalid  = New(ErrCodeConsentInvalid, "consent_token无效或已过期", 400)
 	ErrClientMismatch  = New(ErrCodeClientMismatch, "客户端与Token归属不一致", 401)
+
+	// 客户端管理（管理员 API）错误
+	ErrClientNotFound        = New(ErrCodeClientNotFound, "客户端不存在", 404)
+	ErrPublicClientImmutable = New(ErrCodePublicImmutable, "公共客户端属性不可修改", 400)
+	ErrNoSecretForPublic     = New(ErrCodeNoSecretForPublic, "公共客户端不支持密钥", 400)
+	// ErrUnsupportedGrant 复用已有的 ErrCodeUnsupportedGrantType（token 端点 default 分支同款错误码）
+	ErrUnsupportedGrant = New(ErrCodeUnsupportedGrantType, "不支持的授权类型", 400)
 
 	// MFA错误
 	ErrMFAAlreadyEnabled    = New(ErrCodeMFAAlreadyEnabled, "MFA已启用", 409)

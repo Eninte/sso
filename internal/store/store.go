@@ -85,6 +85,13 @@ type ClientStore interface {
 	CreateClient(ctx context.Context, client *model.Client) error
 	GetByClientID(ctx context.Context, clientID string) (*model.Client, error)
 	ValidateRedirectURI(ctx context.Context, clientID, redirectURI string) bool
+	// ↓ 客户端管理（管理员 API）
+	ListClients(ctx context.Context, offset, limit int) ([]*model.Client, int, error)
+	UpdateClient(ctx context.Context, client *model.Client) error
+	DeleteClient(ctx context.Context, clientID string) error // 单事务：撤销token→删授权码→删客户端
+	RotateClientSecret(ctx context.Context, clientID, secretHash string) error
+	SetClientActive(ctx context.Context, clientID string, active bool) error
+	RevokeAllClientTokens(ctx context.Context, clientID string) error // 供禁用/轮换复用（非事务场景）
 }
 
 // ============================================================================

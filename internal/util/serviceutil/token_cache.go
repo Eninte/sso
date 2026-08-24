@@ -39,3 +39,21 @@ func InvalidateUserTokenCache(ctx context.Context, cacheSvc cache.Cache, userID 
 		)
 	}
 }
+
+// InvalidateClientCache 失效客户端缓存（客户端配置变更后必须调用）
+//
+// 设计目的：与 InvalidateUserTokenCache 同理，避免 service 之间的循环依赖。
+// 客户端缓存由 OAuthService.getClient 读取（cache.ClientKey，TTL 为 ClientTTL），
+// 任何修改客户端配置的路径（更新/禁用/启用/轮换/删除）都必须失效该缓存，
+// 否则旧配置最多存活 ClientTTL（1 小时），导致变更延迟生效。
+func InvalidateClientCache(ctx context.Context, cacheSvc cache.Cache, clientID string) {
+	if cacheSvc == nil {
+		return
+	}
+	if err := cacheSvc.Delete(ctx, cache.ClientKey(clientID)); err != nil {
+		slog.Warn("清除客户端缓存失败",
+			"error", err,
+			"client_id", clientID,
+		)
+	}
+}

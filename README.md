@@ -1,10 +1,10 @@
 # SSO 单点登录服务
 
-[![Go Version](https://img.shields.io/badge/Go-1.26.5-00ADD8?style=flat&logo=go)](https://golang.org/)
+[![Go Version](https://img.shields.io/badge/Go-1.26.6-00ADD8?style=flat&logo=go)](https://golang.org/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://img.shields.io/badge/CI-Passing-brightgreen.svg)](.github/workflows/ci.yml)
 
-生产级单点登录(SSO)微服务，基于Go 1.26.5构建，支持OAuth 2.0和OpenID Connect协议。为内部和外部应用提供统一、安全的认证服务。
+生产级单点登录(SSO)微服务，基于Go 1.26.6构建，支持OAuth 2.0和OpenID Connect协议。为内部和外部应用提供统一、安全的认证服务。
 
 ## 功能特性
 
@@ -50,7 +50,7 @@
 
 ### 前置要求
 
-- Go 1.26.5+（CI 使用 1.26.5）
+- Go 1.26.6+（CI 使用 1.26.6）
 - Docker & Docker Compose
 - PostgreSQL 15+
 - Redis 7+
@@ -312,6 +312,14 @@ make docker-logs
 | POST | /api/v1/admin/users/{id}/enable | 启用用户 | 是 |
 | DELETE | /api/v1/admin/users/{id} | 删除用户 | 是 |
 | GET | /api/v1/admin/audit-logs | 审计日志（分页） | 是 |
+| POST | /api/v1/admin/clients | 创建 OAuth 客户端（机密/公共） | 是 |
+| GET | /api/v1/admin/clients | 客户端列表（分页，不含 secret） | 是 |
+| GET | /api/v1/admin/clients/{client_id} | 客户端详情 | 是 |
+| PUT | /api/v1/admin/clients/{client_id} | 更新客户端（public_client 不可变） | 是 |
+| DELETE | /api/v1/admin/clients/{client_id} | 删除客户端（撤销 Token + 清授权码） | 是 |
+| POST | /api/v1/admin/clients/{client_id}/rotate-secret | 轮换客户端密钥 | 是 |
+| POST | /api/v1/admin/clients/{client_id}/enable | 启用客户端 | 是 |
+| POST | /api/v1/admin/clients/{client_id}/disable | 禁用客户端（撤销 Token） | 是 |
 | GET | /api/v1/admin/quality/api/metrics | 质量指标查询 | 是 |
 | GET | /api/v1/admin/quality/api/report/weekly | 周度质量报告 | 是 |
 

@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/example/sso/internal/cache"
 	"github.com/example/sso/internal/crypto"
 	apperrors "github.com/example/sso/internal/errors"
 	"github.com/example/sso/internal/model"
@@ -57,6 +58,7 @@ func createTestClientWithScopes(clientID string, scopes []string, public bool) *
 		GrantTypes:   []string{model.GrantTypeAuthorizationCode, model.GrantTypeRefreshToken},
 		Scopes:       scopes,
 		PublicClient: public,
+		IsActive:     true,
 		CreatedAt:    time.Now(),
 	}
 }
@@ -698,5 +700,85 @@ func TestScopeNormalization(t *testing.T) {
 	t.Run("NormalizeScopes-空输入返回空切片", func(t *testing.T) {
 		result := model.NormalizeScopes(nil)
 		assert.Empty(t, result)
+	})
+}
+
+// TestOAuthService_Exchange_CacheMissesClientSecret 验证缓存命中时 secret 从 DB 回源
+//
+// 背景：Client.ClientSecret 带 json:"-" 标签，内存/Redis 缓存经 JSON 序列化存储，
+// 缓存命中后该字段为空。validateClientSecret 需回源 DB 读取哈希，否则机密客户端
+// 在缓存命中路径下密钥校验必然失败（该路径被客户端管理 E2E 首次覆盖时暴露）。
+func TestOAuthService_Exchange_CacheMissesClientSecret(t *testing.T) {
+	ctx := context.Background()
+	store := mock.New()
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	jwtSvc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, "test-issuer", 15*time.Minute, 7*24*time.Hour)
+	tokenSvc := service.NewTokenService(jwtSvc, store)
+	passwordSvc := crypto.NewPasswordService(4)
+	secretHash, err := passwordSvc.HashPassword("test-client-secret")
+	require.NoError(t, err)
+	memCache := cache.NewMemoryCache()
+	oauthSvc := service.NewOAuthService(store, tokenSvc,
+		service.WithOAuthPassword(passwordSvc),
+		service.WithOAuthCache(memCache),
+	)
+
+	client := &model.Client{
+		ID:           "cache-secret-client",
+		ClientID:     "cache-secret-client",
+		ClientSecret: secretHash,
+		Name:         "Cache Secret Client",
+		RedirectURIs: []string{"http://localhost:3000/callback"},
+		GrantTypes:   []string{model.GrantTypeAuthorizationCode, model.GrantTypeRefreshToken},
+		Scopes:       []string{"openid"},
+		PublicClient: false,
+		IsActive:     true,
+	}
+	store.AddClient(client)
+
+	user := createTestUser()
+	store.AddUser(user)
+
+	// 预置缓存：模拟签发流程已缓存 client（JSON 序列化丢失 secret）
+	cached := *client
+	cached.ClientSecret = ""
+	require.NoError(t, memCache.Set(context.Background(), cache.ClientKey(client.ClientID), &cached, time.Minute))
+
+	code := &model.AuthorizationCode{
+		Code:        "cache-secret-code",
+		ClientID:    client.ClientID,
+		UserID:      user.ID,
+		RedirectURI: "http://localhost:3000/callback",
+		Scopes:      []string{"openid"},
+		ExpiresAt:   time.Now().Add(10 * time.Minute),
+		CreatedAt:   time.Now(),
+	}
+	require.NoError(t, store.StoreAuthorizationCode(ctx, code))
+
+	t.Run("缓存命中且secret为空时回源DB验证成功", func(t *testing.T) {
+		resp, err := oauthSvc.ExchangeAuthorizationCode(ctx, code.Code, client.ClientID,
+			"test-client-secret", "http://localhost:3000/callback", "")
+		require.NoError(t, err)
+		assert.NotEmpty(t, resp.AccessToken)
+	})
+
+	t.Run("错误密钥仍被拒", func(t *testing.T) {
+		// 使用独立的授权码（上一个子测试已将其标记为已使用）
+		wrongCode := &model.AuthorizationCode{
+			Code:        "cache-secret-code-2",
+			ClientID:    client.ClientID,
+			UserID:      user.ID,
+			RedirectURI: "http://localhost:3000/callback",
+			Scopes:      []string{"openid"},
+			ExpiresAt:   time.Now().Add(10 * time.Minute),
+			CreatedAt:   time.Now(),
+		}
+		require.NoError(t, store.StoreAuthorizationCode(ctx, wrongCode))
+
+		_, err := oauthSvc.ExchangeAuthorizationCode(ctx, wrongCode.Code, client.ClientID,
+			"wrong-secret", "http://localhost:3000/callback", "")
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, service.ErrInvalidClient))
 	})
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/example/sso/internal/cache"
+	"github.com/example/sso/internal/crypto"
 	apperrors "github.com/example/sso/internal/errors"
 	"github.com/example/sso/internal/logging"
 	"github.com/example/sso/internal/model"
@@ -50,6 +51,16 @@ type AdminServiceInterface interface {
 	EnableUser(ctx context.Context, userID string) error
 	DeleteUser(ctx context.Context, operatorID, userID string) error
 
+	// 客户端管理
+	ListClients(ctx context.Context, offset, limit int) ([]*model.Client, int, error)
+	GetClient(ctx context.Context, clientID string) (*model.Client, error)
+	CreateClient(ctx context.Context, operatorID string, req model.ClientCreateRequest) (*model.Client, string, error)
+	UpdateClient(ctx context.Context, operatorID string, clientID string, req model.ClientUpdateRequest) (*model.Client, error)
+	DeleteClient(ctx context.Context, operatorID, clientID string) error
+	RotateClientSecret(ctx context.Context, operatorID, clientID string) (string, error)
+	EnableClient(ctx context.Context, operatorID, clientID string) error
+	DisableClient(ctx context.Context, operatorID, clientID string) error
+
 	// 审计日志
 	GetAuditLogs(ctx context.Context, offset, limit int, eventType string) ([]*model.AuditLog, int, error)
 
@@ -77,11 +88,12 @@ type SystemHealthInfo struct {
 
 // AdminService 管理员服务实现
 type AdminService struct {
-	store     store.Store
-	cache     cache.Cache
-	auditSvc  *AuditService
-	version   string
-	buildTime string
+	store       store.Store
+	cache       cache.Cache
+	auditSvc    *AuditService
+	passwordSvc *crypto.PasswordService // 用于客户端密钥哈希（与 InitService 一致）
+	version     string
+	buildTime   string
 }
 
 // AdminServiceOption AdminService 配置选项
@@ -95,6 +107,11 @@ func WithAdminCache(cacheSvc cache.Cache) AdminServiceOption {
 // WithAdminAudit 设置审计服务
 func WithAdminAudit(auditSvc *AuditService) AdminServiceOption {
 	return func(s *AdminService) { s.auditSvc = auditSvc }
+}
+
+// WithAdminPasswordService 设置密码服务（用于客户端密钥哈希）
+func WithAdminPasswordService(pw *crypto.PasswordService) AdminServiceOption {
+	return func(s *AdminService) { s.passwordSvc = pw }
 }
 
 // WithAdminVersion 设置版本信息

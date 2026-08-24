@@ -102,6 +102,11 @@ func (s *OAuthService) getClient(ctx context.Context, clientID string) (*model.C
 		var cachedClient model.Client
 		cacheKey := cache.ClientKey(clientID)
 		if err := s.cache.Get(ctx, cacheKey, &cachedClient); err == nil {
+			// 禁用客户端统一返回 ErrInvalidClient（D6：不向公网泄露客户端状态）
+			// 注：缓存键已版本化为 ClientCachePrefix "client:v2:"，缓存条目必然含 is_active 字段
+			if !cachedClient.IsActive {
+				return nil, ErrInvalidClient
+			}
 			return &cachedClient, nil
 		}
 	}
@@ -110,6 +115,11 @@ func (s *OAuthService) getClient(ctx context.Context, clientID string) (*model.C
 	client, err := s.store.GetByClientID(ctx, clientID)
 	if err != nil {
 		return nil, serviceutil.HandleStoreError(err, ErrInvalidClient)
+	}
+
+	// 禁用客户端统一返回 ErrInvalidClient（D6）
+	if !client.IsActive {
+		return nil, ErrInvalidClient
 	}
 
 	// 缓存结果（失败不影响主流程）
@@ -422,6 +432,16 @@ func (s *OAuthService) validateClientSecret(
 		if s.passwordSvc == nil {
 			s.logAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "password_service_not_initialized")
 			return ErrInvalidClient
+		}
+		// 缓存条目经 JSON 序列化存储，ClientSecret 带 json:"-" 标签不会进入缓存，
+		// 缓存命中时该字段为空，需回源 DB 读取哈希再验证（机密客户端密钥校验不受缓存影响）
+		if client.ClientSecret == "" {
+			dbClient, dbErr := s.store.GetByClientID(ctx, clientID)
+			if dbErr != nil {
+				s.logAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "invalid_client_secret")
+				return ErrInvalidClient
+			}
+			client.ClientSecret = dbClient.ClientSecret
 		}
 		if err := s.passwordSvc.VerifyPassword(client.ClientSecret, clientSecret); err != nil {
 			s.logAuthCodeInvalid(ctx, authCode.UserID, clientID, "", "invalid_client_secret")

@@ -169,6 +169,7 @@ func (s *InitService) CreateOAuthClient(ctx context.Context, name, redirectURI s
 		GrantTypes:   []string{"authorization_code", "refresh_token"},
 		Scopes:       []string{"openid", "profile", "email"},
 		PublicClient: false,
+		IsActive:     true,
 		CreatedAt:    time.Now(),
 	}
 

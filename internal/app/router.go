@@ -215,6 +215,16 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 	admin.HandleFunc("/users/{id}", adminHandler.HandleDeleteUser).Methods("DELETE")
 	admin.HandleFunc("/audit-logs", adminHandler.HandleAuditLogs).Methods("GET")
 
+	// 客户端管理（管理员 API）
+	admin.HandleFunc("/clients", adminHandler.HandleCreateClient).Methods("POST")
+	admin.HandleFunc("/clients", adminHandler.HandleListClients).Methods("GET")
+	admin.HandleFunc("/clients/{client_id}", adminHandler.HandleGetClient).Methods("GET")
+	admin.HandleFunc("/clients/{client_id}", adminHandler.HandleUpdateClient).Methods("PUT")
+	admin.HandleFunc("/clients/{client_id}", adminHandler.HandleDeleteClient).Methods("DELETE")
+	admin.HandleFunc("/clients/{client_id}/rotate-secret", adminHandler.HandleRotateClientSecret).Methods("POST")
+	admin.HandleFunc("/clients/{client_id}/enable", adminHandler.HandleEnableClient).Methods("POST")
+	admin.HandleFunc("/clients/{client_id}/disable", adminHandler.HandleDisableClient).Methods("POST")
+
 	// 质量仪表盘API端点
 	admin.HandleFunc("/quality/api/metrics", svc.Dashboard.HandleMetricsAPI).Methods("GET")
 	admin.HandleFunc("/quality/api/report/weekly", svc.Dashboard.HandleWeeklyReportAPI).Methods("GET")
