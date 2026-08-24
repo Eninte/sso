@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- **管理员客户端管理 API**（OAuth 客户端 CRUD / 禁用启用 / 密钥轮换）：新增 `/api/v1/admin/clients` 系列端点，支持创建机密/公共客户端、查询、分页列表、全量更新、禁用/启用、删除与密钥轮换。安全设计：禁用/删除/轮换先撤销该客户端全部未撤销 Token；`is_active` 在 `getClient`（缓存命中与 DB 路径）统一检查，禁用客户端对公网返回 `INVALID_CLIENT`；公共客户端强制 PKCE（已有）且不支持密钥；`client_credentials` 注册被拒（`UNSUPPORTED_GRANT_TYPE`）。配套迁移 `021_add_client_management`（`oauth_clients` 新增 `is_active`/`updated_at`；`authorization_codes.client_id` → `ON DELETE CASCADE`、`tokens.client_id` → `ON DELETE SET NULL`）
+- **客户端缓存键版本化**：`ClientCachePrefix` 由 `client:` 改为 `client:v2:`，避免升级后旧缓存条目（无 `is_active` 字段）被误判为禁用导致 OAuth 全流程瘫痪
+
+### Fixed
+
+- **机密客户端密钥校验在缓存命中下必然失败**（客户端管理 E2E 首次覆盖暴露）：`model.Client.ClientSecret` 带 `json:"-"` 标签，内存/Redis 缓存经 JSON 序列化后该字段为空，`validateClientSecret` 用空字符串校验 bcrypt 必然失败。修复：缓存命中且 secret 为空时回源 DB 读取哈希再验证
+- **Go 工具链升级到 1.26.6，消除全部标准库漏洞**：`govulncheck` 在 go1.26.4 下报告 8 个 stdlib 漏洞（`net/http`/`crypto/tls`/`net/url`/`html/template`/`encoding/xml`/`encoding/asn1`，修复在 1.26.5/1.26.6）。CI `go-version` 升级为 `1.26.6`（5 处）、Docker 构建镜像升级为 `golang:1.26.6-alpine`、`go.mod` go 指令升级为 `1.26.6`。升级后 `govulncheck` 报告 **0 漏洞**
+
 ## [1.1.1] - 2026-08-03
 
 ### Fixed
