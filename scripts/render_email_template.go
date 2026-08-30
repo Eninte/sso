@@ -52,10 +52,10 @@ func main() {
 
 	// 初始化模板引擎（使用操作系统文件系统）
 	templateConfig := email.TemplateConfig{
-		TemplateFS:  nil, // 使用操作系统文件系统
-		TemplateDir: templateDir,
-		DefaultLang: "zh",
-		CompanyName: "SSO服务",
+		TemplateFS:   nil, // 使用操作系统文件系统
+		TemplateDir:  templateDir,
+		DefaultLang:  "zh",
+		CompanyName:  "SSO服务",
 		SupportEmail: "support@example.com",
 		LogoURL:      "",
 	}
@@ -67,12 +67,12 @@ func main() {
 
 	// 准备模板数据
 	data := email.TemplateData{
-		Username:  *username,
-		ActionURL: "https://example.com/verify?token=test123",
-		ActionText: "验证邮箱",
+		Username:     *username,
+		ActionURL:    "https://example.com/verify?token=test123",
+		ActionText:   "验证邮箱",
 		SecurityNote: "如果您没有注册账户，请忽略此邮件。",
-		Year:      time.Now().Year(),
-		Language:  *lang,
+		Year:         time.Now().Year(),
+		Language:     *lang,
 	}
 
 	// 渲染邮件
@@ -96,7 +96,7 @@ func main() {
 	fmt.Printf("📨 邮件主题: %s\n\n", subject)
 	fmt.Printf("📄 HTML内容:\n")
 	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-	
+
 	if *output != "" {
 		// 写入文件
 		err := os.WriteFile(*output, []byte(htmlBody), 0644)
@@ -108,7 +108,7 @@ func main() {
 		// 输出到stdout
 		fmt.Println(htmlBody)
 	}
-	
+
 	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 	fmt.Printf("✅ 邮件渲染成功！\n")
 }

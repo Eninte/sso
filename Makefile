@@ -100,9 +100,9 @@ test-e2e-cleanup: ## 清理E2E测试数据（CI安全，非交互模式）
 test-e2e-full: test-e2e-prepare test-e2e test-e2e-cleanup ## 完整E2E测试流程（准备数据 + 运行测试 + 清理）
 
 .PHONY: test-coverage
-test-coverage: ## 生成测试覆盖率报告（HTML）并执行阈值检查（>=80%）
+test-coverage: ## 生成测试覆盖率报告（HTML）并执行阈值检查（>=80%，参数与 CI 对齐：-race -p 1 -tags=integration）
 	@test -f .env.test || { echo "❌ .env.test 不存在，请参照 .env.example 创建"; exit 1; }; set -a; source .env.test; set +a; \
-	DATABASE_URL="$(TEST_DATABASE_URL)" go test -coverprofile=coverage.out $$(go list ./internal/... | grep -v '/store/mock' | grep -v '/internal/app$$' | grep -v '/internal/testing/') || { \
+	DATABASE_URL="$(TEST_DATABASE_URL)" go test -race -p 1 -tags=integration -timeout 180s -coverprofile=coverage.out $$(go list ./internal/... | grep -v '/store/mock' | grep -v '/internal/app$$' | grep -v '/internal/testing/') || { \
 		echo "❌ 覆盖率测试失败"; \
 		exit 1; \
 	}
@@ -113,7 +113,7 @@ test-coverage: ## 生成测试覆盖率报告（HTML）并执行阈值检查（>
 	@echo "---"
 	@echo "生成 HTML 覆盖率报告..."
 	@go tool cover -html=coverage.out -o coverage.html
-	@COVERAGE=$$(go tool cover -func=coverage.out | grep total | awk '{print $$3}' | sed 's/%//'); \
+	@COVERAGE=$$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $$3}' | sed 's/%//'); \
 	echo "当前覆盖率: $$COVERAGE% (阈值: 80.0%)"; \
 	awk -v c=$$COVERAGE 'BEGIN { exit !(c >= 80.0) }' || { \
 		echo "❌ 覆盖率 $$COVERAGE% 低于 80% 阈值"; \
@@ -121,6 +121,13 @@ test-coverage: ## 生成测试覆盖率报告（HTML）并执行阈值检查（>
 	}
 	@echo "✅ 覆盖率报告: coverage.html"
 	@echo "✅ 覆盖率检查通过"
+
+.PHONY: quality-metrics-store
+quality-metrics-store: ## 将覆盖率/JUnit 结果回写质量指标表（供 /api/v1/admin/quality/* 仪表盘展示）
+	@test -f .env.test || { echo "❌ .env.test 不存在，请参照 .env.example 创建"; exit 1; }; set -a; source .env.test; set +a; \
+	test -f coverage.out || { echo "❌ coverage.out 不存在，请先运行 make test-coverage"; exit 1; }; \
+	if [ -n "$(JUNIT)" ]; then JUNIT_FLAG="-junit $(JUNIT)"; else JUNIT_FLAG=""; fi; \
+	go run ./scripts/qualitymetrics -coverage coverage.out -database "$$DATABASE_URL" $$JUNIT_FLAG
 
 .PHONY: test-e2e-coverage
 test-e2e-coverage: ## 生成 E2E 测试覆盖率报告（需要服务运行中）
@@ -184,11 +191,11 @@ test-failed: ## 仅重跑失败的测试
 .PHONY: test-coverage-check
 test-coverage-check: ## 运行测试并检查覆盖率阈值 (>=80%，排除app组合根/store/mock/testing基础设施)
 	@test -f .env.test || { echo "❌ .env.test 不存在，请参照 .env.example 创建"; exit 1; }; set -a; source .env.test; set +a; \
-	DATABASE_URL="$(TEST_DATABASE_URL)" go test -coverprofile=coverage.out $$(go list ./internal/... | grep -v '/store/mock' | grep -v '/internal/app$$' | grep -v '/internal/testing/') > /dev/null 2>&1 || { \
+	DATABASE_URL="$(TEST_DATABASE_URL)" go test -race -p 1 -tags=integration -timeout 180s -coverprofile=coverage.out $$(go list ./internal/... | grep -v '/store/mock' | grep -v '/internal/app$$' | grep -v '/internal/testing/') > /dev/null 2>&1 || { \
 		echo "❌ 测试失败"; \
 		exit 1; \
 	}
-	@COVERAGE=$$(go tool cover -func=coverage.out | grep total | awk '{print $$3}' | sed 's/%//'); \
+	@COVERAGE=$$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $$3}' | sed 's/%//'); \
 	echo "当前覆盖率: $$COVERAGE% (阈值: 80.0%)"; \
 	awk -v c=$$COVERAGE 'BEGIN { exit !(c >= 80.0) }' || { \
 		echo "❌ 覆盖率 $$COVERAGE% 低于 80% 阈值"; \
@@ -278,10 +285,19 @@ deploy: ## 部署到TrueNAS (用法: make deploy [TRUENAS_HOST=192.168.1.3])
 # ============================================================================
 # 代码质量
 # ============================================================================
+# golangci-lint 固定版本（与 .github/workflows/ci.yml 保持一致，保证本地与 CI 结果可比）
+GOLANGCI_LINT_VERSION ?= v1.64.8
+
 .PHONY: lint
 lint: ## 运行代码检查
 	@go vet ./... || { echo "❌ go vet 检查失败"; exit 1; }
 	@which golangci-lint > /dev/null || { echo "❌ 未安装 golangci-lint，请安装后再运行 lint"; exit 1; }
+	@installed=$$(golangci-lint version 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1); \
+		if [ "$$installed" != "$(GOLANGCI_LINT_VERSION)" ]; then \
+			echo "❌ golangci-lint 版本为 $${installed:-未知}，要求 $(GOLANGCI_LINT_VERSION)（与 CI 一致）"; \
+			echo "   请执行: go install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)"; \
+			exit 1; \
+		fi
 	@golangci-lint run ./... || { echo "❌ golangci-lint 检查失败"; exit 1; }
 	@echo "✅ 代码检查通过"
 

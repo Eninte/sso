@@ -122,6 +122,9 @@ const (
 	ErrCodeNoActiveKey    ErrorCode = "NO_ACTIVE_KEY"    // 无活跃密钥
 	ErrCodeKeyExpired     ErrorCode = "KEY_EXPIRED"      // 密钥已过期
 
+	// 密钥状态冲突（撤销活跃密钥前必须先轮换）
+	ErrCodeKeyStatusConflict ErrorCode = "KEY_STATUS_CONFLICT" // 密钥状态冲突
+
 	// 缓存相关错误
 	ErrCodeCacheMiss ErrorCode = "CACHE_MISS" // 缓存未命中
 
@@ -319,6 +322,9 @@ var (
 	ErrPublicKeyNil   = New(ErrCodePublicKeyNil, "公钥不能为空", 400)
 	ErrNoActiveKey    = New(ErrCodeNoActiveKey, "无活跃密钥可用", 500)
 	ErrKeyExpired     = New(ErrCodeKeyExpired, "密钥已过期", 401)
+
+	// 密钥状态冲突
+	ErrKeyStatusConflict = New(ErrCodeKeyStatusConflict, "cannot revoke active key, rotate first", 409)
 
 	// 缓存错误
 	ErrCacheMiss = New(ErrCodeCacheMiss, "缓存未命中", 404)

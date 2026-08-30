@@ -286,7 +286,7 @@ func (s *AuthService) RefreshTokenWithClientID(ctx context.Context, refreshToken
 // 阶段 2.4：委托到 serviceutil.InvalidateUserTokenCache 统一实现
 // 详见 serviceutil 包文档
 func (s *AuthService) invalidateUserTokenCache(ctx context.Context, userID string) {
-	serviceutil.InvalidateUserTokenCache(ctx, s.cache, userID)
+	serviceutil.InvalidateUserTokenCache(ctx, s.store, s.cache, userID)
 }
 
 // LogoutWithAudit 用户登出（带审计日志）

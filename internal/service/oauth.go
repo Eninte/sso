@@ -4,9 +4,10 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 
 	"github.com/example/sso/internal/cache"
 	"github.com/example/sso/internal/common"
@@ -47,6 +48,7 @@ type OAuthService struct {
 	cache       cache.Cache             // 缓存服务
 	tokenSvc    *TokenService           // Token生成服务
 	passwordSvc *crypto.PasswordService // 密码服务（用于验证机密客户端密钥）
+	clientSF    singleflight.Group      // 防缓存击穿：getClient 并发回源去重
 }
 
 // OAuthServiceOption OAuthService 配置选项
@@ -95,7 +97,10 @@ func NewOAuthServiceWithCache(store store.Store, cacheSvc cache.Cache, tokenSvc 
 	return NewOAuthServiceWithOptions(store, tokenSvc, WithOAuthCache(cacheSvc))
 }
 
-// getClient 获取客户端（带缓存）
+// getClient 获取客户端（带缓存 + singleflight 防击穿）
+//
+// 缓存未命中时通过 singleflight 去重并发回源：同一 clientID 的并发请求
+// 只有一个查询 DB，其余等待复用结果，避免热点客户端缓存过期或 Redis 抖动时打垮 DB
 func (s *OAuthService) getClient(ctx context.Context, clientID string) (*model.Client, error) {
 	// 检查缓存
 	if s.cache != nil {
@@ -111,27 +116,40 @@ func (s *OAuthService) getClient(ctx context.Context, clientID string) (*model.C
 		}
 	}
 
-	// 缓存未命中，查询数据库
-	client, err := s.store.GetByClientID(ctx, clientID)
+	// 缓存未命中，singleflight 去重后查询数据库
+	v, err, _ := s.clientSF.Do(clientID, func() (interface{}, error) {
+		client, err := s.store.GetByClientID(ctx, clientID)
+		if err != nil {
+			return nil, serviceutil.HandleStoreError(err, ErrInvalidClient)
+		}
+
+		// 禁用客户端统一返回 ErrInvalidClient（D6）
+		if !client.IsActive {
+			return nil, ErrInvalidClient
+		}
+
+		// 缓存结果（失败不影响主流程）
+		if s.cache != nil {
+			cacheKey := cache.ClientKey(clientID)
+			if err := s.cache.Set(ctx, cacheKey, client, cache.ClientTTL); err != nil {
+				// 阶段 D 审查修复（H5）：cache 错误可能含 Redis DSN
+				slog.Warn("缓存客户端信息失败", "error", logging.SanitizeDBURL(err.Error()), "client_id", clientID)
+			}
+		}
+
+		return client, nil
+	})
 	if err != nil {
-		return nil, serviceutil.HandleStoreError(err, ErrInvalidClient)
+		return nil, err
 	}
 
-	// 禁用客户端统一返回 ErrInvalidClient（D6）
-	if !client.IsActive {
+	client, ok := v.(*model.Client)
+	if !ok {
 		return nil, ErrInvalidClient
 	}
-
-	// 缓存结果（失败不影响主流程）
-	if s.cache != nil {
-		cacheKey := cache.ClientKey(clientID)
-		if err := s.cache.Set(ctx, cacheKey, client, cache.ClientTTL); err != nil {
-			// 阶段 D 审查修复（H5）：cache 错误可能含 Redis DSN
-			slog.Warn("缓存客户端信息失败", "error", logging.SanitizeDBURL(err.Error()), "client_id", clientID)
-		}
-	}
-
-	return client, nil
+	// 返回副本：singleflight 的结果为并发调用方共享，避免调用方间共享顶层指针
+	shallow := *client
+	return &shallow, nil
 }
 
 // ============================================================================
@@ -501,7 +519,7 @@ func (s *OAuthService) generateTokenResponse(
 	}
 
 	if s.tokenSvc == nil {
-		return nil, fmt.Errorf("token service is not initialized")
+		return nil, apperrors.ErrInternal
 	}
 
 	clientID := &authCode.ClientID

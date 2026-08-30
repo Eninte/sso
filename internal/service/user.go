@@ -186,6 +186,9 @@ func (s *UserService) VerifyEmail(ctx context.Context, userID, token string) err
 		return serviceutil.WrapServiceError("更新用户", err)
 	}
 
+	// 邮箱验证状态变更立即对外生效（userinfo/user 缓存 TTL 5 分钟）
+	serviceutil.InvalidateUserInfoCache(ctx, s.cache, userID)
+
 	// 清理验证令牌（失败不影响主流程）
 	if err := s.store.DeleteVerificationToken(ctx, userID); err != nil {
 		// 阶段 D 审查修复（H5）：store 错误可能含 DSN
@@ -335,7 +338,7 @@ func (s *UserService) ResetPasswordWithAudit(ctx context.Context, userID, token,
 		logger.Warn("撤销用户Token失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", userID)
 	}
 	// 阶段 2.4：统一清 token 缓存，确保撤销立即生效
-	serviceutil.InvalidateUserTokenCache(ctx, s.cache, userID)
+	serviceutil.InvalidateUserTokenCache(ctx, s.store, s.cache, userID)
 
 	// 使用统一的审计日志工具记录密码重置事件
 	auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventPasswordReset), userID, map[string]interface{}{
@@ -392,7 +395,7 @@ func (s *UserService) ChangePasswordWithAudit(ctx context.Context, userID, oldPa
 		slog.Warn("修改密码后撤销用户Token失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", userID)
 	}
 	// 同步清 token 缓存，确保撤销立即生效
-	serviceutil.InvalidateUserTokenCache(ctx, s.cache, userID)
+	serviceutil.InvalidateUserTokenCache(ctx, s.store, s.cache, userID)
 
 	// 使用统一的审计日志工具记录密码修改成功事件
 	auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventPasswordChanged), userID, map[string]interface{}{

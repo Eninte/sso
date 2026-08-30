@@ -110,12 +110,24 @@ jobs:
 
       - name: Check coverage threshold
         run: |
-          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          # 锚定匹配 total: 行，避免误匹配同名函数（如 totalTimeout）导致门槛检查被静默绕过
+          COVERAGE=$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $3}' | sed 's/%//')
           if [ $(echo "$COVERAGE < 80" | bc) -eq 1 ]; then
             echo "Coverage $COVERAGE% is below threshold 80%"
             exit 1
           fi
           echo "Coverage: $COVERAGE%"
+
+      # 质量指标采集器：为 /api/v1/admin/quality/* 仪表盘补上唯一数据生产者
+      # 打分与落库口径复用 internal/quality/dashboard 与 internal/store/postgres
+      - name: Store quality metrics
+        env:
+          DATABASE_URL: postgres://sso:testpassword@localhost:5432/sso_test?sslmode=disable
+        run: |
+          go run ./scripts/qualitymetrics \
+            -coverage coverage.out \
+            -junit test-results.xml \
+            -commit "$GITHUB_SHA"
 
   lint:
     name: Lint

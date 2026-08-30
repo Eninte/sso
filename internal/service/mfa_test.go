@@ -331,8 +331,12 @@ func TestTOTPReplayProtection(t *testing.T) {
 		require.NoError(t, err)
 
 		// 清除MFA状态以便再次测试
-		user.MFAEnabled = false
-		store.Update(ctx, user)
+		// 注意：mock 已改为拷贝-替换语义，须先重新获取再修改，
+		// 本地旧副本上的修改不会反映到已存储对象
+		stored, err := store.GetByID(ctx, "test-user-id")
+		require.NoError(t, err)
+		stored.MFAEnabled = false
+		store.Update(ctx, stored)
 
 		// 第二次使用相同代码应该失败（重放攻击）
 		err = mfaSvc.VerifyAndEnableMFA(ctx, "test-user-id", code)
@@ -404,9 +408,11 @@ func TestTOTPReplayProtection(t *testing.T) {
 		// 清除使用记录（模拟时间流逝）
 		mfaSvc.ClearTOTPUsageForTesting("test-user-id")
 
-		// 清除MFA状态
-		user.MFAEnabled = false
-		store.Update(ctx, user)
+		// 清除MFA状态（先重新获取再修改，见拷贝-替换语义说明）
+		stored, err := store.GetByID(ctx, "test-user-id")
+		require.NoError(t, err)
+		stored.MFAEnabled = false
+		store.Update(ctx, stored)
 
 		// 清除后应该可以再次使用相同代码
 		err = mfaSvc.VerifyAndEnableMFA(ctx, "test-user-id", code)

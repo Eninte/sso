@@ -47,10 +47,9 @@ func TestResetToken_PreventReuse(t *testing.T) {
 
 	t.Run("第二次使用相同令牌_失败", func(t *testing.T) {
 		// 重新存储令牌并标记为已使用
-		now := time.Now()
+		// 注意：mock getter 返回副本（拷贝-替换语义），模拟"已使用"须走 store API
 		mockStore.StoreResetToken(ctx, user.ID, token, time.Now().Add(1*time.Hour))
-		storedToken, _ := mockStore.GetResetToken(ctx, user.ID)
-		storedToken.UsedAt = &now
+		require.NoError(t, mockStore.MarkResetTokenUsed(ctx, user.ID))
 
 		err := userSvc.ResetPassword(ctx, user.ID, token, "AnotherPassword456!")
 		assert.ErrorIs(t, err, ErrResetTokenUsed)
@@ -84,10 +83,9 @@ func TestResetToken_ConcurrentUse(t *testing.T) {
 		assert.NoError(t, err1)
 
 		// 重新存储令牌并模拟第二个并发请求（令牌已被标记为使用）
+		// 注意：mock getter 返回副本，模拟"已使用"须走 store API
 		mockStore.StoreResetToken(ctx, user.ID, token, time.Now().Add(1*time.Hour))
-		storedToken, _ := mockStore.GetResetToken(ctx, user.ID)
-		now := time.Now()
-		storedToken.UsedAt = &now
+		require.NoError(t, mockStore.MarkResetTokenUsed(ctx, user.ID))
 
 		err2 := userSvc.ResetPassword(ctx, user.ID, token, "Password2!")
 		assert.ErrorIs(t, err2, ErrResetTokenUsed)
@@ -144,11 +142,10 @@ func TestResetToken_ExpiredAndUsed(t *testing.T) {
 
 	t.Run("已使用的令牌_优先检查", func(t *testing.T) {
 		// 存储一个已使用的令牌（即使未过期）
+		// 注意：mock getter 返回副本，模拟"已使用"须走 store API
 		token := "used-token"
 		mockStore.StoreResetToken(ctx, user.ID, token, time.Now().Add(1*time.Hour))
-		now := time.Now()
-		storedToken, _ := mockStore.GetResetToken(ctx, user.ID)
-		storedToken.UsedAt = &now
+		require.NoError(t, mockStore.MarkResetTokenUsed(ctx, user.ID))
 
 		err := userSvc.ResetPassword(ctx, user.ID, token, "NewPassword123!")
 		assert.ErrorIs(t, err, ErrResetTokenUsed, "应该优先检查令牌是否已使用")

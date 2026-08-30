@@ -254,9 +254,9 @@ func TestInitHandler_HandleCreateClient_Integration(t *testing.T) {
 	assert.NotEmpty(t, data["client_id"])
 	assert.NotEmpty(t, data["client_secret"])
 
-	// 验证审计日志（先有admin_created，再有oauth_client_created）
+	// 验证审计日志（先有admin_created，再有client_created）
 	assert.Len(t, auditSvc.logs, 2)
-	assert.Equal(t, "oauth_client_created", auditSvc.logs[1].EventType)
+	assert.Equal(t, string(model.EventClientCreated), auditSvc.logs[1].EventType)
 
 	// 验证客户端已创建（使用正确的表名 oauth_clients）
 	var count int

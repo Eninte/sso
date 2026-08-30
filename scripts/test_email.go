@@ -11,8 +11,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/joho/godotenv"
 	"github.com/example/sso/internal/service"
+	"github.com/joho/godotenv"
 )
 
 func main() {

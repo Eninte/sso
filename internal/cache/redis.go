@@ -49,10 +49,11 @@ type Cache interface {
 
 // 缓存键前缀常量
 const (
-	TokenCachePrefix  = "token:"     // Token缓存前缀
-	UserCachePrefix   = "user:"      // 用户缓存前缀
-	ClientCachePrefix = "client:v2:" // 客户端缓存前缀（v2：含 is_active 字段，旧键自然失配）
-	NilCachePrefix    = "nil:"       // 空值缓存前缀
+	TokenCachePrefix    = "token:"     // Token缓存前缀
+	UserCachePrefix     = "user:"      // 用户缓存前缀
+	ClientCachePrefix   = "client:v2:" // 客户端缓存前缀（v2：含 is_active 字段，旧键自然失配）
+	UserInfoCachePrefix = "userinfo:"  // 用户信息缓存前缀（/api/v1/userinfo 端点）
+	NilCachePrefix      = "nil:"       // 空值缓存前缀
 	// MFAChallengePrefix MFA 两阶段登录 Challenge 缓存前缀
 	// 存储一次性 challenge 令牌（32 字节 hex），TTL 由 config.MFAChallengeTTL 决定
 	MFAChallengePrefix = "mfa:challenge:"
@@ -107,6 +108,11 @@ func UserEmailKey(email string) string {
 // ClientKey 生成客户端缓存键
 func ClientKey(clientID string) string {
 	return ClientCachePrefix + clientID
+}
+
+// UserInfoKey 生成用户信息缓存键（/api/v1/userinfo 端点）
+func UserInfoKey(userID string) string {
+	return UserInfoCachePrefix + userID
 }
 
 // MFAChallengeKey 生成 MFA 两阶段登录 Challenge 缓存键

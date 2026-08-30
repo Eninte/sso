@@ -177,7 +177,7 @@ func (s *InitService) CreateOAuthClient(ctx context.Context, name, redirectURI s
 		return nil, "", serviceutil.WrapServiceError("创建客户端", err)
 	}
 
-	auditutil.SafeAuditLog(ctx, s.auditSvc, "oauth_client_created", "", map[string]interface{}{
+	auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventClientCreated), "", map[string]interface{}{
 		"client_id":   clientID,
 		"client_name": name,
 		"success":     true,

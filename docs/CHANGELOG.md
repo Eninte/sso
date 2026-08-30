@@ -8,11 +8,29 @@
 
 - **管理员客户端管理 API**（OAuth 客户端 CRUD / 禁用启用 / 密钥轮换）：新增 `/api/v1/admin/clients` 系列端点，支持创建机密/公共客户端、查询、分页列表、全量更新、禁用/启用、删除与密钥轮换。安全设计：禁用/删除/轮换先撤销该客户端全部未撤销 Token；`is_active` 在 `getClient`（缓存命中与 DB 路径）统一检查，禁用客户端对公网返回 `INVALID_CLIENT`；公共客户端强制 PKCE（已有）且不支持密钥；`client_credentials` 注册被拒（`UNSUPPORTED_GRANT_TYPE`）。配套迁移 `021_add_client_management`（`oauth_clients` 新增 `is_active`/`updated_at`；`authorization_codes.client_id` → `ON DELETE CASCADE`、`tokens.client_id` → `ON DELETE SET NULL`）
 - **客户端缓存键版本化**：`ClientCachePrefix` 由 `client:` 改为 `client:v2:`，避免升级后旧缓存条目（无 `is_active` 字段）被误判为禁用导致 OAuth 全流程瘫痪
+- **缓存防击穿（singleflight）**：`OAuthService.getClient`、`AdminService.GetUser` 与 `/api/v1/userinfo` 处理器的缓存未命中回源路径接入 `golang.org/x/sync/singleflight`，同一 key 的并发回源只有一个查询 DB，其余等待复用（此前防击穿实现完整但生产零引用，热点 key 过期或 Redis 抖动时会击穿到 DB）
+- **质量指标采集器**（`scripts/qualitymetrics`）：解析 `coverage.out` 与 gotestsum JUnit XML，复用 `dashboard.CalculateQualityScore` 打分、`postgres.StoreMetrics` 落库，补上 `quality_metrics` 表缺失的唯一数据生产者（此前质量仪表盘/周报永远空转）；CI test job 在覆盖率阈值检查通过后自动回写，本地可用 `make quality-metrics-store`
+- **userinfo 缓存失效路径**：新增 `cache.UserInfoKey` 与 `serviceutil.InvalidateUserInfoCache`（同时清理 `userinfo:{id}` 与 `user:{id}`），邮箱验证成功、用户禁用/启用/删除后立即失效，消除变更后最长 5 分钟的陈旧窗口
 
 ### Fixed
 
+- **覆盖率 80% 门槛自 `totalTimeout` 函数引入后被静默绕过**：`go tool cover -func | grep total` 未锚定行首，会同时匹配 `internal/service/email.go` 中名为 `totalTimeout` 的函数（0.0%）与真正的 `total:` 汇总行，`COVERAGE` 变量混入两行后 awk/bc 判定报错或空转——本地 `make test-coverage` 以"0.0% 低于阈值"误报失败，CI 的 bc 检查则静默跳过。修复：Makefile（2 处）与 ci.yml 均改为锚定匹配 `grep '^total:'`
 - **机密客户端密钥校验在缓存命中下必然失败**（客户端管理 E2E 首次覆盖暴露）：`model.Client.ClientSecret` 带 `json:"-"` 标签，内存/Redis 缓存经 JSON 序列化后该字段为空，`validateClientSecret` 用空字符串校验 bcrypt 必然失败。修复：缓存命中且 secret 为空时回源 DB 读取哈希再验证
 - **Go 工具链升级到 1.26.6，消除全部标准库漏洞**：`govulncheck` 在 go1.26.4 下报告 8 个 stdlib 漏洞（`net/http`/`crypto/tls`/`net/url`/`html/template`/`encoding/xml`/`encoding/asn1`，修复在 1.26.5/1.26.6）。CI `go-version` 升级为 `1.26.6`（5 处）、Docker 构建镜像升级为 `golang:1.26.6-alpine`、`go.mod` go 指令升级为 `1.26.6`。升级后 `govulncheck` 报告 **0 漏洞**
+
+### Changed
+
+- **token 缓存按用户精确失效**：`serviceutil.InvalidateUserTokenCache` 不再 `DeletePattern("token:*")` 全量清空（任一用户改密/登出都会清掉所有用户的 token 缓存，放大 Redis 压力），改为以数据库为索引——新增 `TokenStore.ListTokenHashesByUser` 查询该用户全部 `access_token_hash` 后逐键删除，不影响其他用户的缓存命中；查询失败时回退全量清理，保证撤销及时生效
+- **Makefile 测试参数与 CI 对齐**：`make test-coverage` / `test-coverage-check` 补齐 `-race -p 1 -tags=integration -timeout 180s`（与 ci.yml 一致，本地覆盖率数字可与 CI 比较）；`make lint` 固定 golangci-lint 版本（`GOLANGCI_LINT_VERSION ?= v1.64.8`，与 CI 相同，版本不匹配直接报错并附安装命令）
+- **运行镜像升级 alpine 3.19 → 3.22**（3.19 已停止维护）；Dockerfile apk 镜像源参数化为 `ARG APK_MIRROR`（默认阿里云，海外构建可覆盖）
+- **mock 全路径拷贝-替换语义**：`internal/store/mock` 此前仍原地修改共享指针的旧路径（用户 CRUD/登录尝试、授权码更新、StoreToken、重置令牌、社交账号更新、密钥状态变更、测试辅助 Add* 等）全部迁移为"改副本再写回 map"，getter 返回副本——与真实 DB 行更新语义一致，消除并发测试盲区（此前仅 token 撤销/轮换路径合规）
+
+### Security
+
+- **依赖升级消除模块级漏洞**：go-redis v9.18.0→v9.22.0、x/crypto v0.52.0→v0.55.0、testify v1.11.1→v1.12.1、prometheus/client_golang v1.23.2→v1.24.1；升级后 `govulncheck` 调用层面 **0 漏洞**（仅剩 GO-2026-5932 对未使用的 `x/crypto/openpgp` 的公告级条目，官方无修复版本）
+- **错误处理收敛**：撤销活跃密钥由裸错误改为语义化 `KEY_STATUS_CONFLICT`（新增错误码，409）；"token service is not initialized" 等 5 处内部不变式错误统一接入 `apperrors.ErrInternal`（对外响应行为不变）；init 客户端审计事件由硬编码字符串 `"oauth_client_created"` 改为 `model.EventClientCreated`，可被按事件类型检索与关键事件归类正确识别
+
+### Test
 
 ## [1.1.1] - 2026-08-03
 

@@ -6,6 +6,8 @@ import (
 	"log/slog"
 
 	"github.com/example/sso/internal/cache"
+	"github.com/example/sso/internal/logging"
+	"github.com/example/sso/internal/store"
 )
 
 // InvalidateUserTokenCache 失效指定用户所有 token 的缓存
@@ -23,20 +25,66 @@ import (
 //   - AdminService.DisableUser/DeleteUser
 //   - IncrementLoginAttempts 触发账户锁定时
 //
-// 实现说明：
-//   - 当前使用 DeletePattern("token:*") 清除全部 token 缓存
-//     Redis SCAN 性能可接受，且 15 分钟 TTL 会自动过期
-//   - TODO: 后续优化为按 user_id 维度清理（cache.UserTokenKey + 中间件配合）
-//     避免影响其他用户的缓存命中率
-func InvalidateUserTokenCache(ctx context.Context, cacheSvc cache.Cache, userID string) {
+// 实现说明（按用户精确失效）：
+//   - token 缓存键为 token:<access_token_hash>（cache.TokenKey），读取发生在
+//     JWT 解析之前（认证中间件尚未解析出 userID），无法改用用户维度的读键
+//   - 因此以数据库为索引：查询该用户在 tokens 表中的全部 access_token_hash，
+//     逐个删除对应缓存键——精确、无竞态、不再影响其他用户的缓存命中
+//   - 查询失败时回退 DeletePattern("token:*") 全量清理：
+//     宁可让其他用户多一次缓存 miss 回源，也不放过本应立即失效的键
+func InvalidateUserTokenCache(ctx context.Context, storeSvc store.Store, cacheSvc cache.Cache, userID string) {
 	if cacheSvc == nil {
 		return
 	}
-	if err := cacheSvc.DeletePattern(ctx, cache.TokenCachePrefix+"*"); err != nil {
-		slog.Warn("清除用户Token缓存失败",
-			"error", err,
+
+	hashes, err := storeSvc.ListTokenHashesByUser(ctx, userID)
+	if err != nil {
+		// store 错误可能含 DSN
+		slog.Warn("查询用户Token哈希失败，回退全量清理Token缓存",
+			"error", logging.SanitizeDBURL(err.Error()),
 			"user_id", userID,
 		)
+		if delErr := cacheSvc.DeletePattern(ctx, cache.TokenCachePrefix+"*"); delErr != nil {
+			slog.Warn("全量清理Token缓存失败",
+				"error", logging.SanitizeDBURL(delErr.Error()),
+				"user_id", userID,
+			)
+		}
+		return
+	}
+
+	for _, hash := range hashes {
+		if hash == "" {
+			continue
+		}
+		if err := cacheSvc.Delete(ctx, cache.TokenKeyByHash(hash)); err != nil {
+			slog.Warn("清除用户Token缓存失败",
+				"error", logging.SanitizeDBURL(err.Error()),
+				"user_id", userID,
+			)
+		}
+	}
+}
+
+// InvalidateUserInfoCache 失效指定用户的用户信息缓存
+//
+// 覆盖两个读取路径：
+//   - userinfo:<userID>：GET /api/v1/userinfo（handler/userinfo.go，TTL 5 分钟）
+//   - user:<userID>：AdminService.GetUser（TTL 5 分钟）
+//
+// 任何改变上述缓存内容的用户变更（邮箱验证成功、禁用/启用/删除用户）
+// 都必须调用，否则变更最多延迟一个 TTL 才对外可见。
+func InvalidateUserInfoCache(ctx context.Context, cacheSvc cache.Cache, userID string) {
+	if cacheSvc == nil {
+		return
+	}
+	for _, key := range []string{cache.UserInfoKey(userID), cache.UserIDKey(userID)} {
+		if err := cacheSvc.Delete(ctx, key); err != nil {
+			slog.Warn("清除用户信息缓存失败",
+				"error", logging.SanitizeDBURL(err.Error()),
+				"user_id", userID,
+			)
+		}
 	}
 }
 

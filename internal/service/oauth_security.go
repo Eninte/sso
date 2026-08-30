@@ -173,7 +173,7 @@ func (s *OAuthService) IssueConsentToken(
 	state, codeChallenge, codeChallengeMethod string,
 ) (string, error) {
 	if s.tokenSvc == nil || s.tokenSvc.jwtSvc == nil {
-		return "", fmt.Errorf("token service is not initialized")
+		return "", apperrors.ErrInternal
 	}
 
 	// 阶段 D 审查修复（M2）：输入校验，防止空值签发无效 consent_token
@@ -240,7 +240,7 @@ func (s *OAuthService) IssueConsentToken(
 //  4. 携带 client_id/user_id/scopes/redirect_uri/state
 func (s *OAuthService) VerifyConsentToken(ctx context.Context, consentToken string) (*ConsentClaims, error) {
 	if s.tokenSvc == nil || s.tokenSvc.jwtSvc == nil {
-		return nil, fmt.Errorf("token service is not initialized")
+		return nil, apperrors.ErrInternal
 	}
 	jwtSvc := s.tokenSvc.jwtSvc
 
@@ -252,7 +252,7 @@ func (s *OAuthService) VerifyConsentToken(ctx context.Context, consentToken stri
 		// 使用 JWTService 暴露的公钥
 		pub := jwtSvc.GetPublicKey()
 		if pub == nil {
-			return nil, fmt.Errorf("no public key available")
+			return nil, apperrors.ErrInternal
 		}
 		return pub, nil
 	}, jwt.WithIssuer("sso-consent"), jwt.WithExpirationRequired())
@@ -280,7 +280,7 @@ func signConsentTokenWithJWTService(jwtSvc interface {
 	}
 	signer, ok := jwtSvc.(consentSigner)
 	if !ok {
-		return "", fmt.Errorf("jwtSvc does not implement SignConsentToken")
+		return "", apperrors.ErrInternal
 	}
 	return signer.SignConsentToken(token)
 }

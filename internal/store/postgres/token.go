@@ -200,6 +200,35 @@ func (s *Store) getTokenByField(ctx context.Context, field, value string) (*mode
 	return token, nil
 }
 
+// ListTokenHashesByUser 返回用户全部 token 的 access_token_hash
+//
+// 含已撤销/已轮换记录：token 缓存失效以 DB 为索引（serviceutil.InvalidateUserTokenCache），
+// 只要缓存条目可能存在（TTL 15 分钟内）就需要清理对应键
+func (s *Store) ListTokenHashesByUser(ctx context.Context, userID string) ([]string, error) {
+	ctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+
+	query := `SELECT access_token_hash FROM tokens WHERE user_id = $1 AND access_token_hash <> ''`
+	rows, err := s.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	hashes := make([]string, 0, 8)
+	for rows.Next() {
+		var hash string
+		if err := rows.Scan(&hash); err != nil {
+			return nil, err
+		}
+		hashes = append(hashes, hash)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return hashes, nil
+}
+
 // RotateRefreshToken 原子地轮换 refresh token
 //
 // 在单个事务内：

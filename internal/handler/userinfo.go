@@ -3,10 +3,13 @@
 package handler
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 
 	"github.com/example/sso/internal/cache"
 	apperrors "github.com/example/sso/internal/errors"
@@ -14,6 +17,9 @@ import (
 	"github.com/example/sso/internal/model"
 	"github.com/example/sso/internal/store"
 )
+
+// userInfoCacheTTL userinfo 缓存有效期
+const userInfoCacheTTL = 5 * time.Minute
 
 // ============================================================================
 // UserInfoHandler 用户信息处理器
@@ -23,6 +29,7 @@ import (
 type UserInfoHandler struct {
 	store store.Store
 	cache cache.Cache
+	sf    singleflight.Group // 防缓存击穿：并发回源去重
 }
 
 // NewUserInfoHandler 创建用户信息处理器
@@ -55,7 +62,7 @@ func (h *UserInfoHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 尝试从缓存获取用户信息
-	cacheKey := "userinfo:" + userID
+	cacheKey := cache.UserInfoKey(userID)
 	if h.cache != nil {
 		var cached model.User
 		if err := h.cache.Get(r.Context(), cacheKey, &cached); err == nil && cached.ID != "" {
@@ -64,8 +71,8 @@ func (h *UserInfoHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 缓存未命中，查询数据库
-	user, err := h.store.GetByID(r.Context(), userID)
+	// 缓存未命中，singleflight 去重后查询数据库（userinfo 是高频读取端点，防击穿）
+	user, err := h.loadUser(r.Context(), userID)
 	if err != nil {
 		slog.Error("查询用户信息失败", "error", err, "userID", userID)
 		// 数据库查询失败时仍按 scope 过滤返回上下文中已有的信息
@@ -73,15 +80,40 @@ func (h *UserInfoHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 写入缓存（5分钟TTL）
-	if h.cache != nil {
-		if err := h.cache.Set(r.Context(), cacheKey, user, 5*time.Minute); err != nil {
-			slog.Debug("缓存用户信息失败", "error", err, "userID", userID)
-		}
-	}
-
 	// 按 scope 过滤返回字段
 	writeJSON(w, http.StatusOK, filterUserInfoByScope(user.ID, user.Email, user.EmailVerified, user.Role, userScopes))
+}
+
+// loadUser 缓存未命中时的回源查询（singleflight 去重并发回源，防缓存击穿）
+//
+// 同一 userID 的并发请求只有一个查询 DB，其余等待复用结果；
+// 查询成功后写入缓存（5 分钟 TTL），失败不影响调用方的降级逻辑
+func (h *UserInfoHandler) loadUser(ctx context.Context, userID string) (*model.User, error) {
+	v, err, _ := h.sf.Do(userID, func() (interface{}, error) {
+		user, err := h.store.GetByID(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+
+		if h.cache != nil {
+			if err := h.cache.Set(ctx, cache.UserInfoKey(userID), user, userInfoCacheTTL); err != nil {
+				slog.Debug("缓存用户信息失败", "error", err, "userID", userID)
+			}
+		}
+
+		return user, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	user, ok := v.(*model.User)
+	if !ok {
+		return nil, apperrors.ErrNotFound
+	}
+	// 返回副本：singleflight 的结果为并发调用方共享，避免调用方间共享顶层指针
+	shallow := *user
+	return &shallow, nil
 }
 
 // filterUserInfoByScope 按 OIDC scope 规范过滤返回字段

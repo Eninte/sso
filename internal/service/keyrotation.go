@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"time"
 
@@ -171,7 +170,7 @@ func (s *KeyRotationService) RevokeKey(ctx context.Context, keyID string) error 
 	}
 
 	if key.Status == model.KeyStatusActive {
-		return fmt.Errorf("cannot revoke active key, rotate first")
+		return apperrors.ErrKeyStatusConflict
 	}
 
 	if err := s.keyStore.RevokeKey(ctx, keyID); err != nil {

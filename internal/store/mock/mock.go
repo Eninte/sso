@@ -144,7 +144,9 @@ func (m *Store) Create(ctx context.Context, user *model.User) error {
 		}
 	}
 
-	m.users[user.ID] = user
+	// 拷贝-替换：存入副本，调用方后续修改不影响已存储对象（与真实 DB 行为一致）
+	stored := *user
+	m.users[user.ID] = &stored
 	return nil
 }
 
@@ -161,7 +163,9 @@ func (m *Store) GetByID(ctx context.Context, id string) (*model.User, error) {
 	if !ok {
 		return nil, store.ErrNotFound
 	}
-	return user, nil
+	// 返回副本：避免调用方在锁外读写与后续写路径共享指针产生竞争
+	returned := *user
+	return &returned, nil
 }
 
 // GetByEmail 根据邮箱获取用户
@@ -175,7 +179,8 @@ func (m *Store) GetByEmail(ctx context.Context, email string) (*model.User, erro
 
 	for _, user := range m.users {
 		if user.Email == email {
-			return user, nil
+			returned := *user
+			return &returned, nil
 		}
 	}
 	return nil, store.ErrNotFound
@@ -194,7 +199,9 @@ func (m *Store) Update(ctx context.Context, user *model.User) error {
 		return store.ErrNotFound
 	}
 
-	m.users[user.ID] = user
+	// 拷贝-替换：存入副本，调用方后续修改不影响已存储对象
+	stored := *user
+	m.users[user.ID] = &stored
 	return nil
 }
 
@@ -212,8 +219,11 @@ func (m *Store) UpdateLoginAttempts(ctx context.Context, userID string, attempts
 		return store.ErrNotFound
 	}
 
-	user.LoginAttempts = attempts
-	user.LockedUntil = lockedUntil
+	// 拷贝-替换：不原地修改已存入 map 的对象（锁外读与写并发时 -race 会检出）
+	updated := *user
+	updated.LoginAttempts = attempts
+	updated.LockedUntil = lockedUntil
+	m.users[userID] = &updated
 	return nil
 }
 
@@ -227,16 +237,19 @@ func (m *Store) IncrementLoginAttempts(ctx context.Context, userID string, maxAt
 		return 0, false, nil, store.ErrNotFound
 	}
 
-	user.LoginAttempts++
-	attempts = user.LoginAttempts
+	// 拷贝-替换：不原地修改已存入 map 的对象
+	updated := *user
+	updated.LoginAttempts++
+	attempts = updated.LoginAttempts
 
 	if attempts >= maxAttempts {
 		t := time.Now().Add(lockoutDuration)
-		user.LockedUntil = &t
-		user.Status = model.UserStatusLocked
+		updated.LockedUntil = &t
+		updated.Status = model.UserStatusLocked
 		locked = true
 		lockedUntil = &t
 	}
+	m.users[userID] = &updated
 
 	return attempts, locked, lockedUntil, nil
 }
@@ -251,11 +264,14 @@ func (m *Store) ResetLoginAttempts(ctx context.Context, userID string) error {
 		return store.ErrNotFound
 	}
 
-	user.LoginAttempts = 0
-	user.LockedUntil = nil
-	if user.Status == model.UserStatusLocked {
-		user.Status = model.UserStatusActive
+	// 拷贝-替换：不原地修改已存入 map 的对象
+	updated := *user
+	updated.LoginAttempts = 0
+	updated.LockedUntil = nil
+	if updated.Status == model.UserStatusLocked {
+		updated.Status = model.UserStatusActive
 	}
+	m.users[userID] = &updated
 	return nil
 }
 
@@ -277,8 +293,11 @@ func (m *Store) UnlockExpiredAccount(ctx context.Context, userID string) error {
 		return store.ErrNotFound
 	}
 
-	user.LoginAttempts = 0
-	user.Status = model.UserStatusActive
+	// 拷贝-替换：不原地修改已存入 map 的对象
+	updated := *user
+	updated.LoginAttempts = 0
+	updated.Status = model.UserStatusActive
+	m.users[userID] = &updated
 	return nil
 }
 
@@ -308,10 +327,11 @@ func (m *Store) ListUsers(ctx context.Context, offset, limit int) ([]*model.User
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	// 将所有用户转换为切片
+	// 将所有用户转换为切片（返回副本，避免共享指针被外部修改）
 	allUsers := make([]*model.User, 0, len(m.users))
 	for _, user := range m.users {
-		allUsers = append(allUsers, user)
+		returned := *user
+		allUsers = append(allUsers, &returned)
 	}
 
 	total := len(allUsers)
@@ -398,14 +418,15 @@ func (m *Store) CreateAdminAtomic(ctx context.Context, user *model.User) error {
 		}
 	}
 
-	m.users[user.ID] = user
+	// 拷贝-替换：存入副本，调用方后续修改不影响已存储对象
+	stored := *user
+	m.users[user.ID] = &stored
 	return nil
 }
 
 // ============================================================================
 // 客户端存储实现
 // ============================================================================
-
 // GetByClientID 根据客户端ID获取客户端
 func (m *Store) GetByClientID(ctx context.Context, clientID string) (*model.Client, error) {
 	if m.GetClientByClientIDErr != nil {
@@ -431,7 +452,9 @@ func (m *Store) CreateClient(ctx context.Context, client *model.Client) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.clients[client.ClientID] = client
+	// 拷贝-替换：存入副本，调用方后续修改不影响已存储对象
+	stored := *client
+	m.clients[client.ClientID] = &stored
 	return nil
 }
 
@@ -683,7 +706,8 @@ func (m *Store) UpdateAuthorizationCode(ctx context.Context, code *model.Authori
 		return store.ErrAuthorizationCodeUsed
 	}
 
-	m.authorizationCodes[code.Code] = code
+	// 拷贝-替换：与 StoreAuthorizationCode 一致，深拷贝后存入
+	m.authorizationCodes[code.Code] = copyAuthorizationCode(code)
 	return nil
 }
 
@@ -706,7 +730,13 @@ func (m *Store) StoreToken(ctx context.Context, token *model.Token) error {
 		token.RefreshTokenHash = hashTokenMock(token.RefreshToken)
 	}
 
-	m.tokens[token.AccessToken] = token
+	// 拷贝-替换：存入副本，调用方后续修改不影响已存储对象（scopes 深拷贝）
+	stored := *token
+	if token.Scopes != nil {
+		stored.Scopes = make([]string, len(token.Scopes))
+		copy(stored.Scopes, token.Scopes)
+	}
+	m.tokens[token.AccessToken] = &stored
 	return nil
 }
 
@@ -725,13 +755,15 @@ func (m *Store) GetTokenByRefreshToken(ctx context.Context, refreshToken string)
 	for _, token := range m.tokens {
 		// 优先 hash 匹配
 		if token.RefreshTokenHash == hash && token.RefreshTokenHash != "" {
-			return token, nil
+			returned := *token
+			return &returned, nil
 		}
 	}
 	// 回退到明文（兼容旧数据）
 	for _, token := range m.tokens {
 		if token.RefreshToken == refreshToken {
-			return token, nil
+			returned := *token
+			return &returned, nil
 		}
 	}
 	return nil, store.ErrNotFound
@@ -752,7 +784,8 @@ func (m *Store) GetTokenByAccessToken(ctx context.Context, accessToken string) (
 	for _, token := range m.tokens {
 		// 优先 hash 匹配
 		if token.AccessTokenHash == hash && token.AccessTokenHash != "" {
-			return token, nil
+			returned := *token
+			return &returned, nil
 		}
 	}
 	// 回退到明文（兼容旧数据）
@@ -760,7 +793,8 @@ func (m *Store) GetTokenByAccessToken(ctx context.Context, accessToken string) (
 	if !ok {
 		return nil, store.ErrNotFound
 	}
-	return token, nil
+	returned := *token
+	return &returned, nil
 }
 
 // RevokeToken 撤销Token
@@ -841,6 +875,22 @@ func (m *Store) RevokeAllUserTokens(ctx context.Context, userID string) error {
 		}
 	}
 	return nil
+}
+
+// ListTokenHashesByUser 返回用户全部 token 的 access_token_hash（含已撤销/已轮换）
+//
+// 用于按用户精确失效 token 缓存（serviceutil.InvalidateUserTokenCache）
+func (m *Store) ListTokenHashesByUser(ctx context.Context, userID string) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	hashes := make([]string, 0, 8)
+	for _, token := range m.tokens {
+		if token.UserID == userID && token.AccessTokenHash != "" {
+			hashes = append(hashes, token.AccessTokenHash)
+		}
+	}
+	return hashes, nil
 }
 
 // RotateRefreshToken 原子地轮换 refresh token
@@ -999,7 +1049,9 @@ func (m *Store) GetVerificationToken(ctx context.Context, userID string) (*store
 	if !ok {
 		return nil, store.ErrNotFound
 	}
-	return token, nil
+	// 返回副本：与其他 getter 保持拷贝-替换语义一致
+	returned := *token
+	return &returned, nil
 }
 
 // DeleteVerificationToken 删除验证令牌
@@ -1045,7 +1097,9 @@ func (m *Store) GetResetToken(ctx context.Context, userID string) (*store.ResetT
 	if !ok {
 		return nil, store.ErrNotFound
 	}
-	return token, nil
+	// 返回副本：与其他 getter 保持拷贝-替换语义一致
+	returned := *token
+	return &returned, nil
 }
 
 // MarkResetTokenUsed 标记重置令牌为已使用
@@ -1063,8 +1117,11 @@ func (m *Store) MarkResetTokenUsed(ctx context.Context, userID string) error {
 		return store.ErrNotFound
 	}
 
+	// 拷贝-替换：不原地修改已存入 map 的对象
+	updated := *token
 	now := time.Now()
-	token.UsedAt = &now
+	updated.UsedAt = &now
+	m.resetTokens[userID] = &updated
 	return nil
 }
 
@@ -1211,12 +1268,21 @@ func (m *Store) UpdateSocialAccount(ctx context.Context, account *model.SocialAc
 	}
 
 	// 仅更新允许的字段，保留 user_id 不变
-	existing.ProviderEmail = account.ProviderEmail
-	existing.EmailVerified = account.EmailVerified
-	existing.ProviderMetadata = account.ProviderMetadata
-	existing.UpdatedAt = account.UpdatedAt
+	// 拷贝-替换：不原地修改已存入 map 的对象；socialAccounts 与
+	// userSocialAccounts 两个索引需同步替换为新指针
+	updated := *existing
+	updated.ProviderEmail = account.ProviderEmail
+	updated.EmailVerified = account.EmailVerified
+	updated.ProviderMetadata = account.ProviderMetadata
+	updated.UpdatedAt = account.UpdatedAt
+	m.socialAccounts[key] = &updated
 
-	// 同步更新 userSocialAccounts 索引中的指针指向的内容（同一指针，无需额外操作）
+	for i, a := range m.userSocialAccounts[updated.UserID] {
+		if a.Provider == existing.Provider && a.ProviderUserID == existing.ProviderUserID {
+			m.userSocialAccounts[updated.UserID][i] = &updated
+			break
+		}
+	}
 	return nil
 }
 
@@ -1276,21 +1342,24 @@ func (m *Store) AddSocialAccount(account *model.SocialAccount) {
 func (m *Store) AddUser(user *model.User) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.users[user.ID] = user
+	stored := *user
+	m.users[user.ID] = &stored
 }
 
 // AddClient 添加客户端（测试辅助）
 func (m *Store) AddClient(client *model.Client) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.clients[client.ClientID] = client
+	stored := *client
+	m.clients[client.ClientID] = &stored
 }
 
 // AddToken 添加Token（测试辅助）
 func (m *Store) AddToken(token *model.Token) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.tokens[token.AccessToken] = token
+	stored := *token
+	m.tokens[token.AccessToken] = &stored
 }
 
 // Reset 重置所有数据（测试辅助）
@@ -1417,7 +1486,9 @@ func (m *Store) StoreKey(ctx context.Context, key *model.KeyVersion) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.keys[key.ID] = key
+	// 拷贝-替换：存入副本，调用方后续修改不影响已存储对象
+	stored := *key
+	m.keys[key.ID] = &stored
 	return nil
 }
 
@@ -1431,7 +1502,8 @@ func (m *Store) GetActiveKey(ctx context.Context) (*model.KeyVersion, error) {
 
 	for _, key := range m.keys {
 		if key.Status == model.KeyStatusActive {
-			return key, nil
+			returned := *key
+			return &returned, nil
 		}
 	}
 	return nil, store.ErrNotFound
@@ -1449,7 +1521,8 @@ func (m *Store) GetKeyByID(ctx context.Context, keyID string) (*model.KeyVersion
 	if !ok {
 		return nil, store.ErrNotFound
 	}
-	return key, nil
+	returned := *key
+	return &returned, nil
 }
 
 func (m *Store) ListActiveKeys(ctx context.Context) ([]*model.KeyVersion, error) {
@@ -1459,7 +1532,8 @@ func (m *Store) ListActiveKeys(ctx context.Context) ([]*model.KeyVersion, error)
 	result := make([]*model.KeyVersion, 0)
 	for _, key := range m.keys {
 		if key.Status == model.KeyStatusActive || key.Status == model.KeyStatusDeprecated {
-			result = append(result, key)
+			returned := *key
+			result = append(result, &returned)
 		}
 	}
 	return result, nil
@@ -1471,7 +1545,8 @@ func (m *Store) ListAllKeys(ctx context.Context) ([]*model.KeyVersion, error) {
 
 	result := make([]*model.KeyVersion, 0, len(m.keys))
 	for _, key := range m.keys {
-		result = append(result, key)
+		returned := *key
+		result = append(result, &returned)
 	}
 	return result, nil
 }
@@ -1489,8 +1564,11 @@ func (m *Store) DeprecateKey(ctx context.Context, keyID string, expiresAt time.T
 		return store.ErrNotFound
 	}
 
-	key.Status = model.KeyStatusDeprecated
-	key.ExpiresAt = &expiresAt
+	// 拷贝-替换：不原地修改已存入 map 的对象
+	updated := *key
+	updated.Status = model.KeyStatusDeprecated
+	updated.ExpiresAt = &expiresAt
+	m.keys[keyID] = &updated
 	return nil
 }
 
@@ -1507,7 +1585,10 @@ func (m *Store) RevokeKey(ctx context.Context, keyID string) error {
 		return store.ErrNotFound
 	}
 
-	key.Status = model.KeyStatusRevoked
+	// 拷贝-替换：不原地修改已存入 map 的对象
+	updated := *key
+	updated.Status = model.KeyStatusRevoked
+	m.keys[keyID] = &updated
 	return nil
 }
 
@@ -1528,7 +1609,10 @@ func (m *Store) UpdateKeyPrivateKey(ctx context.Context, keyID string, privateKe
 	if !ok {
 		return store.ErrNotFound
 	}
-	key.PrivateKey = privateKey
+	// 拷贝-替换：不原地修改已存入 map 的对象
+	updated := *key
+	updated.PrivateKey = privateKey
+	m.keys[keyID] = &updated
 	return nil
 }
 

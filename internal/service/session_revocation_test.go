@@ -96,9 +96,10 @@ func TestChangePassword_RevokesAllTokens(t *testing.T) {
 		token3 := createTestToken(t, storeInst, user.ID)
 
 		// 预热缓存（模拟已登录访问后缓存已建立）
-		// 通过 store.GetTokenByAccessToken 触发缓存写入（生产路径由 AuthMiddleware 完成）
+		// 生产缓存键为 token:<sha256>（cache.TokenKey），认证中间件写入撤销状态
 		_, err := storeInst.GetTokenByAccessToken(ctx, token1.AccessToken)
 		require.NoError(t, err)
+		require.NoError(t, memCache.Set(ctx, cache.TokenKey(token1.AccessToken), token1, 15*time.Minute))
 
 		// 修改密码
 		err = userSvc.ChangePasswordWithAudit(ctx, user.ID, "OldPass123!", "NewPass456!", "192.168.1.1")
@@ -114,7 +115,7 @@ func TestChangePassword_RevokesAllTokens(t *testing.T) {
 
 		// 验证 token 缓存已被清理（缓存未命中）
 		var cached model.Token
-		err = memCache.Get(ctx, "token:"+token1.AccessToken, &cached)
+		err = memCache.Get(ctx, cache.TokenKey(token1.AccessToken), &cached)
 		assert.ErrorIs(t, err, cache.ErrCacheMiss,
 			"修改密码后 token 缓存应被清理")
 	})
@@ -279,15 +280,15 @@ func TestUnifiedCacheInvalidation(t *testing.T) {
 		require.NoError(t, storeInst.Create(ctx, user))
 		token := createTestToken(t, storeInst, user.ID)
 
-		// 预热缓存
-		require.NoError(t, memCache.Set(ctx, "token:"+token.AccessToken, token, 15*time.Minute))
+		// 预热缓存（生产缓存键为 token:<sha256>，见 cache.TokenKey）
+		require.NoError(t, memCache.Set(ctx, cache.TokenKey(token.AccessToken), token, 15*time.Minute))
 
 		// LogoutAll
 		require.NoError(t, authSvc.LogoutAll(ctx, user.ID))
 
 		// 验证缓存已被清理
 		var cached model.Token
-		err := memCache.Get(ctx, "token:"+token.AccessToken, &cached)
+		err := memCache.Get(ctx, cache.TokenKey(token.AccessToken), &cached)
 		assert.ErrorIs(t, err, cache.ErrCacheMiss, "LogoutAll 后 token 缓存应被清理")
 	})
 }

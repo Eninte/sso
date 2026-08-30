@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/example/sso/internal/cache"
 	"github.com/example/sso/internal/crypto"
 	apperrors "github.com/example/sso/internal/errors"
@@ -94,6 +96,7 @@ type AdminService struct {
 	passwordSvc *crypto.PasswordService // 用于客户端密钥哈希（与 InitService 一致）
 	version     string
 	buildTime   string
+	userSF      singleflight.Group // 防缓存击穿：GetUser 并发回源去重
 }
 
 // AdminServiceOption AdminService 配置选项
@@ -152,7 +155,10 @@ func (s *AdminService) ListUsers(ctx context.Context, offset, limit int) ([]*mod
 	return s.store.ListUsers(ctx, offset, limit)
 }
 
-// GetUser 获取用户
+// GetUser 获取用户（带缓存 + singleflight 防击穿）
+//
+// 缓存未命中时通过 singleflight 去重并发回源：同一 userID 的并发请求
+// 只有一个查询 DB，其余等待复用结果，避免热点用户缓存过期或 Redis 抖动时打垮 DB
 func (s *AdminService) GetUser(ctx context.Context, userID string) (*model.User, error) {
 	// 检查缓存
 	if s.cache != nil {
@@ -163,22 +169,35 @@ func (s *AdminService) GetUser(ctx context.Context, userID string) (*model.User,
 		}
 	}
 
-	// 缓存未命中，查询数据库
-	user, err := s.store.GetByID(ctx, userID)
-	if err != nil {
-		return nil, serviceutil.WrapServiceError("查询用户", err)
-	}
-
-	// 缓存结果（失败不影响主流程）
-	if s.cache != nil {
-		cacheKey := cache.UserIDKey(userID)
-		if err := s.cache.Set(ctx, cacheKey, user, cache.DefaultTTL); err != nil {
-			// 阶段 D 审查修复（H5）：cache 错误可能含 Redis DSN
-			slog.Warn("缓存用户信息失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", userID)
+	// 缓存未命中，singleflight 去重后查询数据库
+	v, err, _ := s.userSF.Do(userID, func() (interface{}, error) {
+		user, err := s.store.GetByID(ctx, userID)
+		if err != nil {
+			return nil, serviceutil.WrapServiceError("查询用户", err)
 		}
+
+		// 缓存结果（失败不影响主流程）
+		if s.cache != nil {
+			cacheKey := cache.UserIDKey(userID)
+			if err := s.cache.Set(ctx, cacheKey, user, cache.DefaultTTL); err != nil {
+				// 阶段 D 审查修复（H5）：cache 错误可能含 Redis DSN
+				slog.Warn("缓存用户信息失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", userID)
+			}
+		}
+
+		return user, nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
-	return user, nil
+	user, ok := v.(*model.User)
+	if !ok {
+		return nil, serviceutil.WrapServiceError("查询用户", apperrors.ErrNotFound)
+	}
+	// 返回副本：singleflight 的结果为并发调用方共享，避免调用方间共享顶层指针
+	shallow := *user
+	return &shallow, nil
 }
 
 // checkAdminProtection 管理员操作防护检查（T14 安全修复）
@@ -235,16 +254,10 @@ func (s *AdminService) DisableUser(ctx context.Context, operatorID, userID strin
 	}
 
 	// 阶段 2.4：统一清 token 缓存（撤销后立即生效，避免 15 分钟延迟窗口）
-	serviceutil.InvalidateUserTokenCache(ctx, s.cache, userID)
+	serviceutil.InvalidateUserTokenCache(ctx, s.store, s.cache, userID)
 
-	// 失效缓存，确保用户状态变更立即生效
-	if s.cache != nil {
-		cacheKey := cache.UserIDKey(userID)
-		if err := s.cache.Delete(ctx, cacheKey); err != nil {
-			// 阶段 D 审查修复（H5）：cache 错误可能含 Redis DSN
-			slog.Warn("失效用户缓存失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", userID)
-		}
-	}
+	// 失效用户信息缓存（user:{id} 与 userinfo:{id}），确保状态变更立即生效
+	serviceutil.InvalidateUserInfoCache(ctx, s.cache, userID)
 
 	// 阶段 D 审查修复（L8）：用户禁用属于关键操作，必须使用 CriticalAuditLog 同步记录
 	// 原实现使用 SafeAuditLog（异步、best-effort），审计可能丢失或延迟
@@ -283,14 +296,8 @@ func (s *AdminService) EnableUser(ctx context.Context, userID string) error {
 		return serviceutil.WrapServiceError("更新用户", err)
 	}
 
-	// 失效缓存，确保用户状态变更立即生效
-	if s.cache != nil {
-		cacheKey := cache.UserIDKey(userID)
-		if err := s.cache.Delete(ctx, cacheKey); err != nil {
-			// 阶段 D 审查修复（H5）：cache 错误可能含 Redis DSN
-			slog.Warn("失效用户缓存失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", userID)
-		}
-	}
+	// 失效用户信息缓存（user:{id} 与 userinfo:{id}），确保状态变更立即生效
+	serviceutil.InvalidateUserInfoCache(ctx, s.cache, userID)
 
 	// 记录管理员操作审计日志（失败不影响主流程）
 	if s.auditSvc != nil {
@@ -329,16 +336,10 @@ func (s *AdminService) DeleteUser(ctx context.Context, operatorID, userID string
 	}
 
 	// 阶段 2.4：统一清 token 缓存（与 DisableUser 行为一致）
-	serviceutil.InvalidateUserTokenCache(ctx, s.cache, userID)
+	serviceutil.InvalidateUserTokenCache(ctx, s.store, s.cache, userID)
 
-	// 失效缓存，确保删除后立即返回404
-	if s.cache != nil {
-		cacheKey := cache.UserIDKey(userID)
-		if err := s.cache.Delete(ctx, cacheKey); err != nil {
-			// 阶段 D 审查修复（H5）：cache 错误可能含 Redis DSN
-			slog.Warn("失效用户缓存失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", userID)
-		}
-	}
+	// 失效用户信息缓存（user:{id} 与 userinfo:{id}），确保删除后立即返回404
+	serviceutil.InvalidateUserInfoCache(ctx, s.cache, userID)
 
 	// 阶段 D 审查修复（L8）：用户删除属于关键操作，必须使用 CriticalAuditLog 同步记录
 	// 原实现使用 SafeAuditLog（异步、best-effort），审计可能丢失或延迟

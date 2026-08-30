@@ -104,6 +104,13 @@ type TokenStore interface {
 	GetTokenByRefreshToken(ctx context.Context, refreshToken string) (*model.Token, error)
 	RevokeToken(ctx context.Context, accessToken string) error
 	RevokeAllUserTokens(ctx context.Context, userID string) error
+
+	// ListTokenHashesByUser 返回用户全部 token 的 access_token_hash（含已撤销/已轮换）
+	//
+	// 用于按用户精确失效 token 缓存（serviceutil.InvalidateUserTokenCache）：
+	// 缓存键 token:<hash> 的读取发生在 JWT 解析之前（无 userID 上下文），
+	// 只能以数据库为索引定位该用户的缓存键
+	ListTokenHashesByUser(ctx context.Context, userID string) ([]string, error)
 	StoreAuthorizationCode(ctx context.Context, code *model.AuthorizationCode) error
 	GetAuthorizationCode(ctx context.Context, code string) (*model.AuthorizationCode, error)
 	UpdateAuthorizationCode(ctx context.Context, code *model.AuthorizationCode) error
