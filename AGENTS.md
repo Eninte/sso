@@ -26,7 +26,7 @@ SSO 服务是一个生产级单点登录（Single Sign-On）微服务，基于 G
 
 | 文件/目录 | 作用 |
 |----------|------|
-| `go.mod` | Go 模块定义，模块名 `github.com/example/sso`，Go 版本 `1.26.1` |
+| `go.mod` | Go 模块定义，模块名 `github.com/example/sso`，Go 版本 `1.26.6` |
 | `Makefile` | 构建、测试、覆盖率、迁移、Docker、压力测试、代码分析等全量命令 |
 | `.env.example` | 配置模板，所有配置项的默认值与说明 |
 | `.env.test` | 测试环境配置（含真实凭据，**不可提交/分发**） |
@@ -35,7 +35,7 @@ SSO 服务是一个生产级单点登录（Single Sign-On）微服务，基于 G
 | `docker/Dockerfile` | 多阶段 Docker 构建，基于 `golang:1.26.6-alpine` |
 | `docker/docker-compose.yml` | 开发/部署 Compose，含 postgres、redis、sso 三服务 |
 | `docker/entrypoint.sh` | 容器启动脚本：自动构造无密码迁移 DSN（密码经 `PGPASSWORD` 子进程环境传递）并执行 `migrate up` |
-| `migrations/` | 数据库迁移脚本，共 018 个版本（3 位序号命名） |
+| `migrations/` | 数据库迁移脚本，共 021 个版本（3 位序号命名） |
 | `keys/` | RSA 密钥对（脚本生成，Git 忽略） |
 
 ### 2.2 技术栈
