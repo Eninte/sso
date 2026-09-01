@@ -127,6 +127,7 @@ type coverageStats struct {
 // 统计口径与 go tool cover -func 的 total 一致：
 // 每行 "文件:起止位置 语句数 命中数"，命中数 > 0 视为该块语句全部覆盖
 func parseCoverageProfile(path string) (*coverageStats, error) {
+	// #nosec G304 -- 路径来自运维显式传入的 CLI flag（CI/本地采集工具，非服务运行时输入）
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -196,6 +197,7 @@ type junitSuite struct {
 
 // parseJUnit 解析 JUnit XML，返回总数/通过数/失败数（skipped 不计入通过率分母）
 func parseJUnit(path string) (*junitStats, error) {
+	// #nosec G304 -- 路径来自运维显式传入的 CLI flag（CI/本地采集工具，非服务运行时输入）
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err

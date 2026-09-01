@@ -107,6 +107,7 @@ button:hover{background:#2b6cb0}
 </html>`
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
+	// #nosec G705 -- 页面中所有请求来源的插值（redirect/error/验证码题目与ID）均经 htmlEscape 转义
 	fmt.Fprint(w, page)
 }
 
@@ -115,6 +116,7 @@ button:hover{background:#2b6cb0}
 // 触发条件（与 API 登录一致的自适应判定）：
 //   - IP 维度失败计数已达阈值（GET 渲染时即可判定）
 //   - 上一次 POST 因账号维度触发而回跳（URL 带 captcha=1）
+//
 // 生成失败或实现不支持生成时降级为不渲染——POST 会再次判定并给出错误提示
 func (h *LoginPageHandler) renderCaptchaBlock(r *http.Request) string {
 	if !h.captchaSvc.IsEnabled() {

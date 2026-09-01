@@ -70,7 +70,7 @@ func InvalidateUserTokenCache(ctx context.Context, storeSvc store.Store, cacheSv
 //
 // 设计目的：与 InvalidateUserTokenCache 同理（避免 service 间循环依赖），
 // 但维度是客户端。认证中间件按 token:<access_token_hash> 缓存撤销状态
-//（TTL 15 分钟），客户端级撤销只改 DB 不清缓存的话，已撤销 token 在缓存
+// （TTL 15 分钟），客户端级撤销只改 DB 不清缓存的话，已撤销 token 在缓存
 // 窗口内仍被接受。以下路径在撤销客户端 Token 后都应调用：
 //   - AdminService.DisableClient（禁用客户端）
 //   - AdminService.RotateClientSecret（轮换密钥）
