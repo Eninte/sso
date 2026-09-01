@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/example/sso/internal/cache"
+	"github.com/example/sso/internal/common"
 	"github.com/example/sso/internal/crypto"
 	apperrors "github.com/example/sso/internal/errors"
 	"github.com/example/sso/internal/model"
@@ -85,6 +86,28 @@ func seedClientToken(store *mock.Store, clientID string, accessToken string) *mo
 	}
 	store.AddToken(token)
 	return token
+}
+
+// seedClientTokenWithHash 注入带 AccessTokenHash 的 token（模拟真实存储的哈希列）
+func seedClientTokenWithHash(store *mock.Store, clientID string, accessToken string) *model.Token {
+	token := seedClientToken(store, clientID, accessToken)
+	token.AccessTokenHash = common.HashToken(accessToken)
+	store.AddToken(token)
+	return token
+}
+
+// presetTokenCache 预置认证中间件的 token 撤销状态缓存（middleware/auth.go 缓存 bool）
+func presetTokenCache(t *testing.T, memCache cache.Cache, accessToken string) {
+	t.Helper()
+	require.NoError(t, memCache.Set(context.Background(), cache.TokenKey(accessToken), false, 15*time.Minute))
+}
+
+// assertTokenCacheInvalidated 断言 token 撤销状态缓存已失效
+func assertTokenCacheInvalidated(t *testing.T, memCache cache.Cache, accessToken string) {
+	t.Helper()
+	var revoked bool
+	err := memCache.Get(context.Background(), cache.TokenKey(accessToken), &revoked)
+	assert.ErrorIs(t, err, cache.ErrCacheMiss, "操作后 token 撤销状态缓存应已失效: %s", accessToken)
 }
 
 // presetClientCache 预置客户端缓存，用于断言操作后缓存已失效
@@ -587,6 +610,29 @@ func TestAdminService_DisableClient(t *testing.T) {
 		err := adminSvc.DisableClient(ctx, "operator-1", "dis-err")
 		require.Error(t, err)
 	})
+
+	t.Run("禁用：已签发Token的撤销状态缓存同步失效", func(t *testing.T) {
+		adminSvc, store, memCache := newAdminClientService(t)
+		seedAdminTestClient(store, "dis-tok", false)
+		seedAdminTestClient(store, "dis-tok-other", false)
+		seedClientTokenWithHash(store, "dis-tok", "dis-tok-access-1")
+		seedClientTokenWithHash(store, "dis-tok", "dis-tok-access-2")
+		seedClientTokenWithHash(store, "dis-tok-other", "dis-tok-access-other")
+		presetTokenCache(t, memCache, "dis-tok-access-1")
+		presetTokenCache(t, memCache, "dis-tok-access-2")
+		presetTokenCache(t, memCache, "dis-tok-access-other")
+
+		err := adminSvc.DisableClient(ctx, "operator-1", "dis-tok")
+		require.NoError(t, err)
+
+		assertTokenCacheInvalidated(t, memCache, "dis-tok-access-1")
+		assertTokenCacheInvalidated(t, memCache, "dis-tok-access-2")
+
+		// 其他客户端的 token 缓存不受影响（精确失效，非全量清理）
+		var revoked bool
+		getErr := memCache.Get(ctx, cache.TokenKey("dis-tok-access-other"), &revoked)
+		assert.NoError(t, getErr, "其他客户端的 token 缓存不应被清理")
+	})
 }
 
 func TestAdminService_EnableClient(t *testing.T) {
@@ -644,6 +690,19 @@ func TestAdminService_DeleteClient(t *testing.T) {
 		assertCacheInvalidated(t, memCache, "del-1")
 
 		waitForAuditLogs(ctx, t, store, "operator-1", string(model.EventClientDeleted), 1)
+	})
+
+	t.Run("删除：已签发Token的撤销状态缓存同步失效", func(t *testing.T) {
+		adminSvc, store, memCache := newAdminClientService(t)
+		seedAdminTestClient(store, "del-tok", false)
+		seedClientTokenWithHash(store, "del-tok", "del-tok-access-1")
+		presetTokenCache(t, memCache, "del-tok-access-1")
+
+		err := adminSvc.DeleteClient(ctx, "operator-1", "del-tok")
+		require.NoError(t, err)
+
+		// 删除后 tokens.client_id 已被置空，缓存失效依赖删除前的预取
+		assertTokenCacheInvalidated(t, memCache, "del-tok-access-1")
 	})
 
 	t.Run("删除不存在的客户端返回NotFound", func(t *testing.T) {

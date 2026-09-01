@@ -232,3 +232,74 @@ func TestStore_TokenHash_RotateByHash(t *testing.T) {
 	err = store.RotateRefreshToken(ctx, oldRefresh, newToken)
 	assert.ErrorIs(t, err, storepkg.ErrTokenRotated)
 }
+
+// TestStore_ListTokenHashesByClient 验证按客户端查询全部 access_token_hash
+//
+// 客户端级缓存失效（serviceutil.InvalidateClientTokenCache）以此查询为索引：
+// 必须返回该客户端全部 token 的哈希（含已撤销），且不能混入其他客户端的 token
+func TestStore_ListTokenHashesByClient(t *testing.T) {
+	store, db := setupTestStore(t)
+	t.Cleanup(func() {
+		cleanupTestData(t, db)
+		db.Close()
+	})
+	ctx := context.Background()
+
+	user := newTestUser("hash-by-client@example.com")
+	require.NoError(t, store.Create(ctx, user))
+
+	clientA := "test-hashclient-a-" + uuid.New().String()[:8]
+	clientB := "test-hashclient-b-" + uuid.New().String()[:8]
+	for _, cid := range []string{clientA, clientB} {
+		require.NoError(t, store.CreateClient(ctx, &model.Client{
+			ID:           uuid.New().String(),
+			ClientID:     cid,
+			ClientSecret: "secret",
+			Name:         "Hash By Client Test",
+			RedirectURIs: []string{"http://localhost"},
+			GrantTypes:   []string{"authorization_code"},
+			Scopes:       []string{"openid"},
+			CreatedAt:    time.Now(),
+		}))
+	}
+
+	// 客户端 A 两个 token（其一随后撤销，已撤销记录也必须列出）
+	accessA1 := "test-hbc-access-a1-" + uuid.New().String()
+	accessA2 := "test-hbc-access-a2-" + uuid.New().String()
+	for _, access := range []string{accessA1, accessA2} {
+		require.NoError(t, store.StoreToken(ctx, &model.Token{
+			ID:           uuid.New().String(),
+			AccessToken:  access,
+			RefreshToken: "test-hbc-refresh-" + uuid.New().String(),
+			UserID:       user.ID,
+			ClientID:     ptrTo(clientA),
+			Scopes:       []string{"openid"},
+			ExpiresAt:    time.Now().Add(1 * time.Hour),
+			CreatedAt:    time.Now(),
+		}))
+	}
+	require.NoError(t, store.RevokeToken(ctx, accessA2))
+
+	// 客户端 B 一个 token（不应出现在 A 的结果中）
+	accessB := "test-hbc-access-b-" + uuid.New().String()
+	require.NoError(t, store.StoreToken(ctx, &model.Token{
+		ID:           uuid.New().String(),
+		AccessToken:  accessB,
+		RefreshToken: "test-hbc-refresh-" + uuid.New().String(),
+		UserID:       user.ID,
+		ClientID:     ptrTo(clientB),
+		Scopes:       []string{"openid"},
+		ExpiresAt:    time.Now().Add(1 * time.Hour),
+		CreatedAt:    time.Now(),
+	}))
+
+	hashes, err := store.ListTokenHashesByClient(ctx, clientA)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{common.HashToken(accessA1), common.HashToken(accessA2)}, hashes,
+		"应返回客户端 A 全部 token 的哈希（含已撤销），不含其他客户端")
+
+	// 不存在的客户端返回空列表而非错误
+	empty, err := store.ListTokenHashesByClient(ctx, "nonexistent-client-"+uuid.New().String())
+	require.NoError(t, err)
+	assert.Empty(t, empty)
+}

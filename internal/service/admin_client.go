@@ -312,6 +312,9 @@ func (s *AdminService) DisableClient(ctx context.Context, operatorID, clientID s
 		return serviceutil.HandleStoreError(err, apperrors.ErrClientNotFound)
 	}
 
+	// 失效该客户端全部 token 的撤销状态缓存（中间件 token:<hash>，TTL 15 分钟），
+	// 否则已撤销 token 在缓存窗口内仍被接受
+	serviceutil.InvalidateClientTokenCache(ctx, s.store, s.cache, clientID)
 	serviceutil.InvalidateClientCache(ctx, s.cache, clientID)
 
 	if err := auditutil.CriticalAuditLog(ctx, s.auditSvc, string(model.EventClientDisabled), operatorID, map[string]interface{}{
@@ -371,6 +374,8 @@ func (s *AdminService) RotateClientSecret(ctx context.Context, operatorID, clien
 		return "", serviceutil.HandleStoreError(err, apperrors.ErrClientNotFound)
 	}
 
+	// 同 DisableClient：失效已撤销 token 的撤销状态缓存
+	serviceutil.InvalidateClientTokenCache(ctx, s.store, s.cache, clientID)
 	serviceutil.InvalidateClientCache(ctx, s.cache, clientID)
 
 	if err := auditutil.CriticalAuditLog(ctx, s.auditSvc, string(model.EventClientSecretRotated), operatorID, map[string]interface{}{
@@ -384,7 +389,13 @@ func (s *AdminService) RotateClientSecret(ctx context.Context, operatorID, clien
 }
 
 // DeleteClient 删除客户端（硬删除，store 单事务完成 Token 撤销与授权码清理）
+//
+// token 缓存失效必须在删除之前执行：删除后 tokens.client_id 已被 FK SET NULL
+// 置空，无法再按客户端定位缓存键。若删除最终失败，多清的缓存键会由下一次
+// 回源重新填充（DB 中 token 未撤销），无安全隐患。
 func (s *AdminService) DeleteClient(ctx context.Context, operatorID, clientID string) error {
+	serviceutil.InvalidateClientTokenCache(ctx, s.store, s.cache, clientID)
+
 	if err := s.store.DeleteClient(ctx, clientID); err != nil {
 		return serviceutil.HandleStoreError(err, apperrors.ErrClientNotFound)
 	}

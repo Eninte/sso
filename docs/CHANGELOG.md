@@ -17,6 +17,7 @@
 - **覆盖率 80% 门槛自 `totalTimeout` 函数引入后被静默绕过**：`go tool cover -func | grep total` 未锚定行首，会同时匹配 `internal/service/email.go` 中名为 `totalTimeout` 的函数（0.0%）与真正的 `total:` 汇总行，`COVERAGE` 变量混入两行后 awk/bc 判定报错或空转——本地 `make test-coverage` 以"0.0% 低于阈值"误报失败，CI 的 bc 检查则静默跳过。修复：Makefile（2 处）与 ci.yml 均改为锚定匹配 `grep '^total:'`
 - **机密客户端密钥校验在缓存命中下必然失败**（客户端管理 E2E 首次覆盖暴露）：`model.Client.ClientSecret` 带 `json:"-"` 标签，内存/Redis 缓存经 JSON 序列化后该字段为空，`validateClientSecret` 用空字符串校验 bcrypt 必然失败。修复：缓存命中且 secret 为空时回源 DB 读取哈希再验证
 - **Go 工具链升级到 1.26.6，消除全部标准库漏洞**：`govulncheck` 在 go1.26.4 下报告 8 个 stdlib 漏洞（`net/http`/`crypto/tls`/`net/url`/`html/template`/`encoding/xml`/`encoding/asn1`，修复在 1.26.5/1.26.6）。CI `go-version` 升级为 `1.26.6`（5 处）、Docker 构建镜像升级为 `golang:1.26.6-alpine`、`go.mod` go 指令升级为 `1.26.6`。升级后 `govulncheck` 报告 **0 漏洞**
+- **客户端级撤销不清 token 缓存，已撤销 access token 最长残留 15 分钟**：认证中间件按 `token:<hash>` 缓存撤销状态（TTL 15 分钟），`DisableClient`/`RotateClientSecret`/`DeleteClient` 只在 DB 撤销 Token 而未失效对应缓存键，缓存窗口内已撤销 token 仍被接受。修复：新增 `TokenStore.ListTokenHashesByClient` 与 `serviceutil.InvalidateClientTokenCache`（以 DB 为索引逐键删除，查询失败回退全量清理），三条撤销路径均已接入；`DeleteClient` 因 FK `SET NULL` 会在删除后置空 `tokens.client_id`，缓存失效在删除前预取执行
 
 ### Changed
 

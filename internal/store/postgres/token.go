@@ -20,8 +20,8 @@ import (
 // StoreAuthorizationCode 存储授权码
 func (s *Store) StoreAuthorizationCode(ctx context.Context, code *model.AuthorizationCode) error {
 	query := `
-		INSERT INTO authorization_codes (code, client_id, user_id, redirect_uri, scopes, code_challenge, code_challenge_method, expires_at, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO authorization_codes (code, client_id, user_id, redirect_uri, scopes, code_challenge, code_challenge_method, nonce, expires_at, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
 	_, err := s.db.ExecContext(ctx, query,
 		code.Code,
@@ -31,6 +31,7 @@ func (s *Store) StoreAuthorizationCode(ctx context.Context, code *model.Authoriz
 		code.Scopes,
 		code.CodeChallenge,
 		code.CodeChallengeMethod,
+		code.Nonce,
 		code.ExpiresAt,
 		code.CreatedAt,
 	)
@@ -40,7 +41,7 @@ func (s *Store) StoreAuthorizationCode(ctx context.Context, code *model.Authoriz
 // GetAuthorizationCode 获取授权码
 func (s *Store) GetAuthorizationCode(ctx context.Context, code string) (*model.AuthorizationCode, error) {
 	query := `
-		SELECT code, client_id, user_id, redirect_uri, scopes, code_challenge, code_challenge_method, expires_at, created_at, used_at
+		SELECT code, client_id, user_id, redirect_uri, scopes, code_challenge, code_challenge_method, nonce, expires_at, created_at, used_at
 		FROM authorization_codes
 		WHERE code = $1
 	`
@@ -54,6 +55,7 @@ func (s *Store) GetAuthorizationCode(ctx context.Context, code string) (*model.A
 		scanTextArray(&authCode.Scopes),
 		&authCode.CodeChallenge,
 		&authCode.CodeChallengeMethod,
+		&authCode.Nonce,
 		&authCode.ExpiresAt,
 		&authCode.CreatedAt,
 		&authCode.UsedAt,
@@ -210,6 +212,36 @@ func (s *Store) ListTokenHashesByUser(ctx context.Context, userID string) ([]str
 
 	query := `SELECT access_token_hash FROM tokens WHERE user_id = $1 AND access_token_hash <> ''`
 	rows, err := s.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	hashes := make([]string, 0, 8)
+	for rows.Next() {
+		var hash string
+		if err := rows.Scan(&hash); err != nil {
+			return nil, err
+		}
+		hashes = append(hashes, hash)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return hashes, nil
+}
+
+// ListTokenHashesByClient 返回客户端全部 token 的 access_token_hash
+//
+// 含已撤销/已轮换记录：客户端被禁用/轮换/删除时撤销其全部 Token 后，
+// 需按这些哈希清理认证中间件的 token:<hash> 撤销状态缓存（TTL 15 分钟），
+// 否则已撤销 token 在缓存窗口内仍被接受
+func (s *Store) ListTokenHashesByClient(ctx context.Context, clientID string) ([]string, error) {
+	ctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+
+	query := `SELECT access_token_hash FROM tokens WHERE client_id = $1 AND access_token_hash <> ''`
+	rows, err := s.db.QueryContext(ctx, query, clientID)
 	if err != nil {
 		return nil, err
 	}

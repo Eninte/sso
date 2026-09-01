@@ -66,6 +66,7 @@ type Store struct {
 	RotateClientSecretErr      error
 	SetClientActiveErr         error
 	RevokeAllClientTokensErr   error
+	ListTokenHashesByClientErr error
 	StoreAuthorizationCodeErr  error
 	GetAuthorizationCodeErr    error
 	StoreTokenErr              error
@@ -893,6 +894,26 @@ func (m *Store) ListTokenHashesByUser(ctx context.Context, userID string) ([]str
 	return hashes, nil
 }
 
+// ListTokenHashesByClient 返回客户端全部 token 的 access_token_hash（含已撤销/已轮换）
+//
+// 用于按客户端精确失效 token 缓存（serviceutil.InvalidateClientTokenCache）
+func (m *Store) ListTokenHashesByClient(ctx context.Context, clientID string) ([]string, error) {
+	if m.ListTokenHashesByClientErr != nil {
+		return nil, m.ListTokenHashesByClientErr
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	hashes := make([]string, 0, 8)
+	for _, token := range m.tokens {
+		if token.ClientID != nil && *token.ClientID == clientID && token.AccessTokenHash != "" {
+			hashes = append(hashes, token.AccessTokenHash)
+		}
+	}
+	return hashes, nil
+}
+
 // RotateRefreshToken 原子地轮换 refresh token
 //
 // 在单个事务（mock 用互斥锁模拟）内：
@@ -1397,6 +1418,7 @@ func (m *Store) Reset() {
 	m.RotateClientSecretErr = nil
 	m.SetClientActiveErr = nil
 	m.RevokeAllClientTokensErr = nil
+	m.ListTokenHashesByClientErr = nil
 	m.StoreAuthorizationCodeErr = nil
 	m.GetAuthorizationCodeErr = nil
 	m.StoreTokenErr = nil

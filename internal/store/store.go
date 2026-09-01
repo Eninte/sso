@@ -111,6 +111,13 @@ type TokenStore interface {
 	// 缓存键 token:<hash> 的读取发生在 JWT 解析之前（无 userID 上下文），
 	// 只能以数据库为索引定位该用户的缓存键
 	ListTokenHashesByUser(ctx context.Context, userID string) ([]string, error)
+
+	// ListTokenHashesByClient 返回客户端全部 token 的 access_token_hash（含已撤销/已轮换）
+	//
+	// 用于按客户端精确失效 token 缓存（serviceutil.InvalidateClientTokenCache）：
+	// 禁用/轮换/删除客户端撤销其全部 Token 后，需清理认证中间件的
+	// token:<hash> 撤销状态缓存，否则已撤销 token 在缓存 TTL 内仍被接受
+	ListTokenHashesByClient(ctx context.Context, clientID string) ([]string, error)
 	StoreAuthorizationCode(ctx context.Context, code *model.AuthorizationCode) error
 	GetAuthorizationCode(ctx context.Context, code string) (*model.AuthorizationCode, error)
 	UpdateAuthorizationCode(ctx context.Context, code *model.AuthorizationCode) error
