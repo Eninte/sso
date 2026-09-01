@@ -417,6 +417,13 @@ func (s *JWTService) GetPublicKeys() map[string]*rsa.PublicKey {
 	return result
 }
 
+// Issuer 返回 JWT 签发的 issuer 值（JWT_ISSUER 配置），供 OIDC id_token 等复用
+func (s *JWTService) Issuer() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.issuer
+}
+
 func (s *JWTService) GetAccessTokenTTL() time.Duration {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

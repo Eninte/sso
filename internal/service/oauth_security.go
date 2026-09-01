@@ -155,6 +155,8 @@ type ConsentClaims struct {
 	State               string   `json:"state"`
 	CodeChallenge       string   `json:"code_challenge,omitempty"`
 	CodeChallengeMethod string   `json:"code_challenge_method,omitempty"`
+	Nonce               string   `json:"nonce,omitempty"`
+	Email               string   `json:"email,omitempty"`
 }
 
 // IssueConsentToken 签发 consent_token
@@ -170,7 +172,7 @@ func (s *OAuthService) IssueConsentToken(
 	ctx context.Context,
 	userID, clientID, redirectURI string,
 	scopes []string,
-	state, codeChallenge, codeChallengeMethod string,
+	state, codeChallenge, codeChallengeMethod, nonce string,
 ) (string, error) {
 	if s.tokenSvc == nil || s.tokenSvc.jwtSvc == nil {
 		return "", apperrors.ErrInternal
@@ -211,6 +213,7 @@ func (s *OAuthService) IssueConsentToken(
 		State:               state,
 		CodeChallenge:       codeChallenge,
 		CodeChallengeMethod: codeChallengeMethod,
+		Nonce:               nonce,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)

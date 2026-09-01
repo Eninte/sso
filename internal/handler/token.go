@@ -35,9 +35,28 @@ func NewTokenHandler(authSvc service.AuthServiceInterface, oauthSvc service.OAut
 
 // HandleToken 处理Token请求
 // POST /api/v1/token
+//
+// 兼容两种请求体格式（OIDC 标准为 application/x-www-form-urlencoded，
+// 本项目原生支持 application/json）：
+//   - application/json：{"grant_type":"authorization_code", ...}
+//   - application/x-www-form-urlencoded：grant_type=authorization_code&...
 func (h *TokenHandler) HandleToken(w http.ResponseWriter, r *http.Request) {
 	var req model.TokenRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
+		if err := r.ParseForm(); err != nil {
+			handleDecodeJSONError(w, r, err)
+			return
+		}
+		req = model.TokenRequest{
+			GrantType:    r.PostForm.Get("grant_type"),
+			Code:         r.PostForm.Get("code"),
+			RedirectURI:  r.PostForm.Get("redirect_uri"),
+			ClientID:     r.PostForm.Get("client_id"),
+			ClientSecret: r.PostForm.Get("client_secret"),
+			RefreshToken: r.PostForm.Get("refresh_token"),
+			CodeVerifier: r.PostForm.Get("code_verifier"),
+		}
+	} else if err := decodeJSON(r, &req); err != nil {
 		handleDecodeJSONError(w, r, err)
 		return
 	}
@@ -110,13 +129,29 @@ func (h *TokenHandler) handleAuthorizationCode(w http.ResponseWriter, r *http.Re
 	}
 
 	// 返回Token响应
-	handlerutil.WriteJSONSuccess(w, map[string]interface{}{
+	// OIDC 标准：顶层输出 access_token/id_token/token_type/expires_in/scope，
+	// 同时保留 data 字段兼容既有的非标准客户端。
+	// id_token 由授权码交换时独立签发（RS256，aud=client_id），
+	// 不拿 access token 兜底（aud 语义不符）；为空时不输出该字段。
+	body := map[string]interface{}{
 		"access_token":  token.AccessToken,
 		"refresh_token": token.RefreshToken,
 		"token_type":    "Bearer",
 		"expires_in":    int(h.oauthSvc.GetAccessTokenTTL().Seconds()),
 		"scope":         strings.Join(token.Scopes, " "),
-	})
+	}
+	resp := map[string]interface{}{
+		"data":         body,
+		"access_token": token.AccessToken,
+		"token_type":   "Bearer",
+		"expires_in":   int(h.oauthSvc.GetAccessTokenTTL().Seconds()),
+		"scope":        strings.Join(token.Scopes, " "),
+	}
+	if token.IDToken != "" {
+		body["id_token"] = token.IDToken
+		resp["id_token"] = token.IDToken
+	}
+	handlerutil.WriteJSON(w, http.StatusOK, resp)
 }
 
 // HandleRevoke 处理Token撤销请求

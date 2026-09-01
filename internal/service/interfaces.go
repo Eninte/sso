@@ -87,7 +87,7 @@ type OAuthServiceInterface interface {
 		ctx context.Context,
 		userID, clientID, redirectURI string,
 		scopes []string,
-		state, codeChallenge, codeChallengeMethod string,
+		state, codeChallenge, codeChallengeMethod, nonce string,
 	) (string, error)
 
 	// ExchangeAuthorizationCode 交换授权码

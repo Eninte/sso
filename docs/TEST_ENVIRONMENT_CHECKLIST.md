@@ -19,10 +19,12 @@ psql "postgres://sso:sso@192.168.1.3:5432/sso_test?sslmode=disable" -c "SELECT 1
 **配置信息：**
 - 主机：`192.168.1.3`
 - 端口：`5432`
-- 数据库：`sso_test`
+- 数据库：`sso_test`（**测试/自动化环境**；**部署中的 IdP 实例连的是同机 `sso` 库**——两者勿混，手工插数据/查账号先确认目标库）
 - 用户：`sso`
 - 密码：`sso`
 - SSL模式：`disable`（测试环境）
+
+> ⚠️ **库名坑**：Makefile / `.env.test` 默认指向 `sso_test`，但 2026-08 实测部署 IdP（192.168.1.3:9090）连接的是 **`sso` 库**（用户 `ocean@eninte.com`、OAuth client `llm-proxy-local` 等真实测试资源都在 `sso` 库）。向 IdP 插数据前先用 `\l` / `SELECT count(*) FROM users;` 确认是哪个库。
 
 **环境变量：**
 ```bash

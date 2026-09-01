@@ -251,6 +251,7 @@ func TestOAuthService_ConsentToken(t *testing.T) {
 			"random-state-value-12345",
 			"valid-challenge",
 			"S256",
+			"", // 未传 nonce
 		)
 		require.NoError(t, err)
 		assert.NotEmpty(t, token)
@@ -314,6 +315,7 @@ func TestOAuthService_CreateAuthorizationCodeWithConsent(t *testing.T) {
 			"state-csrf-1234567890",
 			"challenge-value",
 			"S256",
+			"", // 未传 nonce
 		)
 		require.NoError(t, err)
 
@@ -340,6 +342,7 @@ func TestOAuthService_CreateAuthorizationCodeWithConsent(t *testing.T) {
 			"state-csrf-1234567890",
 			"",
 			"",
+			"", // 未传 nonce
 		)
 		require.NoError(t, err)
 
@@ -360,6 +363,7 @@ func TestOAuthService_CreateAuthorizationCodeWithConsent(t *testing.T) {
 			"state-csrf-1234567890",
 			"",
 			"",
+			"", // 未传 nonce
 		)
 		// IssueConsentToken 本身不校验 redirect_uri，需要 CreateAuthorizationCodeWithConsent 校验
 		// 但 ValidateRedirectURI 在 store 层会拒绝
@@ -385,6 +389,7 @@ func TestOAuthService_CreateAuthorizationCodeWithConsent(t *testing.T) {
 			"state-csrf-1234567890",
 			"", // 未传 code_challenge
 			"", // 未传 method
+			"", // 未传 nonce
 		)
 		require.NoError(t, err)
 
@@ -403,6 +408,7 @@ func TestOAuthService_CreateAuthorizationCodeWithConsent(t *testing.T) {
 			"original-state-abcdef",
 			"",
 			"",
+			"", // 未传 nonce
 		)
 		require.NoError(t, err)
 

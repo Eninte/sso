@@ -7,6 +7,8 @@
 ### Added
 
 - **管理员客户端管理 API**（OAuth 客户端 CRUD / 禁用启用 / 密钥轮换）：新增 `/api/v1/admin/clients` 系列端点，支持创建机密/公共客户端、查询、分页列表、全量更新、禁用/启用、删除与密钥轮换。安全设计：禁用/删除/轮换先撤销该客户端全部未撤销 Token；`is_active` 在 `getClient`（缓存命中与 DB 路径）统一检查，禁用客户端对公网返回 `INVALID_CLIENT`；公共客户端强制 PKCE（已有）且不支持密钥；`client_credentials` 注册被拒（`UNSUPPORTED_GRANT_TYPE`）。配套迁移 `021_add_client_management`（`oauth_clients` 新增 `is_active`/`updated_at`；`authorization_codes.client_id` → `ON DELETE CASCADE`、`tokens.client_id` → `ON DELETE SET NULL`）
+- **标准浏览器 OIDC 授权码登录流**：新增 `GET/POST /ui/login` 浏览器登录页（HTML 表单 + 服务端渲染数学验证码 + 会话 cookie `sso_session`（HttpOnly/SameSite=Lax/生产 Secure）+ 防开放重定向）；`GET /api/v1/authorize` 支持可选认证（`Authorization` 头或 `sso_session` cookie），浏览器导航未登录 302 到登录页、已登录自动授权并 302 回 `redirect_uri?code=...`；`POST /ui/login` 纳入敏感限流（与 `/api/v1/login` 相同）；登录页使用专属 CSP（放行内联样式、不限制 form-action），全局安全策略不变
+- **OIDC id_token 签发**：token 交换（authorization_code）响应新增 `id_token`（RS256，claims：iss/sub/aud=client_id/email/nonce），`authorization_codes` 表新增 `nonce` 列（migration `022`）；token 端点兼容 `application/x-www-form-urlencoded`（OIDC 标准）与 `application/json`，响应顶层输出标准 OIDC 字段（`access_token`/`id_token`/`token_type`/`expires_in`/`scope`），`data` 保留兼容旧客户端
 - **客户端缓存键版本化**：`ClientCachePrefix` 由 `client:` 改为 `client:v2:`，避免升级后旧缓存条目（无 `is_active` 字段）被误判为禁用导致 OAuth 全流程瘫痪
 - **缓存防击穿（singleflight）**：`OAuthService.getClient`、`AdminService.GetUser` 与 `/api/v1/userinfo` 处理器的缓存未命中回源路径接入 `golang.org/x/sync/singleflight`，同一 key 的并发回源只有一个查询 DB，其余等待复用（此前防击穿实现完整但生产零引用，热点 key 过期或 Redis 抖动时会击穿到 DB）
 - **质量指标采集器**（`scripts/qualitymetrics`）：解析 `coverage.out` 与 gotestsum JUnit XML，复用 `dashboard.CalculateQualityScore` 打分、`postgres.StoreMetrics` 落库，补上 `quality_metrics` 表缺失的唯一数据生产者（此前质量仪表盘/周报永远空转）；CI test job 在覆盖率阈值检查通过后自动回写，本地可用 `make quality-metrics-store`
@@ -17,6 +19,7 @@
 - **覆盖率 80% 门槛自 `totalTimeout` 函数引入后被静默绕过**：`go tool cover -func | grep total` 未锚定行首，会同时匹配 `internal/service/email.go` 中名为 `totalTimeout` 的函数（0.0%）与真正的 `total:` 汇总行，`COVERAGE` 变量混入两行后 awk/bc 判定报错或空转——本地 `make test-coverage` 以"0.0% 低于阈值"误报失败，CI 的 bc 检查则静默跳过。修复：Makefile（2 处）与 ci.yml 均改为锚定匹配 `grep '^total:'`
 - **机密客户端密钥校验在缓存命中下必然失败**（客户端管理 E2E 首次覆盖暴露）：`model.Client.ClientSecret` 带 `json:"-"` 标签，内存/Redis 缓存经 JSON 序列化后该字段为空，`validateClientSecret` 用空字符串校验 bcrypt 必然失败。修复：缓存命中且 secret 为空时回源 DB 读取哈希再验证
 - **Go 工具链升级到 1.26.6，消除全部标准库漏洞**：`govulncheck` 在 go1.26.4 下报告 8 个 stdlib 漏洞（`net/http`/`crypto/tls`/`net/url`/`html/template`/`encoding/xml`/`encoding/asn1`，修复在 1.26.5/1.26.6）。CI `go-version` 升级为 `1.26.6`（5 处）、Docker 构建镜像升级为 `golang:1.26.6-alpine`、`go.mod` go 指令升级为 `1.26.6`。升级后 `govulncheck` 报告 **0 漏洞**
+- **public client（`client_secret` 为 NULL）查询崩溃**：`GetByClientID` 对 `client_secret` 用 `sql.NullString` 扫描，此前 `converting NULL to string` 导致 public client 无法通过授权端点
 - **客户端级撤销不清 token 缓存，已撤销 access token 最长残留 15 分钟**：认证中间件按 `token:<hash>` 缓存撤销状态（TTL 15 分钟），`DisableClient`/`RotateClientSecret`/`DeleteClient` 只在 DB 撤销 Token 而未失效对应缓存键，缓存窗口内已撤销 token 仍被接受。修复：新增 `TokenStore.ListTokenHashesByClient` 与 `serviceutil.InvalidateClientTokenCache`（以 DB 为索引逐键删除，查询失败回退全量清理），三条撤销路径均已接入；`DeleteClient` 因 FK `SET NULL` 会在删除后置空 `tokens.client_id`，缓存失效在删除前预取执行
 
 ### Changed

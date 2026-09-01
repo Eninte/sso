@@ -51,6 +51,7 @@ type LoginRequest struct {
 
 type LoginResponse struct {
 	AccessToken  string   `json:"access_token,omitempty"`
+	IDToken      string   `json:"id_token,omitempty"`
 	RefreshToken string   `json:"refresh_token,omitempty"`
 	TokenType    string   `json:"token_type,omitempty"`
 	Scopes       []string `json:"scopes,omitempty"`
@@ -187,6 +188,7 @@ type AuthorizationCode struct {
 	Scopes              []string   `json:"scopes" db:"scopes"`
 	CodeChallenge       string     `json:"code_challenge" db:"code_challenge"`
 	CodeChallengeMethod string     `json:"code_challenge_method" db:"code_challenge_method"`
+	Nonce               string     `json:"nonce" db:"nonce"`
 	UsedAt              *time.Time `json:"used_at" db:"used_at"`
 	ExpiresAt           time.Time  `json:"expires_at" db:"expires_at"`
 	CreatedAt           time.Time  `json:"created_at" db:"created_at"`

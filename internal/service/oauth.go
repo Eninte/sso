@@ -4,9 +4,12 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/example/sso/internal/cache"
@@ -348,6 +351,7 @@ func (s *OAuthService) CreateAuthorizationCodeWithConsent(
 		Scopes:              validScopes,
 		CodeChallenge:       claims.CodeChallenge,
 		CodeChallengeMethod: claims.CodeChallengeMethod,
+		Nonce:               claims.Nonce,
 		ExpiresAt:           time.Now().Add(10 * time.Minute),
 		CreatedAt:           time.Now(),
 	}
@@ -523,7 +527,7 @@ func (s *OAuthService) generateTokenResponse(
 	}
 
 	clientID := &authCode.ClientID
-	return s.tokenSvc.GenerateTokenPair(
+	resp, err := s.tokenSvc.GenerateTokenPair(
 		ctx,
 		user.ID,
 		user.Email,
@@ -531,6 +535,51 @@ func (s *OAuthService) generateTokenResponse(
 		authCode.Scopes,
 		clientID,
 	)
+	if err != nil {
+		return nil, err
+	}
+	// OIDC：签发 id_token（aud=client_id、nonce=authorize 时的 nonce、email），
+	// 供客户端（如 Gateway Web Session）校验登录身份。
+	idToken, err := s.issueIDToken(user, authCode)
+	if err != nil {
+		return nil, err
+	}
+	resp.IDToken = idToken
+	return resp, nil
+}
+
+// issueIDToken 签发 OIDC id_token（RS256，活跃密钥）。
+// aud 取授权码的 client_id（符合 OIDC），nonce 透传 authorize 请求的 nonce。
+func (s *OAuthService) issueIDToken(user *model.User, authCode *model.AuthorizationCode) (string, error) {
+	if s.tokenSvc == nil || s.tokenSvc.jwtSvc == nil {
+		return "", fmt.Errorf("token service is not initialized")
+	}
+	now := time.Now()
+	claims := ConsentClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    s.tokenSvc.jwtSvc.Issuer(),
+			Subject:   user.ID,
+			Audience:  jwt.ClaimStrings{authCode.ClientID},
+			ExpiresAt: jwt.NewNumericDate(now.Add(s.tokenSvc.jwtSvc.GetAccessTokenTTL())),
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			ID:        uuid.New().String(),
+		},
+		ClientID: authCode.ClientID,
+		UserID:   user.ID,
+		Nonce:    authCode.Nonce,
+		Email:    user.Email,
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	keyID := s.tokenSvc.jwtSvc.GetActiveKeyID()
+	if keyID != "" {
+		token.Header["kid"] = keyID
+	}
+	signed, err := signConsentTokenWithJWTService(s.tokenSvc.jwtSvc, token)
+	if err != nil {
+		return "", fmt.Errorf("签发id_token失败: %w", err)
+	}
+	return signed, nil
 }
 
 // logAuthCodeInvalid 记录无效授权码审计日志

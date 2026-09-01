@@ -4,6 +4,7 @@ package handler
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 
 	apperrors "github.com/example/sso/internal/errors"
@@ -11,6 +12,28 @@ import (
 	"github.com/example/sso/internal/service"
 	"github.com/example/sso/internal/util/handlerutil"
 )
+
+// acceptsHTML 判断请求是否来自浏览器导航（OIDC 授权码流程标准行为）。
+func acceptsHTML(r *http.Request) bool {
+	accept := r.Header.Get("Accept")
+	return strings.Contains(accept, "text/html") || strings.Contains(accept, "application/xhtml+xml")
+}
+
+// appendQuery 在已有 URL（可能含 query）上追加参数，返回完整 URL 字符串。
+func appendQuery(rawURL string, params url.Values) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	q := u.Query()
+	for k, vs := range params {
+		for _, v := range vs {
+			q.Add(k, v)
+		}
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
+}
 
 // ============================================================================
 // AuthorizeHandler 授权处理器
@@ -66,12 +89,48 @@ func (h *AuthorizeHandler) HandleAuthorize(w http.ResponseWriter, r *http.Reques
 	// 4. 获取当前登录用户（如果已登录）
 	userID := middleware.GetUserIDFromContext(r.Context())
 
-	// 5. 如果用户未登录，返回登录提示
+	// 5. 如果用户未登录：
+	//    - 浏览器导航（Accept: text/html）→ 302 到 /ui/login 标准登录页（OIDC 授权码流程）
+	//    - API 调用 → 保持 JSON login_required 错误
 	if userID == "" {
+		if acceptsHTML(r) {
+			redirect := "/ui/login?redirect=" + url.QueryEscape(r.URL.RequestURI())
+			http.Redirect(w, r, redirect, http.StatusFound)
+			return
+		}
 		writeJSON(w, http.StatusUnauthorized, map[string]string{
 			"error":             "login_required",
 			"error_description": "请先登录",
 		})
+		return
+	}
+
+	// 5.1 浏览器导航 + 已认证：标准 OIDC 授权码流程——自动授权，
+	// 直接以 302 回跳 redirect_uri?code=...&state=...（不展示 consent 页）。
+	// 签发 consent_token 完成 client/redirect/scope/PKCE 校验后立即兑换授权码。
+	if acceptsHTML(r) {
+		consentToken, err := h.oauthSvc.IssueConsentToken(
+			r.Context(),
+			userID,
+			clientID,
+			redirectURI,
+			scopes,
+			state,
+			codeChallenge,
+			codeChallengeMethod,
+			r.URL.Query().Get("nonce"),
+		)
+		if err != nil {
+			writeOAuthError(w, r, err)
+			return
+		}
+		code, err := h.oauthSvc.CreateAuthorizationCodeWithConsent(r.Context(), userID, consentToken, state)
+		if err != nil {
+			writeOAuthError(w, r, err)
+			return
+		}
+		location := appendQuery(redirectURI, url.Values{"code": {code}, "state": {state}})
+		http.Redirect(w, r, location, http.StatusFound)
 		return
 	}
 
@@ -87,6 +146,7 @@ func (h *AuthorizeHandler) HandleAuthorize(w http.ResponseWriter, r *http.Reques
 		state,
 		codeChallenge,
 		codeChallengeMethod,
+		r.URL.Query().Get("nonce"),
 	)
 	if err != nil {
 		writeOAuthError(w, r, err)

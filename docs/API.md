@@ -347,11 +347,12 @@ Content-Type: application/json
 
 #### 交换授权码
 
-使用OAuth 2.0授权码获取Token。
+使用OAuth 2.0授权码获取Token。支持两种请求体格式（OIDC 标准为 form-urlencoded）：
 
 ```
 POST /api/v1/token
 Content-Type: application/json
+# 或 Content-Type: application/x-www-form-urlencoded
 ```
 
 **请求参数**:
@@ -365,12 +366,18 @@ Content-Type: application/json
 | client_secret | string | 否 | 客户端密钥（机密客户端必填） |
 | code_verifier | string | 否 | PKCE验证器 |
 
-**成功响应** `200 OK`:
+**成功响应** `200 OK`（OIDC 标准字段在顶层，`data` 保留兼容旧客户端）:
 ```json
 {
-  "message": "success",
+  "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "id_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refresh_token": "bmV3IHJlZnJlc2ggdG9rZW4...",
+  "token_type": "Bearer",
+  "expires_in": 900,
+  "scope": "openid profile email",
   "data": {
     "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "id_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
     "refresh_token": "bmV3IHJlZnJlc2ggdG9rZW4...",
     "token_type": "Bearer",
     "expires_in": 900,
@@ -378,6 +385,9 @@ Content-Type: application/json
   }
 }
 ```
+
+`id_token`（OIDC）：RS256 签发，claims 含 `iss`（JWT_ISSUER）、`sub`（用户ID）、`aud`（client_id）、
+`email`、`nonce`（透传 authorize 请求的 nonce）；public client（无 secret）跳过密钥校验。
 
 #### 撤销Token
 
@@ -803,11 +813,12 @@ Authorization: Bearer <access_token>
 
 ### 授权端点
 
-发起OAuth 2.0授权请求。需要认证。
+发起OAuth 2.0授权请求。认证方式二选一：
+- `Authorization: Bearer <access_token>`（API 客户端）
+- 浏览器登录会话 cookie `sso_session`（标准 OIDC 授权码流程，见 `/ui/login`）
 
 ```
-GET /api/v1/authorize?client_id=<client_id>&redirect_uri=<redirect_uri>&response_type=code&scope=<scope>&state=<state>
-Authorization: Bearer <access_token>
+GET /api/v1/authorize?client_id=<client_id>&redirect_uri=<redirect_uri>&response_type=code&scope=<scope>&state=<state>&nonce=<nonce>
 ```
 
 **查询参数**:
@@ -819,14 +830,27 @@ Authorization: Bearer <access_token>
 | response_type | 是 | 固定值: `code` |
 | scope | 否 | 权限范围（空格分隔） |
 | state | 是 | 状态参数（最小16字符，CSRF保护） |
-| code_challenge | 否 | PKCE挑战 |
+| code_challenge | 否 | PKCE挑战（public client 强制 S256） |
 | code_challenge_method | 否 | PKCE方法 |
+| nonce | 否 | OIDC 一次性随机值，签发 id_token 时透传（aud=client_id、nonce、email） |
 
-**成功响应** `200 OK`:
+**浏览器导航（`Accept: text/html`）行为**（标准 OIDC 授权码流）：
+- 未认证 → `302` 到 `/ui/login?redirect=<authorize 完整 URL>`（浏览器登录页）
+- 已认证 → **自动授权**，直接 `302` 到 `redirect_uri?code=<authorization_code>&state=<state>`
+
+**API 调用（非 text/html）行为**：
+- 未认证 → `401` `{"error":"login_required"}`
+- 已认证 → 返回 `consent_token`（前端需调用 `POST /api/v1/authorize/approve` 批准）
+
+**成功响应**（API 路径） `200 OK`:
 ```json
 {
-  "code": "authorization_code",
-  "state": "xyz"
+  "consent_token": "eyJhbGciOi...",
+  "client_id": "...",
+  "redirect_uri": "...",
+  "scope": "...",
+  "state": "...",
+  "require_approval": true
 }
 ```
 
@@ -836,6 +860,23 @@ Authorization: Bearer <access_token>
 |--------|------|
 | 400 | 请求参数错误或state无效 |
 | 401 | 需要登录 |
+
+### 浏览器登录页
+
+标准 OIDC 授权码流程的登录界面（无需认证）。
+
+```
+GET  /ui/login?redirect=<authorize 完整 URL 的相对路径>
+POST /ui/login   （application/x-www-form-urlencoded：email、password、redirect）
+```
+
+- `GET` 渲染 HTML 登录表单；`POST` 校验凭据（验证码触发时表单内嵌数学验证码题目，
+  从表单字段 `captcha_id`/`captcha_answer` 提交），成功后下发
+  `sso_session` 会话 cookie（HttpOnly + SameSite=Lax + 生产环境 Secure，承载短期 access token）
+  并 `302` 回 `redirect`。
+- `POST /ui/login` 与 `/api/v1/login` 同属敏感端点，适用敏感限流（全局限额的 1/10）。
+- `redirect` 仅接受站内相对路径（防开放重定向）。
+- 登录页使用专属 CSP（放行内联样式、不限制 form-action），全局安全策略不变。
 
 ### 批准授权
 

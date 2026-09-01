@@ -221,6 +221,89 @@ func RequireAdmin() func(http.Handler) http.Handler {
 	return RequireRole("admin")
 }
 
+// BrowserSessionCookie 浏览器 OIDC 登录会话 cookie（承载短期 access token）。
+// 由 /ui/login 表单登录成功后下发，仅用于标准浏览器授权码流程
+// （authorize 未认证时重定向到登录页，而非要求 Authorization 头）。
+const BrowserSessionCookie = "sso_session"
+
+// AuthMiddlewareOptional 可选认证中间件（标准浏览器 OIDC 兼容）。
+//
+// 认证来源优先级：
+//  1. Authorization: Bearer <token>（API 调用，现有行为）
+//  2. BrowserSessionCookie（浏览器表单登录后的会话）
+//  3. 都没有 → 放行（未认证，由 handler 决定重定向登录页或返回错误）
+//
+// 携带了 token 但无效/已撤销时：记录指标并放行（handler 层会按未认证处理），
+// 避免浏览器被意外 401 打断授权跳转。
+func AuthMiddlewareOptional(jwtSvc *crypto.JWTService, store store.Store, cacheSvc cache.Cache, invalidTokenFunc func()) func(http.Handler) http.Handler {
+	blacklisted := func(ctx context.Context, token string) bool {
+		cacheKey := cache.TokenKey(token)
+		var revoked bool
+		err := cacheSvc.Get(ctx, cacheKey, &revoked)
+		if err == nil {
+			return revoked
+		}
+		tokenRecord, err := store.GetTokenByAccessToken(ctx, token)
+		if err != nil {
+			if errors.Is(err, apperrors.ErrNotFound) {
+				_ = cacheSvc.Set(ctx, cacheKey, true, cache.TokenTTL)
+				return true
+			}
+			slog.Error("查询Token状态失败，拒绝请求（fail-closed）", "error", err)
+			return true
+		}
+		revoked = tokenRecord.RevokedAt != nil
+		_ = cacheSvc.Set(ctx, cacheKey, revoked, cache.TokenTTL)
+		return revoked
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			token := bearerTokenFromHeader(r)
+			if token == "" {
+				if c, err := r.Cookie(BrowserSessionCookie); err == nil {
+					token = c.Value
+				}
+			}
+			if token == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if blacklisted(r.Context(), token) {
+				if invalidTokenFunc != nil {
+					invalidTokenFunc()
+				}
+				next.ServeHTTP(w, r)
+				return
+			}
+			claims, err := jwtSvc.ValidateAccessToken(token)
+			if err != nil {
+				if invalidTokenFunc != nil {
+					invalidTokenFunc()
+				}
+				next.ServeHTTP(w, r)
+				return
+			}
+			ctx := context.WithValue(r.Context(), UserIDKey, claims.RegisteredClaims.Subject)
+			ctx = context.WithValue(ctx, UserEmailKey, claims.Email)
+			ctx = context.WithValue(ctx, UserScopesKey, claims.Scopes)
+			ctx = context.WithValue(ctx, UserRoleKey, claims.Role)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+func bearerTokenFromHeader(r *http.Request) string {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		return ""
+	}
+	parts := strings.SplitN(authHeader, " ", 2)
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		return ""
+	}
+	return parts[1]
+}
+
 // writeAdminError 写入管理员权限错误响应
 func writeAdminError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

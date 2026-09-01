@@ -28,6 +28,7 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 	// ==== 初始化处理器 ====
 	registerHandler := handler.NewRegisterHandler(svc.Auth, svc.Captcha)
 	loginHandler := handler.NewLoginHandler(svc.Auth, svc.Captcha)
+	loginPageHandler := handler.NewLoginPageHandler(svc.Auth, svc.Captcha, cfg.Env == "production")
 	tokenHandler := handler.NewTokenHandler(svc.Auth, svc.OAuth)
 	userInfoHandler := handler.NewUserInfoHandler(svc.Store, svc.Cache)
 	authorizeHandler := handler.NewAuthorizeHandler(svc.OAuth)
@@ -184,7 +185,6 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 		svc.Metrics.Increment("security_invalid_token_total")
 	}))
 	protected.HandleFunc("/userinfo", userInfoHandler.Handle).Methods("GET")
-	protected.HandleFunc("/authorize", authorizeHandler.HandleAuthorize).Methods("GET")
 	protected.HandleFunc("/authorize/approve", authorizeHandler.HandleApprove).Methods("POST")
 	protected.HandleFunc("/authorize/deny", authorizeHandler.HandleDeny).Methods("POST")
 	protected.HandleFunc("/token/revoke", tokenHandler.HandleRevoke).Methods("POST")
@@ -199,6 +199,24 @@ func initHandlers(cfg *config.Config, svc *Services, version, buildTime string) 
 	protected.HandleFunc("/mfa/recovery-codes/generate", mfaHandler.HandleGenerateRecoveryCodes).Methods("POST")
 	protected.HandleFunc("/mfa/recovery-codes/verify", mfaHandler.HandleVerifyRecoveryCode).Methods("POST")
 	protected.HandleFunc("/mfa/recovery-codes/status", mfaHandler.HandleGetRecoveryCodeStatus).Methods("GET")
+
+	// 可选认证端点（标准浏览器 OIDC 兼容）：
+	// /authorize 允许通过 Authorization 头或浏览器会话 cookie 认证；
+	// 均未认证时由 handler 决定重定向到 /ui/login（浏览器）或返回错误（API）。
+	optionalAuth := api.PathPrefix("").Subrouter()
+	optionalAuth.Use(middleware.AuthMiddlewareOptional(svc.JWT, svc.Store, svc.Cache, func() {
+		svc.Metrics.Increment("security_invalid_token_total")
+	}))
+	optionalAuth.HandleFunc("/authorize", authorizeHandler.HandleAuthorize).Methods("GET")
+
+	// 浏览器登录页（公开，无认证）：标准 OIDC 授权码流程的登录界面
+	router.HandleFunc("/ui/login", loginPageHandler.HandlePage).Methods("GET")
+	// POST 校验凭据，与 /api/v1/login 同属敏感端点，挂敏感限流器（全局限额的 1/10）
+	if sensitiveLimiter != nil {
+		router.Handle("/ui/login", sensitiveLimiter.Middleware(http.HandlerFunc(loginPageHandler.HandleSubmit))).Methods("POST")
+	} else {
+		router.HandleFunc("/ui/login", loginPageHandler.HandleSubmit).Methods("POST")
+	}
 
 	// 管理员端点 (需要认证 + 管理员角色)
 	admin := api.PathPrefix("/admin").Subrouter()

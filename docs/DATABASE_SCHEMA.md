@@ -130,6 +130,7 @@ OAuth 授权码的一次性存储。
 | `scopes` | TEXT[] | NULLABLE | `'{}'` | 已授予的权限范围 |
 | `code_challenge` | VARCHAR(255) | NULLABLE | NULL | PKCE 挑战码 |
 | `code_challenge_method` | VARCHAR(10) | NULLABLE | NULL | PKCE 方法（`S256` / `plain`） |
+| `nonce` | TEXT | NULLABLE | NULL | OIDC 一次性随机值（migration `022` 新增；authorize 时透传，token 交换时写入 id_token） |
 | `expires_at` | TIMESTAMP | NOT NULL | — | 过期时间（短有效期，通常 10 分钟） |
 | `created_at` | TIMESTAMP | NOT NULL | `NOW()` | 创建时间 |
 | `used_at` | TIMESTAMP | NULLABLE | NULL | 使用时间；NULL 表示未使用 |
