@@ -120,7 +120,9 @@ jobs:
 
       # 质量指标采集器：为 /api/v1/admin/quality/* 仪表盘补上唯一数据生产者
       # 打分与落库口径复用 internal/quality/dashboard 与 internal/store/postgres
+      # continue-on-error：纯观测性步骤，回写失败（如 DB 抖动）不应阻断 CI
       - name: Store quality metrics
+        continue-on-error: true
         env:
           DATABASE_URL: postgres://sso:testpassword@localhost:5432/sso_test?sslmode=disable
         run: |

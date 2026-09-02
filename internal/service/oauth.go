@@ -4,7 +4,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"time"
 
@@ -552,7 +551,7 @@ func (s *OAuthService) generateTokenResponse(
 // aud 取授权码的 client_id（符合 OIDC），nonce 透传 authorize 请求的 nonce。
 func (s *OAuthService) issueIDToken(user *model.User, authCode *model.AuthorizationCode) (string, error) {
 	if s.tokenSvc == nil || s.tokenSvc.jwtSvc == nil {
-		return "", fmt.Errorf("token service is not initialized")
+		return "", apperrors.ErrInternal
 	}
 	now := time.Now()
 	claims := ConsentClaims{
@@ -577,7 +576,7 @@ func (s *OAuthService) issueIDToken(user *model.User, authCode *model.Authorizat
 	}
 	signed, err := signConsentTokenWithJWTService(s.tokenSvc.jwtSvc, token)
 	if err != nil {
-		return "", fmt.Errorf("签发id_token失败: %w", err)
+		return "", apperrors.Wrap(apperrors.ErrCodeInternal, "签发id_token失败", 500, err)
 	}
 	return signed, nil
 }

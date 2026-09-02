@@ -70,6 +70,7 @@ func (h *AuthorizeHandler) HandleAuthorize(w http.ResponseWriter, r *http.Reques
 	state := r.URL.Query().Get("state")
 	codeChallenge := r.URL.Query().Get("code_challenge")
 	codeChallengeMethod := r.URL.Query().Get("code_challenge_method")
+	nonce := r.URL.Query().Get("nonce")
 
 	// 2. 验证必需参数
 	if clientID == "" || redirectURI == "" || responseType != "code" {
@@ -80,6 +81,13 @@ func (h *AuthorizeHandler) HandleAuthorize(w http.ResponseWriter, r *http.Reques
 	// 2.1 验证 state 参数（CSRF 防护）
 	if state == "" || len(state) < 16 {
 		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeStateInvalid))
+		return
+	}
+
+	// 2.2 nonce 长度上限（OIDC 透传值，入库 authorization_codes.nonce，防滥用写入超大字符串）
+	const maxNonceLen = 255
+	if len(nonce) > maxNonceLen {
+		writeError(w, http.StatusBadRequest, getMessage(r, apperrors.ErrCodeBadRequest))
 		return
 	}
 
@@ -118,7 +126,7 @@ func (h *AuthorizeHandler) HandleAuthorize(w http.ResponseWriter, r *http.Reques
 			state,
 			codeChallenge,
 			codeChallengeMethod,
-			r.URL.Query().Get("nonce"),
+			nonce,
 		)
 		if err != nil {
 			writeOAuthError(w, r, err)
@@ -146,7 +154,7 @@ func (h *AuthorizeHandler) HandleAuthorize(w http.ResponseWriter, r *http.Reques
 		state,
 		codeChallenge,
 		codeChallengeMethod,
-		r.URL.Query().Get("nonce"),
+		nonce,
 	)
 	if err != nil {
 		writeOAuthError(w, r, err)

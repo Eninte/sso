@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -69,6 +70,16 @@ func TestAuthorizeHandler_HandleAuthorize(t *testing.T) {
 
 	t.Run("state长度不足16", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/authorize?client_id=test&redirect_uri=http://localhost/callback&response_type=code&state=short", nil)
+		w := httptest.NewRecorder()
+
+		h.HandleAuthorize(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("nonce超长被拒绝", func(t *testing.T) {
+		longNonce := strings.Repeat("n", 256)
+		req := httptest.NewRequest("GET", "/authorize?client_id=test&redirect_uri=http://localhost/callback&response_type=code&state=1234567890abcdef&nonce="+longNonce, nil)
 		w := httptest.NewRecorder()
 
 		h.HandleAuthorize(w, req)

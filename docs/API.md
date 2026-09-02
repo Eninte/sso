@@ -832,7 +832,7 @@ GET /api/v1/authorize?client_id=<client_id>&redirect_uri=<redirect_uri>&response
 | state | 是 | 状态参数（最小16字符，CSRF保护） |
 | code_challenge | 否 | PKCE挑战（public client 强制 S256） |
 | code_challenge_method | 否 | PKCE方法 |
-| nonce | 否 | OIDC 一次性随机值，签发 id_token 时透传（aud=client_id、nonce、email） |
+| nonce | 否 | OIDC 一次性随机值，签发 id_token 时透传（aud=client_id、nonce、email），最长 255 字符 |
 
 **浏览器导航（`Accept: text/html`）行为**（标准 OIDC 授权码流）：
 - 未认证 → `302` 到 `/ui/login?redirect=<authorize 完整 URL>`（浏览器登录页）
