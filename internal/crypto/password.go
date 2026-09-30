@@ -22,6 +22,18 @@ var (
 // PasswordService 密码服务
 // ============================================================================
 
+// dummyPasswordHash 预计算的 bcrypt 哈希（cost=12，与生产最低要求一致）
+// 唯一用途：用户不存在时执行一次等成本的 bcrypt 比较，
+// 消除"用户不存在即时返回 vs 用户存在执行 bcrypt"的时序侧信道（账号枚举）
+// 该哈希对应的明文不可知且永远不会被用作真实凭据
+//
+// 已知残余差异：cost 固定为 12（生产下限）。若部署把 BCRYPT_COST 调到 >12，
+// dummy 与真实校验之间仍会有耗时差（量级远小于"不执行 bcrypt"时的 ~200ms），
+// 需要完全对齐时应将本常量按实际 cost 重新生成。
+//
+//nolint:gosec // G101 误报：这是用于耗时均衡的 bcrypt 哈希常量，不是凭据
+const dummyPasswordHash = "$2a$12$MjZI59ALN.C/5T4GW5CUG.s11mmiVyzsFsziVxrVMaKQJmN2UCQyi"
+
 // PasswordService 密码服务
 // 提供密码哈希和验证功能
 type PasswordService struct {
@@ -82,4 +94,16 @@ func (s *PasswordService) VerifyPassword(hashedPassword, password string) error 
 		return ErrPasswordMismatch
 	}
 	return nil
+}
+
+// VerifyDummyPassword 执行一次与真实校验等成本的 bcrypt 比较
+//
+// 用途：登录路径对"用户不存在"的分支调用本函数后再返回凭据错误。
+// 没有它时，不存在用户的请求在 bcrypt 开始前就返回（~0ms），
+// 而存在用户的请求要执行完整 bcrypt（cost=12 约 200ms+），
+// 响应时间差让远端脚本可以稳定枚举有效账号。
+// 本函数恒定返回 ErrPasswordMismatch，调用方无需关心结果。
+func (s *PasswordService) VerifyDummyPassword(password string) error {
+	// 与 VerifyPassword 保持相同错误返回，调用方统一处理
+	return s.VerifyPassword(dummyPasswordHash, password)
 }

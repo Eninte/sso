@@ -27,8 +27,8 @@ func TestBasicAuth_EmptyCredentials(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	// 空凭据时直接通过
-	assert.Equal(t, http.StatusOK, w.Code)
+	// fail-closed：凭据未配置时必须拒绝而非放行
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
 func TestBasicAuth_NoAuthHeader(t *testing.T) {

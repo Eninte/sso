@@ -6,7 +6,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	apperrors "github.com/example/sso/internal/errors"
 	"github.com/example/sso/internal/model"
 	"github.com/example/sso/internal/util/auditutil"
 )
@@ -249,4 +251,65 @@ func TestSafeAuditLog_NilService(t *testing.T) {
 	assert.NotPanics(t, func() {
 		auditutil.SafeAuditLog(ctx, nil, "user_login", "user-123", nil)
 	})
+}
+
+// syncMockAuditService 实现 SyncAuditLogger 的模拟审计服务
+// 用于验证关键事件被强制路由到同步路径
+type syncMockAuditService struct {
+	mockAuditService
+	syncLogs       []*model.AuditLog
+	syncShouldFail bool
+}
+
+func (m *syncMockAuditService) LogSync(ctx context.Context, log *model.AuditLog) error {
+	if m.syncShouldFail {
+		return apperrors.ErrInternal
+	}
+	m.syncLogs = append(m.syncLogs, log)
+	return nil
+}
+
+// TestSafeAuditLog_CriticalEventUsesSyncPath 验证关键事件即使通过 SafeAuditLog
+// 调用也走同步落库（修复：密码修改/MFA 禁用等事件曾退化为可丢失的异步日志）
+func TestSafeAuditLog_CriticalEventUsesSyncPath(t *testing.T) {
+	ctx := context.Background()
+
+	svc := &syncMockAuditService{}
+	auditutil.SafeAuditLog(ctx, svc, string(model.EventPasswordChanged), "user-1", map[string]interface{}{
+		"ip_address": "203.0.113.5",
+	})
+
+	require.Len(t, svc.syncLogs, 1, "关键事件必须同步落库")
+	assert.Equal(t, string(model.EventPasswordChanged), svc.syncLogs[0].EventType)
+	assert.Empty(t, svc.logs, "关键事件不应再走异步通道")
+}
+
+func TestSafeAuditLog_NormalEventUsesAsyncPath(t *testing.T) {
+	ctx := context.Background()
+
+	svc := &syncMockAuditService{}
+	auditutil.SafeAuditLog(ctx, svc, string(model.EventUserLogin), "user-1", nil)
+
+	assert.Empty(t, svc.syncLogs, "普通事件保持异步语义，不占用同步写库开销")
+	assert.Len(t, svc.logs, 1, "普通事件走异步通道")
+}
+
+func TestSafeAuditLog_CriticalEventSyncFailureDoesNotPanic(t *testing.T) {
+	ctx := context.Background()
+
+	svc := &syncMockAuditService{syncShouldFail: true}
+	assert.NotPanics(t, func() {
+		auditutil.SafeAuditLog(ctx, svc, string(model.EventMFADisabled), "user-1", nil)
+	}, "同步失败时 SafeAuditLog 契约（不 panic、不返回错误）仍成立")
+}
+
+// TestSafeAuditLog_CriticalEventWithoutSyncSupportFallsBackToAsync 验证审计服务
+// 不支持同步记录时降级为异步记录（同步实现侧会输出告警，此处断言降级行为本身）
+func TestSafeAuditLog_CriticalEventWithoutSyncSupportFallsBackToAsync(t *testing.T) {
+	ctx := context.Background()
+
+	svc := &mockAuditService{}
+	auditutil.SafeAuditLog(ctx, svc, string(model.EventMFADisabled), "user-1", nil)
+
+	assert.Len(t, svc.logs, 1, "无同步能力时降级为异步记录")
 }

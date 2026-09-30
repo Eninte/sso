@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -121,7 +122,14 @@ type Config struct {
 
 	// 优雅关闭配置
 	ShutdownTimeout time.Duration // 优雅关闭超时时间
-	LANDeployment   bool          // LAN部署模式（放宽部分生产环境校验）
+
+	// DeprecatedLANDeployment 已废弃：LAN_DEPLOYMENT 不再提供任何生产校验豁免
+	// 原"一键放开全部校验"的总开关已移除，改为逐项显式声明（见 ProdCheckBypasses）
+	DeprecatedLANDeployment bool
+
+	// ProdCheckBypasses 逐项显式声明的生产校验豁免（INSECURE_PROD_BYPASS，逗号分隔）
+	// 不存在任何总开关：每项豁免必须按名称列出，未知名称在 Load 阶段即拒绝启动
+	ProdCheckBypasses []string
 
 	// 初始化面板配置
 	// 安全设计：初始化路由仅注册在独立 loopback HTTP 服务器上，
@@ -230,13 +238,28 @@ func Load() (*Config, error) {
 
 		// 优雅关闭配置
 		ShutdownTimeout: getEnvDuration("SHUTDOWN_TIMEOUT", 30*time.Second),
-		LANDeployment:   getEnvBool("LAN_DEPLOYMENT", false),
 
 		// 初始化面板配置
 		// 默认启用，监听 127.0.0.1:9091，与公网主路由完全隔离
 		// 初始化完成后应设置 INIT_ENABLED=false 永久关闭
 		InitEnabled:    getEnvBool("INIT_ENABLED", true),
 		InitListenAddr: getInitListenAddr(),
+	}
+
+	// 解析逐项显式声明的生产校验豁免（INSECURE_PROD_BYPASS，逗号分隔）
+	// 未知名称直接拒绝启动，防止拼写错误被静默当作"已豁免"而降级安全基线
+	bypasses, err := parseProdBypasses(os.Getenv("INSECURE_PROD_BYPASS"))
+	if err != nil {
+		return nil, err
+	}
+	cfg.ProdCheckBypasses = bypasses
+
+	// 已废弃开关检测：LAN_DEPLOYMENT 不再提供任何豁免，保留读取仅为兼容旧配置
+	if lan := getEnvBool("LAN_DEPLOYMENT", false); lan {
+		cfg.DeprecatedLANDeployment = lan
+		slog.Error("LAN_DEPLOYMENT 已废弃且不再生效：一键放开全部生产校验的总开关已移除，"+
+			"请按需改用 INSECURE_PROD_BYPASS 逐项显式声明豁免",
+			"supported_values", strings.Join(prodBypassNamesSorted(), ","))
 	}
 
 	// 验证必需的配置
@@ -255,11 +278,11 @@ func validateDatabaseConfig(c *Config) error {
 		return ErrDBPasswordRequired
 	}
 
-	// 生产环境建议启用数据库SSL（LAN部署时允许disable）
+	// 生产环境强制数据库SSL（豁免须显式声明 INSECURE_PROD_BYPASS=db_ssl）
 	// 阶段 4 安全增强：拒绝 prefer（若服务端不支持 SSL 会降级为明文，存在 MITM 风险）
 	if c.Env == "production" && (c.DBSSLMode == "disable" || c.DBSSLMode == "prefer" || c.DBSSLMode == "allow") {
-		if c.LANDeployment {
-			slog.Warn("生产环境数据库未启用强制SSL（LAN部署模式）", "ssl_mode", c.DBSSLMode)
+		if c.prodBypassAllowed(prodBypassDBSSL) {
+			slog.Warn("生产环境数据库未启用强制SSL（INSECURE_PROD_BYPASS=db_ssl 显式豁免）", "ssl_mode", c.DBSSLMode)
 		} else {
 			slog.Error("生产环境数据库必须启用强制SSL", "ssl_mode", c.DBSSLMode)
 			return fmt.Errorf("DB_SSL_MODE must be 'require' or higher in production (current: %s)", c.DBSSLMode)
@@ -324,7 +347,7 @@ func validateSecurityConfig(c *Config) error {
 
 	// 验证限流配置
 	if c.RateLimitRequests <= 0 {
-		if c.Env == "production" && !c.LANDeployment {
+		if c.Env == "production" && !c.prodBypassAllowed(prodBypassRateLimit) {
 			slog.Error("生产环境限流请求数必须为正数", "requests", c.RateLimitRequests)
 			return fmt.Errorf("RATE_LIMIT_REQUESTS must be positive in production, current value: %d", c.RateLimitRequests)
 		}
@@ -333,7 +356,7 @@ func validateSecurityConfig(c *Config) error {
 
 	// 验证登录保护配置
 	if c.MaxLoginAttempts <= 0 {
-		if c.Env == "production" && !c.LANDeployment {
+		if c.Env == "production" && !c.prodBypassAllowed(prodBypassMaxLoginAttempts) {
 			slog.Error("生产环境最大登录尝试次数必须为正数", "attempts", c.MaxLoginAttempts)
 			return fmt.Errorf("MAX_LOGIN_ATTEMPTS must be positive in production, current value: %d", c.MaxLoginAttempts)
 		}
@@ -357,8 +380,13 @@ func validateSecurityConfig(c *Config) error {
 }
 
 // validateKeyEncryptionConfig 验证 JWT_KEY_ENCRYPTION_KEY（T7）
-// 所有环境配置即须为 64 位 hex（fail-fast）；
-// 生产环境启用密钥轮换（DB 密钥存储）时必填，否则私钥只能明文落库
+// 所有环境配置即须为 64 位 hex（fail-fast）
+//
+// 关于"启用密钥轮换时 KEK 必填"的变更：
+// DB 密钥轮换与私钥信封加密链路（KeyRotationService / LoadKeysFromStore /
+// SetKeyEncryptionKey）在当前组合根中未接线——KEY_ROTATION_ENABLED 只会激活
+// 文件式过渡公钥（LoadKeysForRotation）。为一个不会执行的路径强制要求密钥
+// 属于误导，故降级为告警：格式仍硬校验（配置了就必须合法），缺失仅提示。
 func validateKeyEncryptionConfig(c *Config) error {
 	// KEK 格式校验（所有环境，配置即须合法，fail-fast）
 	if c.JWTKeyEncryptionKey != "" {
@@ -368,10 +396,10 @@ func validateKeyEncryptionConfig(c *Config) error {
 		}
 	}
 
-	// 生产环境启用密钥轮换（DB 密钥存储）时 KEK 必填
-	if c.Env == "production" && c.KeyRotationEnabled && c.JWTKeyEncryptionKey == "" && !c.LANDeployment {
-		slog.Error("生产环境启用密钥轮换时必须设置 JWT_KEY_ENCRYPTION_KEY")
-		return fmt.Errorf("JWT_KEY_ENCRYPTION_KEY must be set in production when KEY_ROTATION_ENABLED=true")
+	// 生产环境启用密钥轮换但未设置 KEK：告警而非拒绝启动
+	if c.Env == "production" && c.KeyRotationEnabled && c.JWTKeyEncryptionKey == "" {
+		slog.Warn("生产环境启用 KEY_ROTATION_ENABLED 但未设置 JWT_KEY_ENCRYPTION_KEY：" +
+			"DB 密钥轮换与私钥信封加密尚未接线（当前仅文件式过渡公钥生效），KEK 暂时不会被使用")
 	}
 	return nil
 }
@@ -384,10 +412,10 @@ func validateProductionConfig(c *Config) error {
 		return nil
 	}
 
-	lanMode := c.LANDeployment
-
 	// 依次执行各项生产环境检查
-	checks := []func(*Config, bool) error{
+	// 安全设计：不存在任何"一键放开全部校验"的总开关，每项豁免必须通过
+	// INSECURE_PROD_BYPASS 按名称显式声明，未知名称在 Load 阶段即拒绝启动
+	checks := []func(*Config) error{
 		validateProdBypassCORS,
 		validateProdDefaultCORS,
 		validateProdJWTIssuer,
@@ -400,7 +428,7 @@ func validateProductionConfig(c *Config) error {
 		validateProdInitEnabled,
 	}
 	for _, check := range checks {
-		if err := check(c, lanMode); err != nil {
+		if err := check(c); err != nil {
 			return err
 		}
 	}
@@ -408,13 +436,90 @@ func validateProductionConfig(c *Config) error {
 	return nil
 }
 
+// 生产校验豁免项名称（INSECURE_PROD_BYPASS 逗号分隔的可选值）
+// 每项豁免只放开对应的一项校验，必须在配置中按名称显式列出
+//
+//nolint:gosec // G101 误报：这些是配置枚举值名称，不是硬编码凭据
+const (
+	prodBypassDBSSL             = "db_ssl"
+	prodBypassRateLimit         = "rate_limit"
+	prodBypassMaxLoginAttempts  = "max_login_attempts"
+	prodBypassCORSLocalhost     = "cors_localhost"
+	prodBypassCORSDefault       = "cors_default"
+	prodBypassJWTIssuer         = "jwt_issuer"
+	prodBypassSMTPHost          = "smtp_host"
+	prodBypassMetricsAuth       = "metrics_auth"
+	prodBypassRedisPassword     = "redis_password"
+	prodBypassPublicBaseURL     = "public_base_url"
+	prodBypassJWTKeyPermissions = "jwt_key_permissions"
+	prodBypassMFARecoveryKey    = "mfa_recovery_key"
+)
+
+// knownProdBypasses 豁免项白名单：解析与判定均以此为准，防止拼写漂移
+var knownProdBypasses = map[string]bool{
+	prodBypassDBSSL:             true,
+	prodBypassRateLimit:         true,
+	prodBypassMaxLoginAttempts:  true,
+	prodBypassCORSLocalhost:     true,
+	prodBypassCORSDefault:       true,
+	prodBypassJWTIssuer:         true,
+	prodBypassSMTPHost:          true,
+	prodBypassMetricsAuth:       true,
+	prodBypassRedisPassword:     true,
+	prodBypassPublicBaseURL:     true,
+	prodBypassJWTKeyPermissions: true,
+	prodBypassMFARecoveryKey:    true,
+}
+
+// prodBypassNamesSorted 返回全部已知豁免名称（排序后，用于错误提示与日志）
+func prodBypassNamesSorted() []string {
+	names := make([]string, 0, len(knownProdBypasses))
+	for name := range knownProdBypasses {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// parseProdBypasses 解析 INSECURE_PROD_BYPASS（逗号分隔的豁免项名称）
+// 空值返回 nil；未知名称返回错误（fail-fast，防止拼写错误被当成"已豁免"）
+func parseProdBypasses(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	bypasses := make([]string, 0, 4)
+	for _, item := range strings.Split(raw, ",") {
+		name := strings.TrimSpace(item)
+		if name == "" {
+			continue
+		}
+		if !knownProdBypasses[name] {
+			return nil, fmt.Errorf("INSECURE_PROD_BYPASS contains unknown check %q, supported values: %s",
+				name, strings.Join(prodBypassNamesSorted(), ","))
+		}
+		bypasses = append(bypasses, name)
+	}
+	return bypasses, nil
+}
+
+// prodBypassAllowed 判断某项生产校验是否被显式豁免
+func (c *Config) prodBypassAllowed(check string) bool {
+	for _, b := range c.ProdCheckBypasses {
+		if b == check {
+			return true
+		}
+	}
+	return false
+}
+
 // validateProdBypassCORS 检查 CORS 配置不包含 localhost
-func validateProdBypassCORS(c *Config, lanMode bool) error {
+func validateProdBypassCORS(c *Config) error {
 	if !strings.Contains(strings.ToLower(c.CORSAllowedOrigins), "localhost") {
 		return nil
 	}
-	if lanMode {
-		slog.Warn("生产环境CORS配置包含localhost（LAN部署模式）", "cors_origins", c.CORSAllowedOrigins)
+	if c.prodBypassAllowed(prodBypassCORSLocalhost) {
+		slog.Warn("生产环境CORS配置包含localhost（INSECURE_PROD_BYPASS=cors_localhost 显式豁免）", "cors_origins", c.CORSAllowedOrigins)
 		return nil
 	}
 	slog.Error("生产环境CORS配置不能包含localhost", "cors_origins", c.CORSAllowedOrigins)
@@ -422,12 +527,12 @@ func validateProdBypassCORS(c *Config, lanMode bool) error {
 }
 
 // validateProdDefaultCORS 检查默认 CORS 配置
-func validateProdDefaultCORS(c *Config, lanMode bool) error {
+func validateProdDefaultCORS(c *Config) error {
 	if c.CORSAllowedOrigins != "http://localhost:3000" {
 		return nil
 	}
-	if lanMode {
-		slog.Warn("生产环境使用默认CORS配置（LAN部署模式）")
+	if c.prodBypassAllowed(prodBypassCORSDefault) {
+		slog.Warn("生产环境使用默认CORS配置（INSECURE_PROD_BYPASS=cors_default 显式豁免）")
 		return nil
 	}
 	slog.Error("生产环境不能使用默认CORS配置")
@@ -435,12 +540,12 @@ func validateProdDefaultCORS(c *Config, lanMode bool) error {
 }
 
 // validateProdJWTIssuer 检查 JWT Issuer 配置
-func validateProdJWTIssuer(c *Config, lanMode bool) error {
+func validateProdJWTIssuer(c *Config) error {
 	if c.JWTIssuer != "sso" {
 		return nil
 	}
-	if lanMode {
-		slog.Warn("生产环境使用默认JWT Issuer（LAN部署模式）")
+	if c.prodBypassAllowed(prodBypassJWTIssuer) {
+		slog.Warn("生产环境使用默认JWT Issuer（INSECURE_PROD_BYPASS=jwt_issuer 显式豁免）")
 		return nil
 	}
 	slog.Error("生产环境不能使用默认JWT Issuer")
@@ -448,12 +553,12 @@ func validateProdJWTIssuer(c *Config, lanMode bool) error {
 }
 
 // validateProdSMTPHost 检查 SMTP 配置
-func validateProdSMTPHost(c *Config, lanMode bool) error {
+func validateProdSMTPHost(c *Config) error {
 	if c.SMTPHost != "localhost" {
 		return nil
 	}
-	if lanMode {
-		slog.Warn("生产环境使用localhost作为SMTP服务器（LAN部署模式）")
+	if c.prodBypassAllowed(prodBypassSMTPHost) {
+		slog.Warn("生产环境使用localhost作为SMTP服务器（INSECURE_PROD_BYPASS=smtp_host 显式豁免）")
 		return nil
 	}
 	slog.Error("生产环境不能使用localhost作为SMTP服务器")
@@ -463,12 +568,12 @@ func validateProdSMTPHost(c *Config, lanMode bool) error {
 // validateProdMetricsAuth 检查 Metrics 认证配置
 // 阶段 4 安全增强：生产环境必须同时设置 METRICS_USERNAME 和 METRICS_PASSWORD
 // 否则 /metrics 端点完全无认证，暴露 Prometheus 指标
-func validateProdMetricsAuth(c *Config, lanMode bool) error {
+func validateProdMetricsAuth(c *Config) error {
 	if c.MetricsUsername != "" && c.MetricsPassword != "" {
 		return nil
 	}
-	if lanMode {
-		slog.Warn("生产环境未配置 METRICS 认证（LAN部署模式）")
+	if c.prodBypassAllowed(prodBypassMetricsAuth) {
+		slog.Warn("生产环境未配置 METRICS 认证（INSECURE_PROD_BYPASS=metrics_auth 显式豁免），/metrics 将无保护暴露")
 		return nil
 	}
 	slog.Error("生产环境必须配置 METRICS_USERNAME 和 METRICS_PASSWORD")
@@ -476,12 +581,12 @@ func validateProdMetricsAuth(c *Config, lanMode bool) error {
 }
 
 // validateProdRedisPassword 阶段 4 安全增强：Redis 启用时强制密码非空
-func validateProdRedisPassword(c *Config, lanMode bool) error {
+func validateProdRedisPassword(c *Config) error {
 	if !c.RedisEnable || c.RedisPassword != "" {
 		return nil
 	}
-	if lanMode {
-		slog.Warn("生产环境启用 Redis 但未设置 REDIS_PASSWORD（LAN部署模式）")
+	if c.prodBypassAllowed(prodBypassRedisPassword) {
+		slog.Warn("生产环境启用 Redis 但未设置 REDIS_PASSWORD（INSECURE_PROD_BYPASS=redis_password 显式豁免）")
 		return nil
 	}
 	slog.Error("生产环境启用 Redis 时必须设置 REDIS_PASSWORD")
@@ -490,18 +595,18 @@ func validateProdRedisPassword(c *Config, lanMode bool) error {
 
 // validateProdPublicBaseURL 阶段 4 安全增强：PUBLIC_BASE_URL 必须设置且为 HTTPS
 // 防止邮件链接中 token 在明文 HTTP 传输中被窃取
-func validateProdPublicBaseURL(c *Config, lanMode bool) error {
+func validateProdPublicBaseURL(c *Config) error {
 	if c.PublicBaseURL == "" {
-		if lanMode {
-			slog.Warn("生产环境未设置 PUBLIC_BASE_URL（LAN部署模式），邮件链接将使用 BaseURL()")
+		if c.prodBypassAllowed(prodBypassPublicBaseURL) {
+			slog.Warn("生产环境未设置 PUBLIC_BASE_URL（INSECURE_PROD_BYPASS=public_base_url 显式豁免），邮件链接将使用 BaseURL()")
 			return nil
 		}
 		slog.Error("生产环境必须设置 PUBLIC_BASE_URL")
 		return fmt.Errorf("PUBLIC_BASE_URL must be set in production")
 	}
 	if !strings.HasPrefix(c.PublicBaseURL, "https://") {
-		if lanMode {
-			slog.Warn("生产环境 PUBLIC_BASE_URL 非 HTTPS scheme（LAN部署模式）", "public_base_url", c.PublicBaseURL)
+		if c.prodBypassAllowed(prodBypassPublicBaseURL) {
+			slog.Warn("生产环境 PUBLIC_BASE_URL 非 HTTPS scheme（INSECURE_PROD_BYPASS=public_base_url 显式豁免）", "public_base_url", c.PublicBaseURL)
 			return nil
 		}
 		slog.Error("生产环境 PUBLIC_BASE_URL 必须为 HTTPS scheme", "public_base_url", c.PublicBaseURL)
@@ -512,10 +617,10 @@ func validateProdPublicBaseURL(c *Config, lanMode bool) error {
 
 // validateProdJWTKeyPermissions 阶段 4 安全增强：JWT 私钥文件权限校验
 // 私钥必须仅所有者可读写（chmod 600），否则拒绝启动
-func validateProdJWTKeyPermissions(c *Config, lanMode bool) error {
+func validateProdJWTKeyPermissions(c *Config) error {
 	if err := validateJWTPrivateKeyPermissions(c); err != nil {
-		if lanMode {
-			slog.Warn("生产环境 JWT 私钥权限校验失败（LAN部署模式）", "error", err)
+		if c.prodBypassAllowed(prodBypassJWTKeyPermissions) {
+			slog.Warn("生产环境 JWT 私钥权限校验失败（INSECURE_PROD_BYPASS=jwt_key_permissions 显式豁免）", "error", err)
 			return nil
 		}
 		slog.Error("生产环境 JWT 私钥权限校验失败", "error", err)
@@ -529,12 +634,12 @@ func validateProdJWTKeyPermissions(c *Config, lanMode bool) error {
 //
 // T4 强度校验：生产环境密钥长度必须 >= 32 字节（建议 openssl rand -hex 32 生成），
 // 过短密钥熵不足，恢复码 HMAC 可被暴力推导，拒绝启动
-func validateProdMFARecoveryKey(c *Config, lanMode bool) error {
+func validateProdMFARecoveryKey(c *Config) error {
 	if len(c.MFARecoveryHMACKey) >= 32 {
 		return nil
 	}
-	if lanMode {
-		slog.Warn("生产环境 MFA_RECOVERY_HMAC_KEY 未设置或少于32字节（LAN部署模式）",
+	if c.prodBypassAllowed(prodBypassMFARecoveryKey) {
+		slog.Warn("生产环境 MFA_RECOVERY_HMAC_KEY 未设置或少于32字节（INSECURE_PROD_BYPASS=mfa_recovery_key 显式豁免）",
 			"key_length", len(c.MFARecoveryHMACKey))
 		return nil
 	}
@@ -545,8 +650,8 @@ func validateProdMFARecoveryKey(c *Config, lanMode bool) error {
 
 // validateProdInitEnabled 检查初始化面板配置：生产环境推荐初始化完成后关闭 INIT_ENABLED
 // 不强制拒绝（允许重复初始化），但发出告警
-func validateProdInitEnabled(c *Config, lanMode bool) error {
-	if c.InitEnabled && !lanMode {
+func validateProdInitEnabled(c *Config) error {
+	if c.InitEnabled {
 		slog.Warn("生产环境启用 INIT_ENABLED，建议初始化完成后设置为 false 永久关闭",
 			"init_listen_addr", c.InitListenAddr)
 	}
@@ -889,7 +994,7 @@ func WriteEnvFile(path string, values map[string]string) error {
 		"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM",
 		"CORS_ALLOWED_ORIGINS",
 		"METRICS_USERNAME", "METRICS_PASSWORD",
-		"SHUTDOWN_TIMEOUT", "LAN_DEPLOYMENT",
+		"SHUTDOWN_TIMEOUT", "INSECURE_PROD_BYPASS",
 	}
 	written := make(map[string]bool)
 	for _, key := range order {

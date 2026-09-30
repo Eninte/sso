@@ -92,9 +92,16 @@ func (r *LoginRateLimiter) CheckAndRecord(ctx context.Context, clientIP string) 
 	// 首次计数，设置过期时间
 	if count == 1 {
 		if err := r.cache.SetTTL(ctx, key, r.window); err != nil {
-			// TTL失败不阻断，计数已递增故剩余次数 -1
-			r.notifyFallback("登录限流Redis设置TTL失败", clientIP, err)
-			return true, r.limit - 1, nil
+			// TTL 失败必须补偿删除：无 TTL 的计数键会永久存在，
+			// 使该 IP 累计超限后再也无法登录——限流从"限流"退化为"永久锁死"
+			// （Redis 部分故障时可达成的持久 DoS）。
+			// 删除失败仅记录；本次请求按未限流放行（限流器故障不阻断登录）。
+			if delErr := r.cache.Delete(ctx, key); delErr != nil {
+				slog.Error("登录限流Redis补偿删除失败（该IP可能被永久限流）",
+					"error", delErr, "client_ip", clientIP)
+			}
+			r.notifyFallback("登录限流Redis设置TTL失败，已补偿删除计数键", clientIP, err)
+			return true, r.limit, nil
 		}
 	}
 

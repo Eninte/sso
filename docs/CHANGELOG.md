@@ -4,6 +4,31 @@
 
 ## [Unreleased]
 
+### Security
+
+- **`/metrics` 端点空凭据时 fail-open 修复**：`BasicAuth` 中间件在 `METRICS_USERNAME`/`METRICS_PASSWORD` 为空时直接放行请求，非生产环境（开发/测试/误配 staging）的 Prometheus 指标对任何人开放。修复为 fail-closed：凭据未配置一律返回 401（生产校验仍强制非空）
+- **refresh_token 刷新强制机密客户端认证**（RFC 6749 §6）：token 端点此前只校验 `client_id` 归属，`ClientSecret` 被解析后直接丢弃——拿到任一 token 对的人仅凭公开的 client_id 即可持续换发新 token。新增 `validateRefreshClientBinding`：OAuth 签发 token 必须携带正确 `client_secret`（bcrypt 比对，缓存缺失时回源 DB）；公共客户端（`public_client=true`）豁免。客户端归属与密钥校验合并为单一收口点，杜绝漏检分支。**破坏性**：带 `client_id` 但不带 secret 的第三方机密客户端刷新将被拒（`INVALID_CLIENT`）；本仓库 6 个 SDK 的 refresh 均不携带 `client_id`/`client_secret`（既有的客户端归属缺口，本次非回归）
+- **JWT access token 增加 `aud` 声明并强制校验**：签发时绑定 `aud = issuer`（两条签发路径均已覆盖），验证时用 `jwt.WithAudience` 拒绝缺失/不匹配的 token。**部署影响**：上线瞬间所有存量 access token 失效（≤15 分钟 TTL，影响有界），SDK 均不本地验签不受影响
+- **登录路径防账号枚举**：用户不存在/邮箱未验证分支此前不执行 bcrypt 即返回，与"用户存在+密码错误"（cost=12 约 200ms）存在可测量的时序差。两分支补充等成本 dummy bcrypt（`PasswordService.VerifyDummyPassword`）；未验证邮箱的验证邮件补发改异步发送（`context.WithoutCancel` + `safego.Go`），消除慢 SMTP 对登录端点的阻塞与邮件轰炸放大
+- **MFA Challenge 尝试计数原子化**：原 `Get→Attempts++→Set` 回写整个 challenge，并发失败请求丢失更新，`MaxMFALoginAttempts`（5 次）上限可被并发成倍击穿。改为独立计数键 + 原子 `INCR`，TTL 与 challenge 对齐；Redis 写失败时删除 challenge（fail-secure），达上限删除 challenge + 计数键并记录审计
+- **限流 `INCR`/`SetTTL` 非原子导致永久锁死**：登录/邮件/MFA 恢复码三处限流在 `SetTTL` 失败时未回滚已递增的计数键——无 TTL 的键永久存在，限流从"限流"退化为"持久 DoS"（登录 20 次后永久无法登录、邮箱永久不能收发验证邮件、恢复码永久锁死）。修复为 TTL 失败时补偿删除计数键，并明确可用性优先语义（限流是 DoS 防护而非认证边界）
+- **`GetClientIP` 支持 X-Forwarded-For**：此前只解析 `X-Real-IP`，反向代理默认只透传 XFF 时所有客户端 key 塌缩为代理 IP（限流失效 + 审计 IP 全部相同）。改为从右向左遍历 XFF 跳过受信代理链取首个非受信 IP（最左条目完全由客户端伪造，不可作为起点），保留 X-Real-IP 兼容；受信代理列表为空（默认）时只信 RemoteAddr。新增 12 个用例（含"非受信来源伪造 XFF 被忽略""多跳受信链"等）
+- **关键审计事件强制同步落库**：密码修改/MFA 启停/账户锁定等关键事件有 6 处误用异步 `SafeAuditLog`，channel 拥塞或服务关闭时审计直接丢失，而 `IsCriticalEvent` 判定器全仓库零调用。修复为在 `SafeAuditLog` 内部按清单强制路由到同步 `LogSync`（单一收口点，调用方无法再搞错）；服务不支持同步记录时明确告警而非静默降级
+- **账户锁定不再撤销全部 Token**：锁定是"有人知道邮箱并连续输错密码"的信号而非失窃证据，攻击者可借此每 30 分钟重复锁定任意已知邮箱账号、迫使受害者所有设备反复掉线。改为仅冻结新登录（Refresh token 重放检测与管理员禁用路径仍负责失窃场景的吊销）
+- **`LAN_DEPLOYMENT` 一键总开关移除，改为 `INSECURE_PROD_BYPASS` 逐项豁免**：原开关一键放开全部 10 项生产校验（含 metrics 认证、MFA 密钥、CORS、HTTPS base URL），一次误配即让生产在无 CORS 限制、无指标认证、弱 MFA 密钥下静默运行。现每个豁免必须按名称显式声明（13 个具名项），未知项名拒绝启动；旧开关设置后仅记录错误日志。**部署迁移**：使用 `LAN_DEPLOYMENT=true` 的环境（含 `docker/.env.truenas.example`）升级后需按需改为 `INSECURE_PROD_BYPASS=db_ssl` 等，否则校验生效会拒绝启动
+- **KEK 生产必填降级为告警**：`JWT_KEY_ENCRYPTION_KEY` 此前在 `KEY_ROTATION_ENABLED=true` 时生产硬必填，但 DB 密钥轮换与信封加密链路（`KeyRotationService`/`LoadKeysFromStore`/`SetKeyEncryptionKey`）在组合根中从未接线，为一个不会执行的路径强制要密钥属于误导。格式校验（64 位 hex）仍硬生效，缺失改为告警，相关代码补充"未接线"标注
+
+### Fixed
+
+- **mock store 与 Postgres 三处语义分叉**（单测通过而生产行为不同）：`GetByClientID`/`ListClients`/`StoreAuditLog`/`ListAuditLogs` 返回 map 内共享指针（调用方一写即竞态）改为拷贝语义；`CleanupExpired` 漏清 `verification_tokens`/`reset_tokens` 两张表（Postgres 清 4 张）已对齐；`DeleteUser`/`DeleteKey` 在"行不存在"时的 ErrNotFound 返回值与 Postgres 相反已对齐
+- **安全关键错误路径"结构性不可测"**：mock 的 63 个接口方法中 15 个没有错误注入字段，其中 4 个正好承载 fail-secure 逻辑（账户锁定防 DB 错误绕过、MFA 恢复码、重置令牌/授权码重放防护），而 `TestLoginFailureCounter_DatabaseError` 等两个名为 DatabaseError 的测试实际未注入任何错误，制造了"已覆盖"的假象。补齐全部注入字段并重写测试，另新增 fail-secure 回归测试 4 项
+- **空目录误导**：删除 `internal/audit`（含 11 个子目录）、`cmd/security-audit`、`cmd/mockserver`、`cmd/coverage-check`（审计功能实际位于 `internal/service/audit.go` + `auditutil`）
+
+### Changed
+
+- **`BasicAuth` 错误消息改英文**（遵循 AGENTS.md §7.3）
+- **配置向导"部署模式"卡片**：`LAN_DEPLOYMENT` 开关替换为 `INSECURE_PROD_BYPASS` 输入框（后端 `allowedEnvKeys` 同步接受新变量与 `PUBLIC_BASE_URL`/`TRUSTED_PROXIES`）
+
 ### Added
 
 - **管理员客户端管理 API**（OAuth 客户端 CRUD / 禁用启用 / 密钥轮换）：新增 `/api/v1/admin/clients` 系列端点，支持创建机密/公共客户端、查询、分页列表、全量更新、禁用/启用、删除与密钥轮换。安全设计：禁用/删除/轮换先撤销该客户端全部未撤销 Token；`is_active` 在 `getClient`（缓存命中与 DB 路径）统一检查，禁用客户端对公网返回 `INVALID_CLIENT`；公共客户端强制 PKCE（已有）且不支持密钥；`client_credentials` 注册被拒（`UNSUPPORTED_GRANT_TYPE`）。配套迁移 `021_add_client_management`（`oauth_clients` 新增 `is_active`/`updated_at`；`authorization_codes.client_id` → `ON DELETE CASCADE`、`tokens.client_id` → `ON DELETE SET NULL`）

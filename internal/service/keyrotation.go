@@ -14,6 +14,15 @@ import (
 	"github.com/example/sso/internal/util/serviceutil"
 )
 
+// KeyRotationService DB 密钥轮换服务（⚠️ 未接线 / experimental）
+//
+// 当前组合根（internal/app）不实例化本服务，也没有周期性调度触发 RotateKey：
+// KEY_ROTATION_ENABLED=true 仅激活文件式过渡公钥（crypto.LoadKeysForRotation）。
+// 换言之 DB 密钥轮换与私钥信封加密链路在当前版本不会执行，
+// key_versions 表的私钥不会被写入，JWT_KEY_ENCRYPTION_KEY 也不会被使用。
+//
+// 本类型与配套的 LoadKeysFromStore / SetKeyEncryptionKey（crypto 包）保留为
+// 后续接线的实现基础；接线前请勿依赖其行为，配置侧已相应降级为告警。
 type KeyRotationService struct {
 	keyStore         store.KeyStore
 	jwtSvc           *crypto.JWTService

@@ -68,7 +68,9 @@ KEY_ROTATION_INTERVAL=2160h # 密钥轮换周期
 KEY_TRANSITION_PERIOD=24h   # 密钥过渡期时长
 JWT_TRANSITION_PUBKEY_PATHS=  # 密钥轮换期间的旧公钥路径（逗号分隔）
 JWT_KEY_ENCRYPTION_KEY=     # DB 中私钥的 AES-256-GCM 信封加密密钥（64 位 hex）
-                            # 启用密钥轮换时生产环境必填：openssl rand -hex 32
+                            # 注意：DB 密钥轮换/信封加密链路当前未接线
+                            # （KEY_ROTATION_ENABLED=true 仅激活文件式过渡公钥），
+                            # 配置不会生效，缺失仅告警：openssl rand -hex 32
 ```
 
 ### 5. 安全配置
@@ -129,8 +131,12 @@ E2E_ADMIN_PASSWORD=Admin1234!        # 测试管理员密码
 
 ### 12. 部署模式配置
 ```bash
-LAN_DEPLOYMENT=false        # LAN部署模式：放宽生产环境部分校验（DB_SSL_MODE、CORS、JWT_ISSUER 等）
-                            # 仅用于内网部署场景，正式生产环境不要启用
+INSECURE_PROD_BYPASS=        # 逐项显式声明的生产校验豁免（逗号分隔），不存在总开关
+                            # 可选值：db_ssl,rate_limit,max_login_attempts,cors_localhost,
+                            #   cors_default,jwt_issuer,smtp_host,metrics_auth,redis_password,
+                            #   public_base_url,jwt_key_permissions,mfa_recovery_key
+                            # 仅用于内网部署场景，正式生产环境（公网）必须留空
+                            # 注意：LAN_DEPLOYMENT 已废弃，设置后不再豁免任何校验
 INIT_ENABLED=true           # 初始化面板（/init），初始化完成后建议设为 false 永久关闭
 INIT_LISTEN=                # 初始化面板独立监听地址（默认 127.0.0.1:9091，强制 loopback，
                             # 拒绝绑定非回环地址；格式 host:port 或 port）
@@ -280,8 +286,9 @@ make generate-keys
 
 > 服务启动时也会自动执行配置校验：`SERVER_ENV=production` 下
 > `DB_SSL_MODE`、`BCRYPT_COST`、`CORS_ALLOWED_ORIGINS`、`JWT_ISSUER`、
-> `SMTP_HOST`、`MFA_RECOVERY_HMAC_KEY` 不满足要求会拒绝启动
-> （`LAN_DEPLOYMENT=true` 可放宽部分校验）。
+> `SMTP_HOST`、`MFA_RECOVERY_HMAC_KEY`、`METRICS_*`、`PUBLIC_BASE_URL` 等
+> 不满足要求会拒绝启动。不存在一键放开全部校验的总开关；确需放宽某项时，
+> 用 `INSECURE_PROD_BYPASS=<项名>` 逐项显式声明（未知项名同样拒绝启动）。
 
 ## 参考文档
 

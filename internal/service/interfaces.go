@@ -33,9 +33,10 @@ type AuthServiceInterface interface {
 	// RefreshToken 刷新Token
 	RefreshToken(ctx context.Context, refreshToken string) (*model.LoginResponse, error)
 
-	// RefreshTokenWithClientID 携带 clientID 刷新 Token（阶段 2.2）
-	// 用于 OAuth 流程签发的 token 刷新，校验 clientID 与 token 归属一致
-	RefreshTokenWithClientID(ctx context.Context, refreshToken, clientID string) (*model.LoginResponse, error)
+	// RefreshTokenWithClientCredentials 携带客户端凭据刷新 Token（阶段 2.2 + RFC 6749 §6）
+	// 用于 OAuth 流程签发的 token 刷新：校验 clientID 与 token 归属一致，
+	// 且机密客户端必须提供正确的 client_secret
+	RefreshTokenWithClientCredentials(ctx context.Context, refreshToken, clientID, clientSecret string) (*model.LoginResponse, error)
 
 	// Logout 用户登出
 	Logout(ctx context.Context, accessToken string) error

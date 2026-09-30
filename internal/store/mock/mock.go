@@ -48,48 +48,67 @@ type Store struct {
 	mfaRecoveryCodes map[string][]string // 每实例独立，避免全局状态污染
 	hmacKey          []byte              // Mock HMAC 密钥
 
-	CreateUserErr              error
-	GetUserByIDErr             error
-	GetUserByEmailErr          error
-	UpdateUserErr              error
-	UpdateLoginAttemptsErr     error
-	DeleteUserErr              error
-	ListUsersErr               error
-	ExistsUserByRoleErr        error
-	CountActiveAdminsErr       error
-	CreateAdminAtomicErr       error
-	GetClientByClientIDErr     error
-	CreateClientErr            error
-	ListClientsErr             error
-	UpdateClientErr            error
-	DeleteClientErr            error
-	RotateClientSecretErr      error
-	SetClientActiveErr         error
-	RevokeAllClientTokensErr   error
-	StoreAuthorizationCodeErr  error
-	GetAuthorizationCodeErr    error
-	StoreTokenErr              error
-	GetTokenByRefreshTokenErr  error
-	GetTokenByAccessTokenErr   error
-	RevokeTokenErr             error
-	RevokeAllUserTokensErr     error
-	RotateRefreshTokenErr      error
-	CleanupExpiredErr          error
-	StoreVerificationTokenErr  error
-	GetVerificationTokenErr    error
-	DeleteVerificationTokenErr error
-	StoreResetTokenErr         error
-	GetResetTokenErr           error
-	DeleteResetTokenErr        error
-	StoreAuditLogErr           error
-	StoreKeyErr                error
-	GetActiveKeyErr            error
-	GetKeyByIDErr              error
-	DeprecateKeyErr            error
-	RevokeKeyErr               error
-	DeleteKeyErr               error
-	CloseErr                   error
-	PingErr                    error
+	CreateUserErr          error
+	GetUserByIDErr         error
+	GetUserByEmailErr      error
+	UpdateUserErr          error
+	UpdateLoginAttemptsErr error
+	DeleteUserErr          error
+
+	// fail-secure 分支错误注入字段：
+	// 账户锁定/MFA 恢复码/重置令牌/授权码/审计查询等路径在生产代码中
+	// "宁可失败不可放行"，必须有注入点才能单测其错误分支
+	IncrementLoginAttemptsErr      error
+	ResetLoginAttemptsErr          error
+	UnlockExpiredAccountErr        error
+	UpdateAuthorizationCodeErr     error
+	ListTokenHashesByUserErr       error
+	MarkResetTokenUsedErr          error
+	ListAuditLogsErr               error
+	ListActiveKeysErr              error
+	ListAllKeysErr                 error
+	UpdateKeyPrivateKeyErr         error
+	StoreMFARecoveryCodesErr       error
+	GetUnusedMFARecoveryCodesErr   error
+	VerifyAndUseMFARecoveryCodeErr error
+	DeleteUsedMFARecoveryCodesErr  error
+	DeleteAllMFARecoveryCodesErr   error
+	ListUsersErr                   error
+	ExistsUserByRoleErr            error
+	CountActiveAdminsErr           error
+	CreateAdminAtomicErr           error
+	GetClientByClientIDErr         error
+	CreateClientErr                error
+	ListClientsErr                 error
+	UpdateClientErr                error
+	DeleteClientErr                error
+	RotateClientSecretErr          error
+	SetClientActiveErr             error
+	RevokeAllClientTokensErr       error
+	StoreAuthorizationCodeErr      error
+	GetAuthorizationCodeErr        error
+	StoreTokenErr                  error
+	GetTokenByRefreshTokenErr      error
+	GetTokenByAccessTokenErr       error
+	RevokeTokenErr                 error
+	RevokeAllUserTokensErr         error
+	RotateRefreshTokenErr          error
+	CleanupExpiredErr              error
+	StoreVerificationTokenErr      error
+	GetVerificationTokenErr        error
+	DeleteVerificationTokenErr     error
+	StoreResetTokenErr             error
+	GetResetTokenErr               error
+	DeleteResetTokenErr            error
+	StoreAuditLogErr               error
+	StoreKeyErr                    error
+	GetActiveKeyErr                error
+	GetKeyByIDErr                  error
+	DeprecateKeyErr                error
+	RevokeKeyErr                   error
+	DeleteKeyErr                   error
+	CloseErr                       error
+	PingErr                        error
 
 	// 阶段 2.3：社交账号相关错误
 	CreateSocialAccountErr        error
@@ -229,6 +248,10 @@ func (m *Store) UpdateLoginAttempts(ctx context.Context, userID string, attempts
 
 // IncrementLoginAttempts 原子递增登录尝试次数
 func (m *Store) IncrementLoginAttempts(ctx context.Context, userID string, maxAttempts int, lockoutDuration time.Duration) (attempts int, locked bool, lockedUntil *time.Time, err error) {
+	if m.IncrementLoginAttemptsErr != nil {
+		return 0, false, nil, m.IncrementLoginAttemptsErr
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -256,6 +279,10 @@ func (m *Store) IncrementLoginAttempts(ctx context.Context, userID string, maxAt
 
 // ResetLoginAttempts 重置登录尝试次数
 func (m *Store) ResetLoginAttempts(ctx context.Context, userID string) error {
+	if m.ResetLoginAttemptsErr != nil {
+		return m.ResetLoginAttemptsErr
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -277,6 +304,10 @@ func (m *Store) ResetLoginAttempts(ctx context.Context, userID string) error {
 
 // UnlockExpiredAccount 解锁已过期的锁定账户
 func (m *Store) UnlockExpiredAccount(ctx context.Context, userID string) error {
+	if m.UnlockExpiredAccountErr != nil {
+		return m.UnlockExpiredAccountErr
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -310,10 +341,8 @@ func (m *Store) Delete(ctx context.Context, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, ok := m.users[id]; !ok {
-		return store.ErrNotFound
-	}
-
+	// 与 Postgres 行为对齐：DELETE 影响 0 行不返回 ErrNotFound（幂等删除）
+	// postgres/user.go 的 DELETE ... WHERE id = $1 对不存在的行同样返回 nil
 	delete(m.users, id)
 	return nil
 }
@@ -440,7 +469,10 @@ func (m *Store) GetByClientID(ctx context.Context, clientID string) (*model.Clie
 	if !ok {
 		return nil, store.ErrNotFound
 	}
-	return client, nil
+	// 返回副本：与 GetByID/GetByEmail 的 User 路径对齐，防止调用方
+	// 直接改写 map 内共享对象与并发写产生数据竞争
+	returned := *client
+	return &returned, nil
 }
 
 // CreateClient 创建新客户端
@@ -491,7 +523,9 @@ func (m *Store) ListClients(ctx context.Context, offset, limit int) ([]*model.Cl
 
 	clients := make([]*model.Client, 0, len(m.clients))
 	for _, client := range m.clients {
-		clients = append(clients, client)
+		// 返回副本，避免调用方序列化/持有期间与并发写形成数据竞争
+		returned := *client
+		clients = append(clients, &returned)
 	}
 	// 按创建时间倒序，与 Postgres ORDER BY created_at DESC 一致
 	sort.SliceStable(clients, func(i, j int) bool {
@@ -693,6 +727,10 @@ func copyAuthorizationCode(src *model.AuthorizationCode) *model.AuthorizationCod
 // UpdateAuthorizationCode 原子地标记授权码为已使用
 // 与 Postgres 实现保持一致：如果授权码已被使用，返回 ErrAuthorizationCodeUsed
 func (m *Store) UpdateAuthorizationCode(ctx context.Context, code *model.AuthorizationCode) error {
+	if m.UpdateAuthorizationCodeErr != nil {
+		return m.UpdateAuthorizationCodeErr
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -881,6 +919,10 @@ func (m *Store) RevokeAllUserTokens(ctx context.Context, userID string) error {
 //
 // 用于按用户精确失效 token 缓存（serviceutil.InvalidateUserTokenCache）
 func (m *Store) ListTokenHashesByUser(ctx context.Context, userID string) ([]string, error) {
+	if m.ListTokenHashesByUserErr != nil {
+		return nil, m.ListTokenHashesByUserErr
+	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -1012,6 +1054,20 @@ func (m *Store) CleanupExpired(ctx context.Context) error {
 		}
 	}
 
+	// 清理过期的邮箱验证令牌（与 Postgres cleanupExpiredBatch 的 4 张表对齐）
+	for key, token := range m.verificationTokens {
+		if token.ExpiresAt.Before(now) {
+			delete(m.verificationTokens, key)
+		}
+	}
+
+	// 清理过期的密码重置令牌
+	for key, token := range m.resetTokens {
+		if token.ExpiresAt.Before(now) {
+			delete(m.resetTokens, key)
+		}
+	}
+
 	return nil
 }
 
@@ -1104,6 +1160,10 @@ func (m *Store) GetResetToken(ctx context.Context, userID string) (*store.ResetT
 
 // MarkResetTokenUsed 标记重置令牌为已使用
 func (m *Store) MarkResetTokenUsed(ctx context.Context, userID string) error {
+	if m.MarkResetTokenUsedErr != nil {
+		return m.MarkResetTokenUsedErr
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1419,6 +1479,21 @@ func (m *Store) Reset() {
 	m.DeprecateKeyErr = nil
 	m.RevokeKeyErr = nil
 	m.DeleteKeyErr = nil
+	m.IncrementLoginAttemptsErr = nil
+	m.ResetLoginAttemptsErr = nil
+	m.UnlockExpiredAccountErr = nil
+	m.UpdateAuthorizationCodeErr = nil
+	m.ListTokenHashesByUserErr = nil
+	m.MarkResetTokenUsedErr = nil
+	m.ListAuditLogsErr = nil
+	m.ListActiveKeysErr = nil
+	m.ListAllKeysErr = nil
+	m.UpdateKeyPrivateKeyErr = nil
+	m.StoreMFARecoveryCodesErr = nil
+	m.GetUnusedMFARecoveryCodesErr = nil
+	m.VerifyAndUseMFARecoveryCodeErr = nil
+	m.DeleteUsedMFARecoveryCodesErr = nil
+	m.DeleteAllMFARecoveryCodesErr = nil
 	m.CloseErr = nil
 	m.PingErr = nil
 	m.CreateSocialAccountErr = nil
@@ -1442,16 +1517,22 @@ func (m *Store) StoreAuditLog(ctx context.Context, log *model.AuditLog) error {
 		return m.StoreAuditLogErr
 	}
 
-	m.auditLogs = append(m.auditLogs, log)
+	// 拷贝-替换：存入副本，调用方后续修改不影响已存储的"行"
+	stored := *log
+	m.auditLogs = append(m.auditLogs, &stored)
 	return nil
 }
 
 // ListAuditLogs 列出审计日志（支持分页和过滤）
 func (m *Store) ListAuditLogs(ctx context.Context, userID string, eventType string, offset, limit int) ([]*model.AuditLog, int, error) {
+	if m.ListAuditLogsErr != nil {
+		return nil, 0, m.ListAuditLogsErr
+	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	// 过滤日志
+	// 过滤日志（返回副本，与 getter 拷贝语义对齐）
 	filtered := make([]*model.AuditLog, 0)
 	for _, log := range m.auditLogs {
 		if userID != "" && log.UserID != userID {
@@ -1460,7 +1541,8 @@ func (m *Store) ListAuditLogs(ctx context.Context, userID string, eventType stri
 		if eventType != "" && log.EventType != eventType {
 			continue
 		}
-		filtered = append(filtered, log)
+		returned := *log
+		filtered = append(filtered, &returned)
 	}
 
 	total := len(filtered)
@@ -1526,6 +1608,10 @@ func (m *Store) GetKeyByID(ctx context.Context, keyID string) (*model.KeyVersion
 }
 
 func (m *Store) ListActiveKeys(ctx context.Context) ([]*model.KeyVersion, error) {
+	if m.ListActiveKeysErr != nil {
+		return nil, m.ListActiveKeysErr
+	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -1540,6 +1626,10 @@ func (m *Store) ListActiveKeys(ctx context.Context) ([]*model.KeyVersion, error)
 }
 
 func (m *Store) ListAllKeys(ctx context.Context) ([]*model.KeyVersion, error) {
+	if m.ListAllKeysErr != nil {
+		return nil, m.ListAllKeysErr
+	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -1596,12 +1686,21 @@ func (m *Store) DeleteKey(ctx context.Context, keyID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// 与 Postgres 行为对齐：rows == 0 时返回 ErrNotFound
+	// postgres/key.go 的 DELETE ... 同样对不存在的 key 返回 ErrNotFound
+	if _, ok := m.keys[keyID]; !ok {
+		return store.ErrNotFound
+	}
 	delete(m.keys, keyID)
 	return nil
 }
 
 // UpdateKeyPrivateKey 更新密钥的私钥字段（T7：懒加密回写）
 func (m *Store) UpdateKeyPrivateKey(ctx context.Context, keyID string, privateKey []byte) error {
+	if m.UpdateKeyPrivateKeyErr != nil {
+		return m.UpdateKeyPrivateKeyErr
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1625,6 +1724,10 @@ func (m *Store) UpdateKeyPrivateKey(ctx context.Context, keyID string, privateKe
 // StoreMFARecoveryCodes 存储MFA恢复码
 // Mock实现：直接存储哈希值（与真实实现一致）
 func (m *Store) StoreMFARecoveryCodes(ctx context.Context, userID string, codeHashes []string) error {
+	if m.StoreMFARecoveryCodesErr != nil {
+		return m.StoreMFARecoveryCodesErr
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1637,6 +1740,10 @@ func (m *Store) StoreMFARecoveryCodes(ctx context.Context, userID string, codeHa
 
 // GetUnusedMFARecoveryCodes 获取未使用的恢复码
 func (m *Store) GetUnusedMFARecoveryCodes(ctx context.Context, userID string) ([]string, error) {
+	if m.GetUnusedMFARecoveryCodesErr != nil {
+		return nil, m.GetUnusedMFARecoveryCodesErr
+	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -1653,6 +1760,10 @@ func (m *Store) GetUnusedMFARecoveryCodes(ctx context.Context, userID string) ([
 // VerifyAndUseMFARecoveryCode 验证并使用恢复码
 // Mock实现：与真实实现一致，接收原始code并进行HMAC哈希
 func (m *Store) VerifyAndUseMFARecoveryCode(ctx context.Context, userID, code string) (bool, error) {
+	if m.VerifyAndUseMFARecoveryCodeErr != nil {
+		return false, m.VerifyAndUseMFARecoveryCodeErr
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1697,6 +1808,10 @@ func (m *Store) SetMockHMACKey(key []byte) {
 // DeleteUsedMFARecoveryCodes 删除已使用的恢复码
 // Mock实现不区分已使用/未使用，直接删除该用户的所有恢复码
 func (m *Store) DeleteUsedMFARecoveryCodes(ctx context.Context, userID string) error {
+	if m.DeleteUsedMFARecoveryCodesErr != nil {
+		return m.DeleteUsedMFARecoveryCodesErr
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1706,6 +1821,10 @@ func (m *Store) DeleteUsedMFARecoveryCodes(ctx context.Context, userID string) e
 
 // DeleteAllMFARecoveryCodes 删除用户的所有恢复码
 func (m *Store) DeleteAllMFARecoveryCodes(ctx context.Context, userID string) error {
+	if m.DeleteAllMFARecoveryCodesErr != nil {
+		return m.DeleteAllMFARecoveryCodesErr
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

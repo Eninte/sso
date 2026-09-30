@@ -139,7 +139,8 @@ var allowedEnvKeys = map[string]bool{
 	"SMTP_HOST": true, "SMTP_PORT": true, "SMTP_USER": true, "SMTP_PASSWORD": true, "SMTP_FROM": true,
 	"CORS_ALLOWED_ORIGINS": true,
 	"METRICS_USERNAME":     true, "METRICS_PASSWORD": true,
-	"SHUTDOWN_TIMEOUT": true, "LAN_DEPLOYMENT": true,
+	"SHUTDOWN_TIMEOUT": true, "INSECURE_PROD_BYPASS": true,
+	"PUBLIC_BASE_URL": true, "TRUSTED_PROXIES": true, "LAN_DEPLOYMENT": true,
 }
 
 func (h *SetupHandler) HandleSetupSave(w http.ResponseWriter, r *http.Request) {

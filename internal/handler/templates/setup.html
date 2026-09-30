@@ -406,10 +406,11 @@
         <!-- 部署模式 -->
         <div class="card">
             <h2>8. 部署模式</h2>
-            <div class="toggle-group">
-                <label class="toggle"><input type="checkbox" name="LAN_DEPLOYMENT" value="true"><span class="slider"></span></label>
-                <span>局域网部署模式 (允许生产环境使用 localhost CORS)</span>
+            <div class="form-group">
+                <label>生产校验豁免（INSECURE_PROD_BYPASS，逗号分隔，公网部署留空）</label>
+                <input name="INSECURE_PROD_BYPASS" placeholder="例如: db_ssl,mfa_recovery_key">
             </div>
+            <div class="hint">不存在总开关：每项豁免只放开对应的一项生产校验，留空表示不豁免任何校验。可选值：db_ssl、rate_limit、max_login_attempts、cors_localhost、cors_default、jwt_issuer、smtp_host、metrics_auth、redis_password、public_base_url、jwt_key_permissions、mfa_recovery_key。LAN_DEPLOYMENT 已废弃，不再提供任何豁免。</div>
             <div class="form-group">
                 <label>优雅关闭超时</label>
                 <input name="SHUTDOWN_TIMEOUT" value="30s">
@@ -523,9 +524,9 @@ document.getElementById('setupForm').addEventListener('submit', async function(e
     } else {
         data.REDIS_ENABLE = 'true';
     }
-    // 处理LAN部署
-    if (data.LAN_DEPLOYMENT !== 'true') {
-        data.LAN_DEPLOYMENT = 'false';
+    // 处理生产校验豁免：空值写为空串（不留旧值）
+    if (data.INSECURE_PROD_BYPASS === undefined || data.INSECURE_PROD_BYPASS === null) {
+        data.INSECURE_PROD_BYPASS = '';
     }
 
     try {

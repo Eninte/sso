@@ -197,9 +197,13 @@ func TestAuthService_Login_ErrorPaths(t *testing.T) {
 		// 验证SendVerificationEmail使用了user.ID（而非user.Email）
 		// 如果传了user.ID，GetByID能查到用户，验证令牌会被存储
 		// 如果传了user.Email，GetByID查不到用户，验证令牌不会被存储
-		token, tokenErr := storeInst.GetVerificationToken(ctx, "verify-test-user-id")
-		assert.NoError(t, tokenErr, "验证令牌应已存储（SendVerificationEmail应传user.ID）")
-		assert.NotNil(t, token, "验证令牌应存在")
+		// 发送已异步化（防止登录端点被慢 SMTP 阻塞/邮件轰炸放大），轮询等待落库
+		var token *store.VerificationToken
+		var tokenErr error
+		require.Eventually(t, func() bool {
+			token, tokenErr = storeInst.GetVerificationToken(ctx, "verify-test-user-id")
+			return tokenErr == nil && token != nil
+		}, 2*time.Second, 10*time.Millisecond, "验证令牌应已异步存储（SendVerificationEmail应传user.ID）")
 	})
 
 	// ==== 测试4: 密码错误场景 ====

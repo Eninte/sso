@@ -14,9 +14,10 @@
 #### 必须配置项 ✅
 
 - [ ] `SERVER_ENV=production` - 生产环境标识
-- [ ] `MFA_RECOVERY_HMAC_KEY` - MFA恢复码HMAC密钥（>= 32 字节，`LAN_DEPLOYMENT=true` 除外，未设置时生产环境拒绝启动）
+- [ ] `MFA_RECOVERY_HMAC_KEY` - MFA恢复码HMAC密钥（>= 32 字节，未设置时生产环境拒绝启动，豁免项 `mfa_recovery_key`）
 - [ ] `BCRYPT_COST>=12` - 密码哈希成本（推荐14）
-- [ ] `DB_SSL_MODE=require` - 数据库SSL连接（`LAN_DEPLOYMENT=true` 除外）
+- [ ] `DB_SSL_MODE=require` - 数据库SSL连接（豁免项 `db_ssl`）
+- [ ] `INSECURE_PROD_BYPASS` - 生产校验豁免清单（**必须留空**；公网部署任何豁免都不应出现）
 - [ ] `CORS_ALLOWED_ORIGINS` - CORS允许的域名（不能使用 `*`，不能包含 `localhost`，不能为默认值）
 - [ ] `JWT_ISSUER` - JWT签发者标识（不能使用默认值 `sso`）
 - [ ] `SMTP_HOST` - 生产SMTP服务器（不能为 `localhost`）
@@ -40,6 +41,9 @@
 
 > 密钥轮换（`KEY_ROTATION_ENABLED=true`）启用时，生产环境还必须设置
 > `JWT_KEY_ENCRYPTION_KEY`（64 位 hex，`openssl rand -hex 32` 生成）。
+> 注意：DB 密钥轮换与私钥信封加密链路当前未接线（`KEY_ROTATION_ENABLED=true`
+> 仅激活文件式过渡公钥 `LoadKeysForRotation`），该密钥暂不会被使用；
+> 缺失时仅告警不拒绝启动。
 
 ### 2. 数据库检查
 
@@ -162,7 +166,7 @@ curl -X GET http://localhost:9090/api/v1/userinfo \
 ### 1. MFA恢复码配置
 
 - `MFA_RECOVERY_HMAC_KEY` 必须已设置且长度 >= 32 字节
-- 生产环境未满足时服务会拒绝启动（`LAN_DEPLOYMENT=true` 除外）
+- 生产环境未满足时服务会拒绝启动（豁免项 `mfa_recovery_key`）
 
 ### 2. CORS配置检查
 
@@ -175,7 +179,7 @@ curl -X GET http://localhost:9090/api/v1/userinfo \
 
 ### 4. 数据库SSL检查
 
-- 生产环境 `DB_SSL_MODE` 必须为 `require` 或更高（`LAN_DEPLOYMENT=true` 除外）
+- 生产环境 `DB_SSL_MODE` 必须为 `require` 或更高（豁免项 `db_ssl`，LAN 部署专用）
 
 ## 📊 监控指标
 

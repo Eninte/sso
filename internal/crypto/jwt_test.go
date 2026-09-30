@@ -13,6 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/golang-jwt/jwt/v5"
+
 	"github.com/example/sso/internal/crypto"
 )
 
@@ -649,4 +651,67 @@ func TestJWTService_ValidateAccessToken_AcceptsCorrectIssuer(t *testing.T) {
 	claims, err := svc.ValidateAccessToken(token)
 	require.NoError(t, err)
 	assert.Equal(t, "test-issuer", claims.RegisteredClaims.Issuer)
+}
+
+// TestJWTService_AudienceValidation 测试 aud 校验：
+// 1. 本服务签发的 token 携带 aud 且能通过校验
+// 2. 手工构造的无 aud / aud 不匹配 token 必须被拒绝
+func TestJWTService_AudienceValidation(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	const issuer = "test-issuer"
+	svc := crypto.NewJWTService(privateKey, &privateKey.PublicKey, issuer, 15*time.Minute, 7*24*time.Hour)
+
+	t.Run("本服务签发的token携带aud并校验通过", func(t *testing.T) {
+		token, err := svc.GenerateAccessToken("user-1", "user@example.com", "user", []string{"openid"})
+		require.NoError(t, err)
+
+		claims, err := svc.ValidateAccessToken(token)
+		require.NoError(t, err)
+		assert.Contains(t, claims.Audience, issuer, "签发的 token 必须携带 aud")
+		assert.Equal(t, "user-1", claims.Subject)
+	})
+
+	t.Run("无aud的token被拒绝", func(t *testing.T) {
+		// 模拟旧版本签发（无 aud）或他处构造的 token：即使签名有效也拒绝
+		now := time.Now()
+		legacyClaims := crypto.AccessTokenClaims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				ID:        "legacy-jti",
+				Issuer:    issuer,
+				Subject:   "user-1",
+				ExpiresAt: jwt.NewNumericDate(now.Add(15 * time.Minute)),
+				IssuedAt:  jwt.NewNumericDate(now),
+				NotBefore: jwt.NewNumericDate(now),
+			},
+		}
+		legacyToken := jwt.NewWithClaims(jwt.SigningMethodRS256, legacyClaims)
+		signed, err := legacyToken.SignedString(privateKey)
+		require.NoError(t, err)
+
+		_, err = svc.ValidateAccessToken(signed)
+		assert.ErrorIs(t, err, crypto.ErrInvalidToken, "缺失 aud 的 token 必须被拒绝")
+	})
+
+	t.Run("aud不匹配的token被拒绝", func(t *testing.T) {
+		now := time.Now()
+		wrongAudClaims := crypto.AccessTokenClaims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				ID:        "wrong-aud-jti",
+				Issuer:    issuer,
+				Audience:  jwt.ClaimStrings{"other-service"},
+				Subject:   "user-1",
+				ExpiresAt: jwt.NewNumericDate(now.Add(15 * time.Minute)),
+				IssuedAt:  jwt.NewNumericDate(now),
+				NotBefore: jwt.NewNumericDate(now),
+			},
+		}
+		wrongToken := jwt.NewWithClaims(jwt.SigningMethodRS256, wrongAudClaims)
+		signed, err := wrongToken.SignedString(privateKey)
+		require.NoError(t, err)
+
+		_, err = svc.ValidateAccessToken(signed)
+		assert.ErrorIs(t, err, crypto.ErrInvalidToken, "aud 不匹配的 token 必须被拒绝")
+	})
 }

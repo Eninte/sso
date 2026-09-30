@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"errors"
 	"testing"
 	"time"
 
@@ -33,13 +34,12 @@ func createTestJWTServiceForLoginTest() *crypto.JWTService {
 // 安全问题 #13: 登录失败计数器可能被绕过
 //
 // 测试场景:
-// 1. 用户使用错误密码登录
-// 2. UpdateLoginAttempts返回数据库错误（通过设置UpdateLoginAttemptsErr）
-// 3. 验证登录请求被拒绝（返回错误）
-// 4. 验证返回的是服务错误而非ErrInvalidCredentials
-//
-// 注意：由于mock.Store的IncrementLoginAttempts不支持自定义错误注入，
-// 我们通过集成测试验证整体行为，确保数据库错误不会被忽略
+//  1. 用户使用错误密码登录（密码校验必然先失败，进入 handleLoginFailure）
+//  2. IncrementLoginAttempts 返回数据库错误（通过 IncrementLoginAttemptsErr 注入）
+//  3. 验证登录请求被拒绝，且返回的不是 ErrInvalidCredentials 而是包装后的服务错误
+//     ——若此处错误被吞、退化为 ErrInvalidCredentials，攻击者即可通过触发 DB 错误
+//     使计数不递增，从而绕过账户锁定
+//  4. 验证错误消息不泄露 DSN/内部细节
 func TestLoginFailureCounter_DatabaseError(t *testing.T) {
 	// 准备测试数据
 	hashedPassword, err := crypto.NewPasswordService(10).HashPassword("correct-password")
@@ -51,11 +51,14 @@ func TestLoginFailureCounter_DatabaseError(t *testing.T) {
 		PasswordHash:  hashedPassword,
 		EmailVerified: true,
 		Status:        model.UserStatusActive,
+		Role:          "user",
 	}
 
-	// 创建Mock Store
+	// 创建Mock Store并注入数据库错误
 	mockStore := mock.New()
 	mockStore.AddUser(user)
+	dbErr := errors.New("connection reset by peer: postgres://sso:supersecret@10.0.0.9:5432/sso")
+	mockStore.IncrementLoginAttemptsErr = dbErr
 
 	// 创建服务
 	passwordSvc := crypto.NewPasswordService(10)
@@ -70,15 +73,21 @@ func TestLoginFailureCounter_DatabaseError(t *testing.T) {
 
 	resp, err := authSvc.Login(context.Background(), req)
 
-	// 验证结果：密码错误应该返回ErrInvalidCredentials
-	assert.Error(t, err, "密码错误应该返回错误")
-	assert.Nil(t, resp, "密码错误不应该返回响应")
-	assert.True(t, apperrors.Is(err, ErrInvalidCredentials), "密码错误应该返回ErrInvalidCredentials")
+	// 验证结果：DB 错误必须导致登录失败，且不得退化为普通凭据错误
+	require.Error(t, err, "数据库错误时登录必须被拒绝")
+	assert.Nil(t, resp, "数据库错误时不应返回响应")
+	assert.False(t, apperrors.Is(err, ErrInvalidCredentials),
+		"数据库错误不得包装为 ErrInvalidCredentials，否则攻击者可借 DB 错误绕过锁定计数")
 
-	// 验证登录失败次数被正确记录
+	// 错误消息不得泄露 DSN 等内部细节
+	assert.NotContains(t, err.Error(), "supersecret", "错误消息不得泄露 DSN 凭据")
+	assert.NotContains(t, err.Error(), "10.0.0.9", "错误消息不得泄露数据库地址")
+
+	// 计数器不得在 DB 错误时被记为已递增
 	updatedUser, err := mockStore.GetByID(context.Background(), user.ID)
 	require.NoError(t, err)
-	assert.Equal(t, 1, updatedUser.LoginAttempts, "应该记录1次失败")
+	assert.Equal(t, 0, updatedUser.LoginAttempts, "DB 错误时计数器不应递增")
+	assert.NotEqual(t, model.UserStatusLocked, updatedUser.Status, "DB 错误时不得锁定账户")
 }
 
 // TestLoginFailureCounter_NormalFlow 测试正常流程下登录失败计数器工作正常
@@ -251,10 +260,9 @@ func TestLoginFailureCounter_ConcurrentFailures(t *testing.T) {
 	assert.LessOrEqual(t, updatedUser.LoginAttempts, concurrency, "计数器不应该超过并发数")
 }
 
-// TestLoginFailureCounter_DatabaseErrorDoesNotExposeCredentials 测试数据库错误不会暴露凭据信息
-// 注意：由于mock.Store的IncrementLoginAttempts不支持错误注入，
-// 此测试验证正常流程下不会暴露敏感信息
-func TestLoginFailureCounter_DatabaseErrorDoesNotExposeCredentials(t *testing.T) {
+// TestLoginFailureCounter_ErrorMessagesDoNotExposeSecrets 测试登录失败路径的
+// 错误消息不泄露敏感信息（密码、邮箱、DSN）
+func TestLoginFailureCounter_ErrorMessagesDoNotExposeSecrets(t *testing.T) {
 	// 准备测试数据
 	hashedPassword, err := crypto.NewPasswordService(10).HashPassword("correct-password")
 	require.NoError(t, err)
@@ -295,4 +303,14 @@ func TestLoginFailureCounter_DatabaseErrorDoesNotExposeCredentials(t *testing.T)
 	assert.Nil(t, resp)
 	assert.True(t, apperrors.Is(err, ErrInvalidCredentials), "不存在的邮箱应该返回ErrInvalidCredentials")
 	assert.NotContains(t, err.Error(), "nonexistent@example.com", "错误消息不应该包含邮箱")
+
+	// 测试3: DB 错误路径的错误消息不得包含 DSN（store 错误可能内嵌连接串）
+	mockStore.IncrementLoginAttemptsErr = errors.New(
+		"failed to connect to `host=10.0.0.9 user=sso password=supersecret database=sso`: dial error")
+	req.Email = user.Email
+	resp, err = authSvc.Login(context.Background(), req)
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	assert.NotContains(t, err.Error(), "supersecret", "DB 错误消息不得泄露 DSN 凭据")
+	assert.NotContains(t, err.Error(), "10.0.0.9", "DB 错误消息不得泄露数据库地址")
 }

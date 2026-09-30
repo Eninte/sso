@@ -123,13 +123,55 @@ func LogWithFallback(auditSvc AuditService, logFunc func() error) {
 	}
 }
 
+// buildAuditLog 根据事件参数构建审计日志对象
+// SafeAuditLog 与 CriticalAuditLog 共用，确保两条路径的结构完全一致
+func buildAuditLog(event, userID string, metadata map[string]interface{}) *model.AuditLog {
+	// 阶段 4 安全增强：在序列化前对 metadata 脱敏
+	// 防止 token / password / secret 等敏感字段进入 audit_logs.details 列
+	sanitized := sanitizeMetadata(metadata)
+
+	detailsJSON, _ := json.Marshal(sanitized)
+
+	// 从metadata中提取IP地址、用户代理等字段
+	ipAddress := ""
+	userAgent := ""
+	clientID := ""
+	success := true
+	if sanitized != nil {
+		if ip, ok := sanitized["ip_address"].(string); ok {
+			ipAddress = ip
+		}
+		if ua, ok := sanitized["user_agent"].(string); ok {
+			userAgent = ua
+		}
+		if cid, ok := sanitized["client_id"].(string); ok {
+			clientID = cid
+		}
+		if s, ok := sanitized["success"].(bool); ok {
+			success = s
+		}
+	}
+
+	return &model.AuditLog{
+		EventType: event,
+		UserID:    userID,
+		IPAddress: ipAddress,
+		UserAgent: userAgent,
+		ClientID:  clientID,
+		Details:   string(detailsJSON),
+		Success:   success,
+		Timestamp: time.Now(),
+	}
+}
+
 // SafeAuditLog 安全的审计日志记录函数
 // 提供统一的审计日志记录接口，包含自动回退处理
 //
 // 此函数是审计日志记录的标准方式。它确保：
-// 1. 审计日志失败不会影响主操作
-// 2. 审计日志失败会被记录到stderr
-// 3. 所有审计日志都使用统一的格式和处理方式
+//  1. 审计日志失败不会影响主操作
+//  2. 审计日志失败会被记录到stderr
+//  3. 所有审计日志都使用统一的格式和处理方式
+//  4. 关键事件（IsCriticalEvent 命中）强制走同步落库，即使调用方误用了本函数
 //
 // 参数:
 //   - ctx: 请求上下文
@@ -140,8 +182,8 @@ func LogWithFallback(auditSvc AuditService, logFunc func() error) {
 //
 // 行为:
 //   - 如果auditSvc为nil，直接返回（审计日志是可选的）
-//   - 尝试记录审计日志到审计服务
-//   - 如果记录失败，记录到stderr并继续
+//   - 关键事件：服务支持同步记录时同步落库；同步失败回退stderr，不返回错误
+//   - 普通事件：异步记录，失败记录到stderr并继续
 //   - 不会panic或返回error
 //
 // 示例:
@@ -156,45 +198,36 @@ func SafeAuditLog(ctx context.Context, auditSvc AuditService, event, userID stri
 		return
 	}
 
+	// 关键事件强制同步落库（安全收口点）
+	// 背景：密码修改/MFA 禁用等关键事件若走异步 channel，在 channel 拥塞或
+	// 服务关闭时日志会丢失，且调用方（SafeAuditLog 无返回值）无法感知。
+	// 此处按 criticalEvents 清单强制路由到同步路径，与调用方是否误用无关。
+	// 普通事件保持原有异步语义，避免为每次登录同步写库。
+	if IsCriticalEvent(event) {
+		if syncLogger, ok := auditSvc.(SyncAuditLogger); ok {
+			auditLog := buildAuditLog(event, userID, metadata)
+			if err := syncLogger.LogSync(ctx, auditLog); err != nil {
+				// SafeAuditLog 契约不返回错误，同步失败仅回退 stderr
+				fmt.Fprintf(os.Stderr, "[AUDIT_CRITICAL_FAILED] 关键审计日志同步记录失败: %v\n", err)
+				return
+			}
+			slog.InfoContext(ctx, "关键审计日志已记录",
+				"event", event,
+				"user_id", userID,
+				"success", auditLog.Success,
+			)
+			return
+		}
+		// 审计服务不支持同步记录：明确告警而非静默丢失
+		slog.WarnContext(ctx, "审计服务不支持同步记录，关键事件降级为异步（存在丢失风险）",
+			"event", event,
+			"user_id", userID,
+		)
+	}
+
 	// 使用LogWithFallback确保审计失败不影响主流程
 	LogWithFallback(auditSvc, func() error {
-		// 阶段 4 安全增强：在序列化前对 metadata 脱敏
-		// 防止 token / password / secret 等敏感字段进入 audit_logs.details 列
-		sanitized := sanitizeMetadata(metadata)
-
-		// 构建审计日志对象
-		detailsJSON, _ := json.Marshal(sanitized)
-
-		// 从metadata中提取IP地址、用户代理等字段
-		ipAddress := ""
-		userAgent := ""
-		clientID := ""
-		success := true
-		if sanitized != nil {
-			if ip, ok := sanitized["ip_address"].(string); ok {
-				ipAddress = ip
-			}
-			if ua, ok := sanitized["user_agent"].(string); ok {
-				userAgent = ua
-			}
-			if cid, ok := sanitized["client_id"].(string); ok {
-				clientID = cid
-			}
-			if s, ok := sanitized["success"].(bool); ok {
-				success = s
-			}
-		}
-
-		auditLog := &model.AuditLog{
-			EventType: event,
-			UserID:    userID,
-			IPAddress: ipAddress,
-			UserAgent: userAgent,
-			ClientID:  clientID,
-			Details:   string(detailsJSON),
-			Success:   success,
-			Timestamp: time.Now(),
-		}
+		auditLog := buildAuditLog(event, userID, metadata)
 
 		// 调用审计服务记录日志
 		// 审计服务应该异步处理，不阻塞主流程
@@ -248,41 +281,8 @@ func CriticalAuditLog(ctx context.Context, auditSvc AuditService, event, userID 
 		return apperrors.New(apperrors.ErrCodeInternal, "audit service required for critical operations", 500)
 	}
 
-	// 构建审计日志对象
-	// 阶段 4 安全增强：在序列化前对 metadata 脱敏，防止敏感字段持久化到 audit_logs.details
-	sanitized := sanitizeMetadata(metadata)
-	detailsJSON, _ := json.Marshal(sanitized)
-
-	// 从metadata中提取IP地址、用户代理等字段
-	ipAddress := ""
-	userAgent := ""
-	clientID := ""
-	success := true
-	if sanitized != nil {
-		if ip, ok := sanitized["ip_address"].(string); ok {
-			ipAddress = ip
-		}
-		if ua, ok := sanitized["user_agent"].(string); ok {
-			userAgent = ua
-		}
-		if cid, ok := sanitized["client_id"].(string); ok {
-			clientID = cid
-		}
-		if s, ok := sanitized["success"].(bool); ok {
-			success = s
-		}
-	}
-
-	auditLog := &model.AuditLog{
-		EventType: event,
-		UserID:    userID,
-		IPAddress: ipAddress,
-		UserAgent: userAgent,
-		ClientID:  clientID,
-		Details:   string(detailsJSON),
-		Success:   success,
-		Timestamp: time.Now(),
-	}
+	// 构建审计日志对象（与 SafeAuditLog 共用，确保结构一致）
+	auditLog := buildAuditLog(event, userID, metadata)
 
 	// 如果审计服务支持同步记录，则使用同步接口（关键事件必须同步）
 	// 这确保关键操作的审计日志真正写入存储，失败时调用者可回滚
@@ -295,7 +295,7 @@ func CriticalAuditLog(ctx context.Context, auditSvc AuditService, event, userID 
 		slog.InfoContext(ctx, "关键审计日志已记录",
 			"event", event,
 			"user_id", userID,
-			"success", success,
+			"success", auditLog.Success,
 		)
 		return nil
 	}

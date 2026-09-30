@@ -81,9 +81,15 @@ func (r *EmailRateLimiter) CheckLimit(ctx context.Context, email string) (bool, 
 	// 如果是第一次计数，设置过期时间
 	if count == 1 {
 		if err := r.cache.SetTTL(ctx, key, EmailRateLimitWindow); err != nil {
-			// TTL设置失败，记录但不阻止，计数已递增故剩余次数 -1
-			r.notifyFallback("邮件限流Redis设置TTL失败", email, err)
-			return true, EmailRateLimitMax - 1, nil
+			// TTL 失败必须补偿删除：无 TTL 的计数键会永久存在，
+			// 使该邮箱的验证/重置邮件被永久限流（无法自愈的持久 DoS）。
+			// 删除失败仅记录；本次请求按未限流放行。
+			if delErr := r.cache.Delete(ctx, key); delErr != nil {
+				slog.Error("邮件限流Redis补偿删除失败（该邮箱可能被永久限流）",
+					"error", delErr, "email", email)
+			}
+			r.notifyFallback("邮件限流Redis设置TTL失败，已补偿删除计数键", email, err)
+			return true, EmailRateLimitMax, nil
 		}
 	}
 

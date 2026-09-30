@@ -20,8 +20,8 @@ import (
 // 测试隔离的两条核心原则：
 //  1. 禁止读取磁盘 .env 文件——否则测试结果依赖运行环境，换台机器或改了 .env 就会随机失败。
 //     通过设置 SKIP_ENV_FILE=1 让 loadEnvFile() 直接返回。
-//  2. 隔离影响生产环境校验的关键开关——特别是 LAN_DEPLOYMENT，若残留为 true 会旁路
-//     生产环境的 CORS/SSL 等安全校验，使"期望报错"的测试用例静默通过。
+//  2. 隔离影响生产环境校验的关键开关——特别是 INSECURE_PROD_BYPASS，若残留非空会按名
+//     豁免对应的生产环境校验，使"期望报错"的测试用例静默通过。
 //
 // CI/CD 修复：所有环境变量设置改用 t.Setenv，自动在测试结束时恢复原值（包括 unset 状态），
 // 避免环境变量泄漏到后续测试引发 race condition 或非确定性失败。
@@ -49,9 +49,11 @@ func setupTestEnv(t *testing.T) {
 	t.Setenv("STRICT_KEY_PERMISSIONS", "false")
 	// 禁止读取磁盘 .env 文件，保证测试环境完全自包含
 	t.Setenv("SKIP_ENV_FILE", "1")
-	// 默认非 LAN 部署模式，确保生产环境安全校验不被旁路；
-	// 需要测试 LAN 模式的用例可单独设置 LAN_DEPLOYMENT=true
-	// 空字符串等同于 unset（getEnvBool 检查 value != ""）
+	// 默认不声明任何生产校验豁免，确保生产环境安全校验不被旁路；
+	// 需要测试豁免的用例可单独设置 INSECURE_PROD_BYPASS=<项名>
+	// 空字符串等同于 unset
+	t.Setenv("INSECURE_PROD_BYPASS", "")
+	// 已废弃开关同样置空，避免其告警日志污染测试输出
 	t.Setenv("LAN_DEPLOYMENT", "")
 }
 
@@ -814,15 +816,17 @@ func TestValidate_JWTKeyEncryptionKey(t *testing.T) {
 
 	validKEK := "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
 
-	t.Run("生产环境_启用轮换_无KEK_拒绝启动", func(t *testing.T) {
+	t.Run("生产环境_启用轮换_无KEK_告警放行", func(t *testing.T) {
+		// DB 密钥轮换/信封加密链路未接线，KEK 缺失仅为告警而非拒绝启动
+		// （避免为不会执行的路径强制要求密钥）
 		setupTestEnv(t)
 		setProductionPrereqs(t)
 		t.Setenv("KEY_ROTATION_ENABLED", "true")
 		t.Setenv("JWT_KEY_ENCRYPTION_KEY", "")
 
-		_, err := config.Load()
-		require.Error(t, err, "生产环境启用密钥轮换且无 KEK 应拒绝启动")
-		assert.Contains(t, err.Error(), "JWT_KEY_ENCRYPTION_KEY")
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		assert.NotNil(t, cfg)
 	})
 
 	t.Run("生产环境_启用轮换_合法KEK_通过", func(t *testing.T) {
@@ -847,15 +851,37 @@ func TestValidate_JWTKeyEncryptionKey(t *testing.T) {
 		assert.NotNil(t, cfg)
 	})
 
-	t.Run("生产环境_启用轮换_LAN部署_无KEK_通过", func(t *testing.T) {
+	t.Run("任意环境_INSECURE_PROD_BYPASS未知项名_拒绝启动", func(t *testing.T) {
+		setupTestEnv(t)
+		t.Setenv("INSECURE_PROD_BYPASS", "all")
+
+		_, err := config.Load()
+		require.Error(t, err, "未知豁免项名必须 fail-fast，防止拼写错误被当作已豁免")
+		assert.Contains(t, err.Error(), "INSECURE_PROD_BYPASS")
+	})
+
+	t.Run("任意环境_已废弃LAN_DEPLOYMENT不提供任何豁免", func(t *testing.T) {
+		// LAN_DEPLOYMENT 已移除：即使设置也不得豁免任何生产校验。
+		// 用 CORS localhost 这一仍然硬拒绝的校验来观察（KEK 已降级为告警）
 		setupTestEnv(t)
 		setProductionPrereqs(t)
-		t.Setenv("KEY_ROTATION_ENABLED", "true")
-		t.Setenv("JWT_KEY_ENCRYPTION_KEY", "")
+		t.Setenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
 		t.Setenv("LAN_DEPLOYMENT", "true")
 
+		_, err := config.Load()
+		require.Error(t, err, "LAN_DEPLOYMENT 已废弃，不得再豁免任何生产校验")
+		assert.Contains(t, err.Error(), "CORS_ALLOWED_ORIGINS")
+	})
+
+	t.Run("任意环境_INSECURE_PROD_BYPASS逐项豁免生效", func(t *testing.T) {
+		setupTestEnv(t)
+		setProductionPrereqs(t)
+		// 含 localhost 但非默认值，仅触发 cors_localhost 一项校验
+		t.Setenv("CORS_ALLOWED_ORIGINS", "https://localhost:3000")
+		t.Setenv("INSECURE_PROD_BYPASS", "cors_localhost")
+
 		cfg, err := config.Load()
-		require.NoError(t, err, "LAN 内网部署可放宽 KEK 必填校验")
+		require.NoError(t, err, "显式声明 cors_localhost 后对应校验被豁免")
 		assert.NotNil(t, cfg)
 	})
 
