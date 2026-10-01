@@ -435,7 +435,7 @@ sso/
 | SMTP_FROM | 发件人邮箱地址 | noreply@example.com | **邮件功能必填** |
 | GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET | Google登录凭据 | - | Google登录必填 |
 | GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET | GitHub登录凭据 | - | GitHub登录必填 |
-| LAN_DEPLOYMENT | LAN部署模式（放宽生产校验） | false | 仅内网部署使用 |
+| INSECURE_PROD_BYPASS | 逐项声明的生产校验豁免（逗号分隔），无总开关 | 空 | 仅内网部署按需使用，公网必须留空 |
 | SHUTDOWN_TIMEOUT | 优雅关闭超时 | 30s | - |
 
 完整配置说明和环境差异对照请参考：[配置管理指南](docs/CONFIGURATION.md)

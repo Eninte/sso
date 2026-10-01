@@ -143,21 +143,27 @@ SSO/
 | `DB_SSL_MODE` | `prefer` | **必须为 `require` 或更高** |
 | `BCRYPT_COST` | 12 | **必须 >= 12** |
 | `MFA_RECOVERY_HMAC_KEY` | 空 | **生产必须设置强密钥（>= 32 字节）** |
-| `JWT_KEY_ENCRYPTION_KEY` | 空 | **启用密钥轮换（`KEY_ROTATION_ENABLED=true`）时生产必填**，64 位 hex（`openssl rand -hex 32`），用于 DB 中私钥的 AES-256-GCM 信封加密 |
+| `JWT_KEY_ENCRYPTION_KEY` | 空 | 64 位 hex（`openssl rand -hex 32`），用于 DB 中私钥的 AES-256-GCM 信封加密。**注意：DB 密钥轮换/信封加密链路当前未接线**（`KEY_ROTATION_ENABLED=true` 仅激活文件式过渡公钥），配置了也不会被使用，缺失仅告警 |
 | `SOCIAL_STATE_COOKIE_BINDING` | `true` | 社交登录 state 绑定发起方会话（login CSRF 防护），纯 API 客户端可设 `false`（生产关闭会告警） |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | **必须配置生产域名** |
 | `JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH` | `./keys/*.pem` | 必填 |
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM` | 邮件相关 | 邮件功能必填 |
-| `LAN_DEPLOYMENT` | `false` | 仅内网部署可放宽生产校验 |
+| `INSECURE_PROD_BYPASS` | 空 | 逐项显式声明的生产校验豁免（逗号分隔），**不存在总开关**，未知项名拒绝启动。可选值：`db_ssl`、`rate_limit`、`max_login_attempts`、`cors_localhost`、`cors_default`、`jwt_issuer`、`smtp_host`、`metrics_auth`、`redis_password`、`public_base_url`、`jwt_key_permissions`、`mfa_recovery_key`。**公网部署必须留空** |
+
+> `LAN_DEPLOYMENT` 已废弃：原“一键放开全部生产校验”的总开关已移除，设置后仅记录错误日志，不再豁免任何校验。请按需改用 `INSECURE_PROD_BYPASS=<项名>`。
 
 生产环境校验：
 
-- `DB_SSL_MODE` 不能为 `disable`（`LAN_DEPLOYMENT=true` 除外）
+- `DB_SSL_MODE` 不能为 `disable` / `prefer` / `allow`（豁免项 `db_ssl`）
 - `BCRYPT_COST >= 12`
-- `CORS_ALLOWED_ORIGINS` 不能包含 `localhost`，不能为默认值
-- `JWT_ISSUER` 不能为默认 `sso`
-- `SMTP_HOST` 不能为 `localhost`
-- `MFA_RECOVERY_HMAC_KEY` 必须非空（`LAN_DEPLOYMENT=true` 除外）
+- `CORS_ALLOWED_ORIGINS` 不能包含 `localhost`（豁免项 `cors_localhost`），不能为默认值（豁免项 `cors_default`）
+- `JWT_ISSUER` 不能为默认 `sso`（豁免项 `jwt_issuer`）
+- `SMTP_HOST` 不能为 `localhost`（豁免项 `smtp_host`）
+- `MFA_RECOVERY_HMAC_KEY` 必须非空（豁免项 `mfa_recovery_key`）
+- `METRICS_USERNAME`/`METRICS_PASSWORD` 必须同时设置（豁免项 `metrics_auth`）
+- `REDIS_ENABLE=true` 时 `REDIS_PASSWORD` 必须非空（豁免项 `redis_password`）
+- `PUBLIC_BASE_URL` 必须设置且为 `https://`（豁免项 `public_base_url`）
+- JWT 私钥文件权限必须为 `600`（豁免项 `jwt_key_permissions`）
 
 ### 4.3 配置向导
 
@@ -378,7 +384,7 @@ apperrors.Is(err, store.ErrNotFound)              // 判断错误类型
 ### 9.1 敏感配置安全
 
 - 不得将 `.env.test` 凭据硬编码到代码或文档
-- 生产环境启动时，若 `SERVER_ENV=production` 且 `MFA_RECOVERY_HMAC_KEY` 为空则拒绝启动（`LAN_DEPLOYMENT=true` 除外）
+- 生产环境启动时，若 `SERVER_ENV=production` 且 `MFA_RECOVERY_HMAC_KEY` 为空则拒绝启动（豁免项 `mfa_recovery_key`）
 
 ## 10. 路由与 API 概览
 

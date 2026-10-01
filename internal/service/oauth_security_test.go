@@ -420,10 +420,10 @@ func TestOAuthService_CreateAuthorizationCodeWithConsent(t *testing.T) {
 }
 
 // ============================================================================
-// RefreshTokenWithClientID 客户端归属校验测试
+// RefreshTokenWithClientCredentials 客户端归属与密钥校验测试
 // ============================================================================
 
-func TestAuthService_RefreshTokenWithClientID(t *testing.T) {
+func TestAuthService_RefreshTokenWithClientCredentials(t *testing.T) {
 	ctx := context.Background()
 
 	storeInst := mock.New()
@@ -439,7 +439,11 @@ func TestAuthService_RefreshTokenWithClientID(t *testing.T) {
 	)
 	authSvc := service.NewAuthService(storeInst, passwordSvc, jwtSvc, 5, 30*time.Minute)
 
-	t.Run("成功-OAuth签发token携带正确client_id", func(t *testing.T) {
+	// 机密客户端密钥（bcrypt 哈希存储，与真实 store 一致）
+	secretHash, err := passwordSvc.HashPassword("correct-client-secret")
+	require.NoError(t, err)
+
+	t.Run("成功-公共客户端OAuth签发token无需secret", func(t *testing.T) {
 		storeInst.Reset()
 
 		clientID := "oauth-client-id"
@@ -459,10 +463,137 @@ func TestAuthService_RefreshTokenWithClientID(t *testing.T) {
 			Role:   "user",
 			Status: model.UserStatusActive,
 		})
+		storeInst.AddClient(&model.Client{
+			ClientID:     clientID,
+			PublicClient: true,
+			IsActive:     true,
+		})
 
-		resp, err := authSvc.RefreshTokenWithClientID(ctx, "valid-refresh-token", clientID)
+		resp, err := authSvc.RefreshTokenWithClientCredentials(ctx, "valid-refresh-token", clientID, "")
 		require.NoError(t, err)
 		assert.NotEmpty(t, resp.AccessToken)
+	})
+
+	t.Run("成功-机密客户端提供正确secret", func(t *testing.T) {
+		storeInst.Reset()
+
+		clientID := "confidential-client-id"
+		refreshExpiresAt := time.Now().Add(24 * time.Hour)
+		storeInst.AddToken(&model.Token{
+			ID:               "token-1c",
+			UserID:           "user-1c",
+			RefreshToken:     "confidential-refresh-token",
+			AccessToken:      "confidential-access-token",
+			ClientID:         &clientID,
+			RefreshExpiresAt: &refreshExpiresAt,
+			CreatedAt:        time.Now(),
+		})
+		storeInst.AddUser(&model.User{
+			ID:     "user-1c",
+			Email:  "test1c@example.com",
+			Role:   "user",
+			Status: model.UserStatusActive,
+		})
+		storeInst.AddClient(&model.Client{
+			ClientID:     clientID,
+			ClientSecret: secretHash,
+			PublicClient: false,
+			IsActive:     true,
+		})
+
+		resp, err := authSvc.RefreshTokenWithClientCredentials(ctx, "confidential-refresh-token", clientID, "correct-client-secret")
+		require.NoError(t, err)
+		assert.NotEmpty(t, resp.AccessToken)
+	})
+
+	t.Run("拒绝-机密客户端缺少secret", func(t *testing.T) {
+		storeInst.Reset()
+
+		clientID := "confidential-client-id"
+		refreshExpiresAt := time.Now().Add(24 * time.Hour)
+		storeInst.AddToken(&model.Token{
+			ID:               "token-1n",
+			UserID:           "user-1n",
+			RefreshToken:     "no-secret-refresh-token",
+			AccessToken:      "no-secret-access-token",
+			ClientID:         &clientID,
+			RefreshExpiresAt: &refreshExpiresAt,
+			CreatedAt:        time.Now(),
+		})
+		storeInst.AddUser(&model.User{
+			ID:     "user-1n",
+			Email:  "test1n@example.com",
+			Role:   "user",
+			Status: model.UserStatusActive,
+		})
+		storeInst.AddClient(&model.Client{
+			ClientID:     clientID,
+			ClientSecret: secretHash,
+			PublicClient: false,
+			IsActive:     true,
+		})
+
+		_, err := authSvc.RefreshTokenWithClientCredentials(ctx, "no-secret-refresh-token", clientID, "")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, apperrors.ErrInvalidClient)
+	})
+
+	t.Run("拒绝-机密客户端提供错误secret", func(t *testing.T) {
+		storeInst.Reset()
+
+		clientID := "confidential-client-id"
+		refreshExpiresAt := time.Now().Add(24 * time.Hour)
+		storeInst.AddToken(&model.Token{
+			ID:               "token-1w",
+			UserID:           "user-1w",
+			RefreshToken:     "wrong-secret-refresh-token",
+			AccessToken:      "wrong-secret-access-token",
+			ClientID:         &clientID,
+			RefreshExpiresAt: &refreshExpiresAt,
+			CreatedAt:        time.Now(),
+		})
+		storeInst.AddUser(&model.User{
+			ID:     "user-1w",
+			Email:  "test1w@example.com",
+			Role:   "user",
+			Status: model.UserStatusActive,
+		})
+		storeInst.AddClient(&model.Client{
+			ClientID:     clientID,
+			ClientSecret: secretHash,
+			PublicClient: false,
+			IsActive:     true,
+		})
+
+		_, err := authSvc.RefreshTokenWithClientCredentials(ctx, "wrong-secret-refresh-token", clientID, "wrong-client-secret")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, apperrors.ErrInvalidClient)
+	})
+
+	t.Run("拒绝-机密客户端不存在时fail-closed", func(t *testing.T) {
+		storeInst.Reset()
+
+		clientID := "deleted-client-id"
+		refreshExpiresAt := time.Now().Add(24 * time.Hour)
+		storeInst.AddToken(&model.Token{
+			ID:               "token-1d",
+			UserID:           "user-1d",
+			RefreshToken:     "deleted-client-refresh-token",
+			AccessToken:      "deleted-client-access-token",
+			ClientID:         &clientID,
+			RefreshExpiresAt: &refreshExpiresAt,
+			CreatedAt:        time.Now(),
+		})
+		storeInst.AddUser(&model.User{
+			ID:     "user-1d",
+			Email:  "test1d@example.com",
+			Role:   "user",
+			Status: model.UserStatusActive,
+		})
+
+		_, err := authSvc.RefreshTokenWithClientCredentials(ctx, "deleted-client-refresh-token", clientID, "whatever")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, apperrors.ErrInvalidClient)
 	})
 
 	t.Run("拒绝-client_id与token归属不一致", func(t *testing.T) {
@@ -487,7 +618,7 @@ func TestAuthService_RefreshTokenWithClientID(t *testing.T) {
 		})
 
 		// 用不同的 client_id 刷新
-		_, err := authSvc.RefreshTokenWithClientID(ctx, "cross-client-token", "different-client-id")
+		_, err := authSvc.RefreshTokenWithClientCredentials(ctx, "cross-client-token", "different-client-id", "")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, service.ErrClientMismatch)
 	})
@@ -514,7 +645,7 @@ func TestAuthService_RefreshTokenWithClientID(t *testing.T) {
 		})
 
 		// 不传 client_id
-		_, err := authSvc.RefreshTokenWithClientID(ctx, "missing-client-id-token", "")
+		_, err := authSvc.RefreshTokenWithClientCredentials(ctx, "missing-client-id-token", "", "")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, service.ErrClientMismatch)
 	})
@@ -540,7 +671,7 @@ func TestAuthService_RefreshTokenWithClientID(t *testing.T) {
 		})
 
 		// 不传 client_id 也能刷新
-		resp, err := authSvc.RefreshTokenWithClientID(ctx, "login-flow-token", "")
+		resp, err := authSvc.RefreshTokenWithClientCredentials(ctx, "login-flow-token", "", "")
 		require.NoError(t, err)
 		assert.NotEmpty(t, resp.AccessToken)
 	})

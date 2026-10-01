@@ -227,15 +227,33 @@ func (s *MFAService) recordRecoveryFailureRedis(ctx context.Context, userID stri
 	case count == 1:
 		// 首次失败：设置尝试窗口过期时间
 		if err := s.cache.SetTTL(ctx, key, recoveryAttemptWindow); err != nil {
+			s.compensateRecoveryKeyTTL(ctx, key, err)
 			return err
 		}
 	case count == maxRecoveryAttempts:
 		// 首次达上限：切换为锁定期过期时间（锁定期内计数持续可读）
 		if err := s.cache.SetTTL(ctx, key, recoveryLockoutDuration); err != nil {
+			s.compensateRecoveryKeyTTL(ctx, key, err)
 			return err
 		}
 	}
 	return nil
+}
+
+// compensateRecoveryKeyTTL 恢复码计数键 TTL 失败时的补偿删除
+//
+// 无 TTL 的计数键会永久存在：一旦累计达到 maxRecoveryAttempts，
+// checkRecoveryRateLimitRedis 将永久判定锁定，恢复码验证路径再无自愈可能
+// （TOTP 之外的唯一恢复通道被永久关闭）。
+// 补偿策略是删除计数键（本次失败按未限流处理）：恢复码限流是 DoS 防护而非
+// 认证边界，可用性优先于严格计数，且调用方会同步降级到内存限流继续防护。
+func (s *MFAService) compensateRecoveryKeyTTL(ctx context.Context, key string, cause error) {
+	if delErr := s.cache.Delete(ctx, key); delErr != nil {
+		slog.Error("MFA恢复码限流Redis补偿删除失败（该用户恢复码可能被永久锁死）",
+			"key", key, "error", delErr, "ttl_error", cause)
+		return
+	}
+	slog.Error("MFA恢复码限流Redis设置TTL失败，已补偿删除计数键", "key", key, "error", cause)
 }
 
 // recordRecoveryFailureMemory 内存降级：记录恢复码验证失败

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -204,8 +205,16 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 }
 
 // GetClientIP 获取客户端真实IP
-// 仅当请求来自受信代理时才信任 X-Real-IP 头
-// 否则直接使用 RemoteAddr（最可靠的来源）
+//
+// 解析顺序（安全优先）：
+//  1. RemoteAddr 始终最可靠：仅当它命中受信代理列表时才考虑解析代理头，
+//     否则直接返回 RemoteAddr，客户端可控的头一律不可信
+//  2. X-Forwarded-For：从右向左遍历，跳过连续的受信代理，取第一个非受信 IP。
+//     从右向左是必须的——最左侧条目完全由客户端伪造，不能作为取 IP 的起点
+//  3. X-Real-IP：兼容仅透传该头的单跳代理（如 Nginx proxy_set_header X-Real-IP）
+//
+// 受信代理列表为空（默认）时只返回 RemoteAddr：宁可把 LB 后所有请求合并到
+// 同一个限流桶（偏严），也不可信任客户端可控的头（偏松）。
 func GetClientIP(r *http.Request) string {
 	// 解析 RemoteAddr（最可靠的来源）
 	remoteAddr := r.RemoteAddr
@@ -219,12 +228,31 @@ func GetClientIP(r *http.Request) string {
 		return r.RemoteAddr
 	}
 
-	// 仅当请求来自受信代理时，才信任 X-Real-IP 头
-	if isTrustedProxy(remoteIP) {
-		if ip := r.Header.Get("X-Real-IP"); ip != "" {
-			if parsedIP := net.ParseIP(ip); parsedIP != nil {
-				return ip
+	// 仅当请求来自受信代理时才解析代理头
+	if !isTrustedProxy(remoteIP) {
+		return remoteAddr
+	}
+
+	// X-Forwarded-For：从右向左跳过受信代理链，取首个非受信 IP
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			candidate := strings.TrimSpace(parts[i])
+			ip := net.ParseIP(candidate)
+			if ip == nil {
+				continue
 			}
+			if isTrustedProxy(ip) {
+				continue
+			}
+			return candidate
+		}
+	}
+
+	// 受信代理单跳部署：兼容仅透传 X-Real-IP 的场景
+	if ip := r.Header.Get("X-Real-IP"); ip != "" {
+		if parsedIP := net.ParseIP(ip); parsedIP != nil {
+			return ip
 		}
 	}
 

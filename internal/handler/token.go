@@ -82,11 +82,11 @@ func (h *TokenHandler) handleRefreshToken(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// 阶段 2.2：调用 RefreshTokenWithClientID 校验 token 客户端归属
-	// 若 token 由 OAuth 流程签发（含 ClientID），则 req.ClientID 必须与之一致
-	// 登录流程签发的 token（ClientID 为 nil）不要求 req.ClientID
-	slog.Debug("handleRefreshToken: 调用authSvc.RefreshTokenWithClientID")
-	resp, err := h.authSvc.RefreshTokenWithClientID(r.Context(), req.RefreshToken, req.ClientID)
+	// 阶段 2.2 + RFC 6749 §6：调用 RefreshTokenWithClientCredentials 校验 token
+	// 客户端归属；机密客户端还必须提供正确的 client_secret，防止 token 泄漏后
+	// 仅凭公开的 client_id 即可持续换发新 token
+	slog.Debug("handleRefreshToken: 调用authSvc.RefreshTokenWithClientCredentials")
+	resp, err := h.authSvc.RefreshTokenWithClientCredentials(r.Context(), req.RefreshToken, req.ClientID, req.ClientSecret)
 	if err != nil {
 		slog.Error("handleRefreshToken: 刷新失败", "error", err)
 		handlerutil.WriteJSONError(w, err)

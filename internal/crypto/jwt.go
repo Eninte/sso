@@ -101,6 +101,10 @@ func NewJWTServiceWithKeyStore(
 //
 // 配置后：LoadKeysFromStore 读取密文行时解密、读取存量明文行后懒加密回写；
 // kek 必须为 32 字节（由 ParseKEK 解析 JWT_KEY_ENCRYPTION_KEY 得到）
+//
+// ⚠️ 未接线：组合根（internal/app）不调用本方法，LoadKeysFromStore 亦然，
+// 因此 DB 密钥存储与信封加密链路在当前版本不会执行（详见
+// service.KeyRotationService 的说明）。
 func (s *JWTService) SetKeyEncryptionKey(kek []byte) error {
 	if len(kek) != 0 && len(kek) != 32 {
 		return fmt.Errorf("KEK must be 32 bytes, got %d", len(kek))
@@ -153,6 +157,11 @@ func (s *JWTService) GetActiveKeyID() string {
 	return s.activeKeyID
 }
 
+// LoadKeysFromStore 从 DB 密钥存储加载全部活跃密钥（T7）
+//
+// ⚠️ 未接线：需要先通过 NewJWTServiceWithKeyStore 构造（组合根未使用），
+// 且运行时由调用方显式触发。当前组合根使用文件式密钥（NewJWTService /
+// LoadKeysForRotation），本方法在生产中不会被调用。
 func (s *JWTService) LoadKeysFromStore(ctx context.Context) error {
 	if s.keyStore == nil {
 		return nil
@@ -284,6 +293,7 @@ func (s *JWTService) GenerateAccessTokenWithKeyID(userID, email, role string, sc
 		RegisteredClaims: jwt.RegisteredClaims{
 			ID:        jti,
 			Issuer:    issuer,
+			Audience:  jwt.ClaimStrings{issuer}, // aud 绑定签发方：下游仅接受发给本服务的 token
 			Subject:   userID,
 			ExpiresAt: jwt.NewNumericDate(now.Add(accessTokenTTL)),
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -366,6 +376,7 @@ func (s *JWTService) ValidateAccessTokenWithContext(ctx context.Context, tokenSt
 		return nil, ErrInvalidToken
 	},
 		jwt.WithIssuer(issuer),
+		jwt.WithAudience(issuer), // 校验 aud：缺失或不匹配的 token 一律拒绝
 		jwt.WithExpirationRequired(),
 	)
 

@@ -248,9 +248,10 @@ cat > /mnt/pool/sso/config/.env << 'EOF'
 SERVER_HOST=0.0.0.0
 SERVER_PORT=9090
 SERVER_ENV=production
-# 内网部署：DB_SSL_MODE=disable 需要 LAN_DEPLOYMENT=true 放宽生产校验，
+# 内网部署：DB_SSL_MODE=disable 需要 INSECURE_PROD_BYPASS=db_ssl 逐项豁免，
 # 否则服务会拒绝启动（与 docker/.env.truenas.example 保持一致）
-LAN_DEPLOYMENT=true
+# 注意：LAN_DEPLOYMENT 已废弃，旧环境升级时务必改成本行，否则校验不豁免会拒绝启动
+INSECURE_PROD_BYPASS=db_ssl
 
 # 数据库配置（指向已部署的 PostgreSQL）
 DB_HOST=your-postgres-host  # 修改为您的 PostgreSQL 主机地址
@@ -258,7 +259,7 @@ DB_PORT=5432
 DB_NAME=sso
 DB_USER=sso
 DB_PASSWORD=YourStrongPassword123!
-DB_SSL_MODE=disable  # 内网可 disable（需 LAN_DEPLOYMENT=true），跨网络必须 require
+DB_SSL_MODE=disable  # 内网可 disable（需 INSECURE_PROD_BYPASS 含 db_ssl），跨网络必须 require
 
 # 数据库连接池配置
 DB_MAX_OPEN_CONNS=100

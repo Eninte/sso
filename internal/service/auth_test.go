@@ -730,7 +730,7 @@ func TestAuthService_RefreshTokenWithAudit(t *testing.T) {
 			IPAddress: "192.168.1.1",
 			UserAgent: "Mozilla/5.0",
 		}
-		newTokenResp, err := authSvc.RefreshTokenWithAudit(ctx, loginResp.RefreshToken, "", auditCtx)
+		newTokenResp, err := authSvc.RefreshTokenWithAudit(ctx, loginResp.RefreshToken, "", "", auditCtx)
 		require.NoError(t, err)
 		assert.NotEmpty(t, newTokenResp.AccessToken)
 		assert.NotEmpty(t, newTokenResp.RefreshToken)
@@ -740,7 +740,7 @@ func TestAuthService_RefreshTokenWithAudit(t *testing.T) {
 		auditCtx := &service.AuditContext{
 			IPAddress: "192.168.1.1",
 		}
-		_, err := authSvc.RefreshTokenWithAudit(ctx, "invalid-refresh-token", "", auditCtx)
+		_, err := authSvc.RefreshTokenWithAudit(ctx, "invalid-refresh-token", "", "", auditCtx)
 		assert.Error(t, err)
 	})
 }
@@ -1104,7 +1104,7 @@ func TestAuthService_RefreshTokenWithAudit_VerifyLog(t *testing.T) {
 		require.NoError(t, err)
 
 		auditCtx := &service.AuditContext{IPAddress: "192.168.2.1"}
-		_, err = authSvc.RefreshTokenWithAudit(ctx, loginResp.RefreshToken, "", auditCtx)
+		_, err = authSvc.RefreshTokenWithAudit(ctx, loginResp.RefreshToken, "", "", auditCtx)
 		require.NoError(t, err)
 
 		require.Eventually(t, func() bool {

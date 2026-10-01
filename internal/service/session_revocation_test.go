@@ -150,11 +150,19 @@ func TestChangePassword_RevokesAllTokens(t *testing.T) {
 }
 
 // ============================================================================
-// Account Locked 时撤销所有 Token 测试
+// Account Locked 时的 Token 语义测试
 // ============================================================================
 
-func TestAccountLock_RevokesAllTokens(t *testing.T) {
-	t.Run("账户锁定时撤销所有Token", func(t *testing.T) {
+// TestAccountLock_DoesNotRevokeTokens 验证账户锁定时不再撤销已有 Token
+//
+// 行为变更说明（防锁定 DoS）：
+// 锁定是"有人知道邮箱并连续输错密码"的信号，而非账号失窃的证据。
+// 旧实现在锁定时撤销全部 Token，攻击者可借此每 30 分钟重复锁定任意
+// 已知邮箱的账号，迫使受害者所有设备反复掉线。现在冻结新登录已足以
+// 阻断暴力破解；疑似失窃时的 Token 吊销由 refresh token 重放检测
+// （handleRefreshTokenReplay）与管理员禁用路径负责。
+func TestAccountLock_DoesNotRevokeTokens(t *testing.T) {
+	t.Run("账户锁定不撤销已有Token", func(t *testing.T) {
 		storeInst := mock.New()
 		passwordSvc := crypto.NewPasswordService(4)
 		jwtSvc := createPhase24TestJWTService()
@@ -201,13 +209,26 @@ func TestAccountLock_RevokesAllTokens(t *testing.T) {
 		// （mock.IncrementLoginAttempts 在 attempts >= maxAttempts 时设置 locked=true）
 		_ = err // 不关心返回的错误码
 
-		// 验证所有 token 都被撤销
+		// 账户应处于锁定状态（新登录被冻结）
+		lockedUser, getErr := storeInst.GetByID(ctx, user.ID)
+		require.NoError(t, getErr)
+		assert.Equal(t, model.UserStatusLocked, lockedUser.Status, "账户应被锁定")
+		assert.NotNil(t, lockedUser.LockedUntil, "应设置锁定时间")
+
+		// 但已有 Token 不得被撤销（防止锁定 DoS 迫使受害者反复掉线）
 		for _, tok := range []*model.Token{token1, token2} {
-			revoked, err := storeInst.GetTokenByAccessToken(ctx, tok.AccessToken)
+			notRevoked, err := storeInst.GetTokenByAccessToken(ctx, tok.AccessToken)
 			require.NoError(t, err)
-			assert.NotNil(t, revoked.RevokedAt,
-				"账户锁定后 token %s 应被撤销", tok.ID)
+			assert.Nil(t, notRevoked.RevokedAt,
+				"账户锁定后 token %s 不应被撤销", tok.ID)
 		}
+
+		// 锁定期间新登录必须被拒绝
+		_, err = authSvc.LoginWithAudit(ctx, &model.LoginRequest{
+			Email:    user.Email,
+			Password: "CorrectPass123!",
+		}, auditCtx)
+		assert.ErrorIs(t, err, service.ErrAccountLocked)
 	})
 }
 

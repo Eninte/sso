@@ -18,21 +18,37 @@ import (
 
 // validateUserCredentials 验证用户凭据：查询用户 → 检查邮箱验证/账户状态 → 验证密码
 // 密码错误时返回 user 对象（非 nil），供 handleLoginFailure 复用避免重复查询
+//
+// 防账号枚举（时序侧信道）：
+//   - 用户不存在时也执行一次等成本 dummy bcrypt 再返回，与"用户存在+密码错误"
+//     的耗时一致（cost=12 约 200ms vs 不存在时 <1ms 的差异可被远端测量）
+//   - 邮箱未验证路径同样先执行 dummy bcrypt，避免第三种耗时画像
 func (s *AuthService) validateUserCredentials(ctx context.Context, email, password string) (*model.User, error) {
 	logger := logging.WithContext(ctx)
 	// 查询用户
 	user, err := s.store.GetByEmail(ctx, email)
 	if err != nil {
+		if apperrors.Is(err, store.ErrNotFound) {
+			// 用户不存在：执行 dummy bcrypt 均衡耗时，再返回通用凭据错误
+			if s.passwordSvc != nil {
+				_ = s.passwordSvc.VerifyDummyPassword(password)
+			}
+			return nil, ErrInvalidCredentials
+		}
 		return nil, serviceutil.HandleStoreError(err, ErrInvalidCredentials)
 	}
 
 	// 检查邮箱是否已验证
 	if !user.EmailVerified {
 		logger.Debug("用户尝试使用未验证邮箱登录", "user_id", user.ID)
+		// 均衡耗时：未验证分支不执行真实 bcrypt，用 dummy 比较抹平差异
+		if s.passwordSvc != nil {
+			_ = s.passwordSvc.VerifyDummyPassword(password)
+		}
 		// 不暴露邮箱未验证状态，返回通用凭据错误
-		// 同时触发发送验证邮件，帮助用户完成验证
+		// 同时异步触发发送验证邮件，帮助用户完成验证
 		if s.userSvc != nil {
-			_ = s.userSvc.SendVerificationEmail(ctx, user.ID)
+			s.sendVerificationEmailAsync(ctx, user.ID)
 		}
 		// 返回nil用户，避免触发handleLoginFailure的登录失败计数
 		// 合法用户未验证邮箱不应被锁定
@@ -68,6 +84,26 @@ func (s *AuthService) validateUserCredentials(ctx context.Context, email, passwo
 	return user, nil
 }
 
+// sendVerificationEmailAsync 异步发送邮箱验证邮件
+//
+// 登录路径的自动补发必须异步化：同步调用会在请求线程内执行令牌生成、
+// 写库与 SMTP 会话（默认 dial 10s / total 30s），慢 SMTP 时少量并发即可
+// 占满连接与 goroutine；且登录端点属于敏感限流端点，同步 SMTP 会把它
+// 变成邮件轰炸的放大器。异步化后请求立即返回，邮件失败仅记日志
+// （邮件限流 5 封/小时/邮箱仍生效，轰炸面由该限流控制）。
+func (s *AuthService) sendVerificationEmailAsync(ctx context.Context, userID string) {
+	logger := logging.WithContext(ctx)
+	// 主请求 ctx 取消不应取消邮件发送（Go 1.21+）
+	asyncCtx := context.WithoutCancel(ctx)
+	userSvc := s.userSvc
+	safego.Go(logger, "异步发送登录触发的验证邮件", func() {
+		if err := userSvc.SendVerificationEmail(asyncCtx, userID); err != nil {
+			// 阶段 D 审查修复（H5）：email 错误可能含 SMTP 主机/端口
+			logger.Error("异步发送验证邮件失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", userID)
+		}
+	})
+}
+
 // handleLoginFailure 处理登录失败：递增失败次数（超阈值则锁定）+ 记录指标与审计日志
 // 数据库错误时返回错误，防止攻击者通过触发DB错误绕过账户锁定机制
 func (s *AuthService) handleLoginFailure(ctx context.Context, user *model.User, auditCtx *AuditContext) error {
@@ -93,14 +129,11 @@ func (s *AuthService) handleLoginFailure(ctx context.Context, user *model.User, 
 		}
 		logger.Warn("账户因多次登录失败被锁定", "user_id", user.ID, "attempts", attempts)
 
-		// 阶段 2.4：账户锁定时撤销所有 token，防止攻击者已获取的 token 继续使用
-		// 失败不影响主流程（锁定已生效），仅记录警告日志
-		if err := s.store.RevokeAllUserTokens(ctx, user.ID); err != nil {
-			// 阶段 D 审查修复（H5）：store 错误可能含 DSN
-			logger.Warn("账户锁定时撤销用户Token失败", "error", logging.SanitizeDBURL(err.Error()), "user_id", user.ID)
-		}
-		// 同步清 token 缓存，确保撤销立即生效
-		s.invalidateUserTokenCache(ctx, user.ID)
+		// 注意：锁定不再撤销该用户的全部 Token。
+		// 原因：锁定是"有人知道邮箱并连续输错密码"的信号，而非账号失窃的证据；
+		// 攻击者可借此每 30 分钟重复锁定任意已知邮箱的账号，迫使受害者所有设备
+		// 反复掉线（可用性 DoS）。冻结新登录已足以阻断暴力破解；
+		// 真正疑似失窃时的 Token 吊销由 refresh token 重放检测与管理员禁用负责。
 	}
 
 	// 记录登录失败指标

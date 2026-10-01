@@ -366,34 +366,38 @@ func GetIsAdminFromContext(ctx context.Context) bool {
 func BasicAuth(username, password string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Fail-closed：凭据未配置时拒绝所有请求。
+			// 不能在配置缺失时静默放行 /metrics，否则任何未配置认证的
+			// 部署（开发/测试/误配 staging）都会无保护暴露内部指标。
 			if username == "" || password == "" {
-				next.ServeHTTP(w, r)
+				w.Header().Set("WWW-Authenticate", `Basic realm="Metrics"`)
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
 
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
 				w.Header().Set("WWW-Authenticate", `Basic realm="Metrics"`)
-				http.Error(w, "未授权", http.StatusUnauthorized)
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
 
 			const prefix = "Basic "
 			if !strings.HasPrefix(authHeader, prefix) {
-				http.Error(w, "无效的认证头格式", http.StatusUnauthorized)
+				http.Error(w, "invalid authorization header format", http.StatusUnauthorized)
 				return
 			}
 
 			encoded := authHeader[len(prefix):]
 			decoded, err := base64Decode(encoded)
 			if err != nil {
-				http.Error(w, "无效的编码格式", http.StatusUnauthorized)
+				http.Error(w, "invalid base64 encoding", http.StatusUnauthorized)
 				return
 			}
 
 			parts := strings.SplitN(decoded, ":", 2)
 			if len(parts) != 2 {
-				http.Error(w, "无效的凭据格式", http.StatusUnauthorized)
+				http.Error(w, "invalid credential format", http.StatusUnauthorized)
 				return
 			}
 
@@ -402,7 +406,7 @@ func BasicAuth(username, password string) func(http.Handler) http.Handler {
 
 			if !usernameMatch || !passwordMatch {
 				w.Header().Set("WWW-Authenticate", `Basic realm="Metrics"`)
-				http.Error(w, "未授权", http.StatusUnauthorized)
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
 

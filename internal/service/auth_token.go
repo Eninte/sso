@@ -122,11 +122,14 @@ func (s *AuthService) handleRefreshTokenReplay(ctx context.Context, userID, refr
 //   - 一次性：WHERE rotated_at IS NULL 保证只能轮换一次
 //   - 重放检测：RowsAffected==0 时视为被盗用，撤销全部 token
 //   - 客户端归属：拒绝跨客户端使用 refresh token
+//   - 机密客户端认证：token 归属于机密客户端时，必须提供正确的 client_secret
+//     （RFC 6749 §6 refresh_token grant 的客户端认证要求）
 //
 // 参数：
 //   - clientID: 调用方传入的客户端 ID；空字符串表示不校验（向后兼容登录流程）
 //     OAuth token 流程必须传 clientID
-func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken, clientID string, auditCtx *AuditContext) (*model.LoginResponse, error) {
+//   - clientSecret: 客户端密钥；仅当 token 归属于机密客户端时校验，其余场景忽略
+func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken, clientID, clientSecret string, auditCtx *AuditContext) (*model.LoginResponse, error) {
 	logger := logging.WithContext(ctx)
 	logger.Debug("RefreshToken: 开始刷新Token", "refresh_token_length", len(refreshToken))
 
@@ -164,30 +167,9 @@ func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken, c
 		return nil, s.handleRefreshTokenReplay(ctx, tokenRecord.UserID, refreshToken, auditCtx)
 	}
 
-	// 4. 阶段 2.2: 校验客户端归属
-	// 若 token 由 OAuth 流程签发（ClientID 不为 nil），则调用方必须传相同的 clientID
-	// 防御 token 替换攻击：攻击者无法用自己客户端的凭据刷新其他客户端签发的 token
-	if tokenRecord.ClientID != nil && *tokenRecord.ClientID != "" {
-		if clientID == "" {
-			logger.Warn("RefreshToken: OAuth签发的Token未传client_id",
-				"token_id", tokenRecord.ID,
-				"token_client_id", *tokenRecord.ClientID,
-			)
-			return nil, ErrClientMismatch
-		}
-		if *tokenRecord.ClientID != clientID {
-			logger.Warn("RefreshToken: client_id与Token归属不一致",
-				"token_id", tokenRecord.ID,
-				"token_client_id", *tokenRecord.ClientID,
-				"request_client_id", clientID,
-			)
-			auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventSuspiciousActivity), tokenRecord.UserID, map[string]interface{}{
-				"reason":            "refresh_token_client_mismatch",
-				"token_client_id":   *tokenRecord.ClientID,
-				"request_client_id": clientID,
-			})
-			return nil, ErrClientMismatch
-		}
+	// 4+4.5 客户端归属与机密客户端认证（合并为一个收口函数）
+	if err := s.validateRefreshClientBinding(ctx, tokenRecord, clientID, clientSecret); err != nil {
+		return nil, err
 	}
 
 	// 5. 获取用户、检查状态
@@ -268,13 +250,109 @@ func (s *AuthService) RefreshTokenWithAudit(ctx context.Context, refreshToken, c
 // RefreshToken 兼容旧接口：刷新 Token（不校验 clientID）
 // 保留用于登录流程签发的 token（ClientID 为 nil）刷新
 func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (*model.LoginResponse, error) {
-	return s.RefreshTokenWithAudit(ctx, refreshToken, "", nil)
+	return s.RefreshTokenWithAudit(ctx, refreshToken, "", "", nil)
 }
 
-// RefreshTokenWithClientID 携带 clientID 刷新 Token（阶段 2.2）
-// 用于 OAuth 流程签发的 token 刷新，校验 clientID 与 token 归属一致
-func (s *AuthService) RefreshTokenWithClientID(ctx context.Context, refreshToken, clientID string) (*model.LoginResponse, error) {
-	return s.RefreshTokenWithAudit(ctx, refreshToken, clientID, nil)
+// RefreshTokenWithClientCredentials 携带客户端凭据刷新 Token（阶段 2.2 + RFC 6749 §6）
+// 用于 OAuth 流程签发的 token 刷新：校验 clientID 与 token 归属一致，
+// 且机密客户端必须提供正确的 client_secret
+func (s *AuthService) RefreshTokenWithClientCredentials(ctx context.Context, refreshToken, clientID, clientSecret string) (*model.LoginResponse, error) {
+	return s.RefreshTokenWithAudit(ctx, refreshToken, clientID, clientSecret, nil)
+}
+
+// validateRefreshClientBinding 校验刷新请求的客户端绑定（阶段 2.2 + RFC 6749 §6）
+//
+// 两道校验合并为一个收口点，保证刷新路径不存在漏检分支：
+//  1. 客户端归属：token 由 OAuth 流程签发（ClientID 非空）时，调用方必须传
+//     相同的 clientID——防御 token 替换攻击（用 A 客户端的凭据刷新 B 客户端
+//     签发的 token）。登录流程签发的 token（ClientID 为 nil）不校验。
+//  2. 机密客户端认证：token 归属于机密客户端时，必须提供正确的 client_secret；
+//     公共客户端（public_client=true）不持有密钥，仅靠归属校验。
+func (s *AuthService) validateRefreshClientBinding(ctx context.Context, tokenRecord *model.Token, clientID, clientSecret string) error {
+	logger := logging.WithContext(ctx)
+
+	// 登录流程签发的 token：无客户端绑定，直接放行
+	if tokenRecord.ClientID == nil || *tokenRecord.ClientID == "" {
+		return nil
+	}
+
+	tokenClientID := *tokenRecord.ClientID
+
+	// 1. 客户端归属校验
+	if clientID == "" {
+		logger.Warn("RefreshToken: OAuth签发的Token未传client_id",
+			"token_id", tokenRecord.ID,
+			"token_client_id", tokenClientID,
+		)
+		return ErrClientMismatch
+	}
+	if tokenClientID != clientID {
+		logger.Warn("RefreshToken: client_id与Token归属不一致",
+			"token_id", tokenRecord.ID,
+			"token_client_id", tokenClientID,
+			"request_client_id", clientID,
+		)
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventSuspiciousActivity), tokenRecord.UserID, map[string]interface{}{
+			"reason":            "refresh_token_client_mismatch",
+			"token_client_id":   tokenClientID,
+			"request_client_id": clientID,
+		})
+		return ErrClientMismatch
+	}
+
+	// 2. 机密客户端密钥认证（RFC 6749 §6）
+	if err := s.verifyRefreshClientSecret(ctx, tokenClientID, clientSecret); err != nil {
+		logger.Warn("RefreshToken: 机密客户端密钥校验失败",
+			"token_id", tokenRecord.ID,
+			"token_client_id", tokenClientID,
+			"has_secret", clientSecret != "",
+		)
+		auditutil.SafeAuditLog(ctx, s.auditSvc, string(model.EventSuspiciousActivity), tokenRecord.UserID, map[string]interface{}{
+			"reason":          "invalid_client_secret",
+			"token_client_id": tokenClientID,
+		})
+		return apperrors.ErrInvalidClient
+	}
+
+	return nil
+}
+
+// verifyRefreshClientSecret 校验刷新目标客户端的身份
+//
+// 规则：
+//   - 公共客户端（public_client=true，如 SPA/移动端 + PKCE）：不持有密钥，直接放行
+//   - 机密客户端：必须提供非空且 bcrypt 校验通过的 client_secret（RFC 6749 §6）
+//
+// 设计说明：直接回源 DB 读取 secret 哈希而不走客户端缓存——缓存条目经 JSON
+// 序列化，ClientSecret 带 json:"-" 标签不会进入缓存，命中时该字段为空；
+// bcrypt 校验本身就是主要开销，多一次 SELECT 可忽略。
+// 任何异常（客户端不存在、passwordSvc 未初始化、密钥哈希为空）均 fail-closed。
+func (s *AuthService) verifyRefreshClientSecret(ctx context.Context, clientID, clientSecret string) error {
+	dbClient, err := s.store.GetByClientID(ctx, clientID)
+	if err != nil {
+		// 阶段 D 审查修复（H5）：store 错误可能含 DSN
+		logging.WithContext(ctx).Warn("RefreshToken: 查询客户端失败",
+			"client_id", clientID,
+			"error", logging.SanitizeDBURL(err.Error()),
+		)
+		return apperrors.ErrInvalidClient
+	}
+
+	// 公共客户端无需密钥认证
+	if dbClient.PublicClient {
+		return nil
+	}
+
+	// 机密客户端：缺 secret、服务未初始化或哈希为空一律拒绝（fail-closed）
+	if clientSecret == "" || s.passwordSvc == nil || dbClient.ClientSecret == "" {
+		return apperrors.ErrInvalidClient
+	}
+
+	if err := s.passwordSvc.VerifyPassword(dbClient.ClientSecret, clientSecret); err != nil {
+		return apperrors.ErrInvalidClient
+	}
+
+	return nil
 }
 
 // ============================================================================

@@ -79,7 +79,7 @@ func TestBasicAuth_Middleware(t *testing.T) {
 	metricsSvc := metrics.NewService()
 	metricsHandler := handler.NewMetricsHandler(metricsSvc)
 
-	t.Run("无认证配置时直接通过", func(t *testing.T) {
+	t.Run("无认证配置时拒绝访问", func(t *testing.T) {
 		middleware := middleware.BasicAuth("", "")
 		handler := middleware(http.HandlerFunc(metricsHandler.HandleMetrics))
 
@@ -88,7 +88,7 @@ func TestBasicAuth_Middleware(t *testing.T) {
 
 		handler.ServeHTTP(w, req)
 
-		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
 	})
 
 	t.Run("配置认证后无凭据返回401", func(t *testing.T) {
