@@ -6,7 +6,7 @@
 # --------------------------------------------------------------------------
 # 阶段1: 构建
 # --------------------------------------------------------------------------
-FROM golang:1.26.6-alpine AS builder
+FROM golang:1.26.10-alpine AS builder
 
 # Alpine 镜像源（默认阿里云，海外构建可通过 --build-arg APK_MIRROR=dl-cdn.alpinelinux.org 覆盖）
 ARG APK_MIRROR=mirrors.aliyun.com

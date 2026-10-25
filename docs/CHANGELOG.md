@@ -17,6 +17,7 @@
 - **账户锁定不再撤销全部 Token**：锁定是"有人知道邮箱并连续输错密码"的信号而非失窃证据，攻击者可借此每 30 分钟重复锁定任意已知邮箱账号、迫使受害者所有设备反复掉线。改为仅冻结新登录（Refresh token 重放检测与管理员禁用路径仍负责失窃场景的吊销）
 - **`LAN_DEPLOYMENT` 一键总开关移除，改为 `INSECURE_PROD_BYPASS` 逐项豁免**：原开关一键放开全部 10 项生产校验（含 metrics 认证、MFA 密钥、CORS、HTTPS base URL），一次误配即让生产在无 CORS 限制、无指标认证、弱 MFA 密钥下静默运行。现每个豁免必须按名称显式声明（13 个具名项），未知项名拒绝启动；旧开关设置后仅记录错误日志。**部署迁移**：使用 `LAN_DEPLOYMENT=true` 的环境（含 `docker/.env.truenas.example`）升级后需按需改为 `INSECURE_PROD_BYPASS=db_ssl` 等，否则校验生效会拒绝启动
 - **KEK 生产必填降级为告警**：`JWT_KEY_ENCRYPTION_KEY` 此前在 `KEY_ROTATION_ENABLED=true` 时生产硬必填，但 DB 密钥轮换与信封加密链路（`KeyRotationService`/`LoadKeysFromStore`/`SetKeyEncryptionKey`）在组合根中从未接线，为一个不会执行的路径强制要密钥属于误导。格式校验（64 位 hex）仍硬生效，缺失改为告警，相关代码补充"未接线"标注
+- **Go 工具链升级到 1.26.10，消除全部标准库漏洞**：`govulncheck` 在 go1.26.6 下报告 **12 个可达 stdlib 漏洞**（`net/http` 6 项、`html/template` 2 项、`crypto/x509` / `crypto/tls` / `mime/multipart` 各 1 项），修复落在 1.26.9 / 1.26.10，Security Scan 的 govulncheck 步骤失败并连带 skip Build 与 Docker Build。CI `go-version` 升级为 `1.26.10`（5 处）、Docker 构建镜像升级为 `golang:1.26.10-alpine`、`go.mod` go 指令升级为 `1.26.10`。升级后 `govulncheck` 报告 **0 可达漏洞**（仍有 3 个模块级漏洞在依赖中，但代码不可达，不影响退出码）
 
 ### Fixed
 

@@ -26,13 +26,13 @@ SSO 服务是一个生产级单点登录（Single Sign-On）微服务，基于 G
 
 | 文件/目录 | 作用 |
 |----------|------|
-| `go.mod` | Go 模块定义，模块名 `github.com/example/sso`，Go 版本 `1.26.6` |
+| `go.mod` | Go 模块定义，模块名 `github.com/example/sso`，Go 版本 `1.26.10` |
 | `Makefile` | 构建、测试、覆盖率、迁移、Docker、压力测试、代码分析等全量命令 |
 | `.env.example` | 配置模板，所有配置项的默认值与说明 |
 | `.env.test` | 测试环境配置（含真实凭据，**不可提交/分发**） |
 | `.golangci.yml` | golangci-lint 配置，`enable-all: true` 并显式禁用部分规则 |
 | `.github/workflows/ci.yml` | CI/CD 流水线：test、lint、security、e2e、build、docker |
-| `docker/Dockerfile` | 多阶段 Docker 构建，基于 `golang:1.26.6-alpine` |
+| `docker/Dockerfile` | 多阶段 Docker 构建，基于 `golang:1.26.10-alpine` |
 | `docker/docker-compose.yml` | 开发/部署 Compose，含 postgres、redis、sso 三服务 |
 | `docker/entrypoint.sh` | 容器启动脚本：自动构造无密码迁移 DSN（密码经 `PGPASSWORD` 子进程环境传递）并执行 `migrate up` |
 | `migrations/` | 数据库迁移脚本，共 023 个版本（3 位序号命名；版本号全局唯一，up/down 成对，CI lint job 会校验） |
@@ -42,7 +42,7 @@ SSO 服务是一个生产级单点登录（Single Sign-On）微服务，基于 G
 
 | 层级 | 技术 | 版本/说明 |
 |------|------|----------|
-| 语言 | Go | 1.26.6（CI 固定版本） |
+| 语言 | Go | 1.26.10（CI 固定版本） |
 | HTTP 路由 | gorilla/mux | 1.8.1 |
 | 数据库 | PostgreSQL | 15+（pgx/v5 驱动） |
 | 缓存 | Redis | 7+（go-redis/v9），也支持内存回退 |

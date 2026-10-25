@@ -1,10 +1,10 @@
 # SSO 单点登录服务
 
-[![Go Version](https://img.shields.io/badge/Go-1.26.6-00ADD8?style=flat&logo=go)](https://golang.org/)
+[![Go Version](https://img.shields.io/badge/Go-1.26.10-00ADD8?style=flat&logo=go)](https://golang.org/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://img.shields.io/badge/CI-Passing-brightgreen.svg)](.github/workflows/ci.yml)
 
-生产级单点登录(SSO)微服务，基于Go 1.26.6构建，支持OAuth 2.0和OpenID Connect协议。为内部和外部应用提供统一、安全的认证服务。
+生产级单点登录(SSO)微服务，基于Go 1.26.10构建，支持OAuth 2.0和OpenID Connect协议。为内部和外部应用提供统一、安全的认证服务。
 
 ## 功能特性
 
@@ -50,7 +50,7 @@
 
 ### 前置要求
 
-- Go 1.26.6+（CI 使用 1.26.6）
+- Go 1.26.10+（CI 使用 1.26.10）
 - Docker & Docker Compose
 - PostgreSQL 15+
 - Redis 7+
