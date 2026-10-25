@@ -73,6 +73,7 @@ __pycache__/
 Thumbs.db
 
 # AI工具配置
+.workbuddy/
 .opencode/
 .kilo/
 .kiro/
