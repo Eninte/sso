@@ -145,6 +145,40 @@ jobs:
           go-version: '1.26.6'
           cache: true
 
+      - name: Validate migration filenames
+        # golang-migrate 在同一版本号存在多个迁移时直接报 duplicate migration file，
+        # 且只有在连上数据库、打开 source 阶段才暴露（Test/E2E 先后跪在这一步）。
+        # 这里做纯文件名校验，秒级 fail-fast，不依赖 DB。
+        # 注意：同一迁移的 .up.sql / .down.sql 共享版本号属于正常，判重必须按方向分别做。
+        run: |
+          fail=0
+
+          # 1) 同一方向上版本号不得重复
+          for dir in up down; do
+            dup=$(ls migrations/*.${dir}.sql 2>/dev/null \
+                  | sed -E 's#.*/([0-9]+)_.*#\1#' | sort | uniq -d)
+            if [ -n "$dup" ]; then
+              echo "::error::${dir} 方向存在重复版本号：$(echo "$dup" | paste -sd, -)"
+              for v in $dup; do
+                echo "--- 版本 $v ---"
+                ls migrations/ | grep -E "^${v}_.*\.${dir}\.sql$" || true
+              done
+              fail=1
+            fi
+          done
+
+          # 2) 每个迁移必须有 up + down 成对存在
+          unbalanced=$(ls migrations/*.sql | sed -E 's#\.(up|down)\.sql$##' \
+                       | sort | uniq -c | awk '$1 != 2 { print $2 }')
+          if [ -n "$unbalanced" ]; then
+            echo "::error::以下迁移缺少 up 或 down（应各一个）："
+            echo "$unbalanced"
+            fail=1
+          fi
+
+          [ "$fail" -eq 0 ] || exit 1
+          echo "迁移文件校验通过：$(ls migrations/*.up.sql | wc -l) 组 up/down"
+
       - name: Install golangci-lint
         # 预构建二进制用 go1.24 编译，无法分析 go1.26 项目
         # (Error: Go language version go1.24 < targeted Go version 1.26)

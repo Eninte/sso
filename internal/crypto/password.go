@@ -31,7 +31,7 @@ var (
 // dummy 与真实校验之间仍会有耗时差（量级远小于"不执行 bcrypt"时的 ~200ms），
 // 需要完全对齐时应将本常量按实际 cost 重新生成。
 //
-//nolint:gosec // G101 误报：这是用于耗时均衡的 bcrypt 哈希常量，不是凭据
+// #nosec G101 -- 这是用于耗时均衡的 bcrypt 哈希常量，不是凭据
 const dummyPasswordHash = "$2a$12$MjZI59ALN.C/5T4GW5CUG.s11mmiVyzsFsziVxrVMaKQJmN2UCQyi"
 
 // PasswordService 密码服务

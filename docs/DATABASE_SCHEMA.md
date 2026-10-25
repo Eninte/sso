@@ -92,8 +92,8 @@ Access Token 和 Refresh Token 的持久化存储，支持撤销和过期管理�
 | 列 | 类型 | 约束 | 默认值 | 说明 |
 |---|------|------|--------|------|
 | `id` | UUID | PK | `gen_random_uuid()` | 内部 ID |
-| `access_token` | VARCHAR(500) | UNIQUE, NOT NULL | — | JWT Access Token |
-| `refresh_token` | VARCHAR(500) | UNIQUE, NULLABLE | NULL | 32 字节随机 Refresh Token |
+| `access_token` | VARCHAR(500) | NULLABLE | NULL | **已废弃**：迁移 `019` 起明文不落库，恒为 NULL（查询用 `access_token_hash`） |
+| `refresh_token` | VARCHAR(500) | NULLABLE | NULL | **已废弃**：迁移 `019` 起明文不落库，恒为 NULL（查询用 `refresh_token_hash`） |
 | `user_id` | UUID | FK → users(id) ON DELETE CASCADE | — | 所属用户 |
 | `client_id` | VARCHAR(255) | FK → oauth_clients(client_id), NULLABLE | NULL | 所属客户端 |
 | `scopes` | TEXT[] | NULLABLE | `'{}'` | 已授予的权限范围 |
@@ -106,12 +106,12 @@ Access Token 和 Refresh Token 的持久化存储，支持撤销和过期管理�
 | 索引名 | 列 | 类型 | 用途 |
 |--------|-----|------|------|
 | `idx_tokens_user_id` | `user_id` | BTREE | 按用户查找 Token |
-| `idx_tokens_access_token` | `access_token` | UNIQUE | 按 Access Token 查找 |
-| `idx_tokens_refresh_token` | `refresh_token` | UNIQUE | 按 Refresh Token 查找 |
 | `idx_tokens_expires_at` | `expires_at` | BTREE | 过期清理查询 |
 | `idx_tokens_user_active` | `user_id` WHERE `revoked_at IS NULL` | PARTIAL | 活跃 Token 查询 |
 | `idx_tokens_expired` | `expires_at` WHERE `expires_at < NOW()` | PARTIAL | 过期 Token 查询 |
 | `idx_tokens_client_id` | `client_id` | BTREE | 按客户端查找 |
+
+> 迁移 `023_drop_dead_token_plaintext_indexes`（up/down 可逆）删除了 4 个建在已废弃明文列上的死索引：`tokens_access_token_key` / `tokens_refresh_token_key`（003 的列级 UNIQUE 约束，需以 `ALTER TABLE ... DROP CONSTRAINT` 删除）与 `idx_tokens_access_token` / `idx_tokens_refresh_token`（015 REINDEX 保留）。两列自迁移 `019` 起恒为 NULL，PostgreSQL 不会使用建在其上的索引，属于纯写放大。唯一性语义不受影响，由 `idx_tokens_refresh_token_hash_unique`（迁移 018）承担。
 
 ### 级联删除
 

@@ -23,6 +23,7 @@
 - **mock store 与 Postgres 三处语义分叉**（单测通过而生产行为不同）：`GetByClientID`/`ListClients`/`StoreAuditLog`/`ListAuditLogs` 返回 map 内共享指针（调用方一写即竞态）改为拷贝语义；`CleanupExpired` 漏清 `verification_tokens`/`reset_tokens` 两张表（Postgres 清 4 张）已对齐；`DeleteUser`/`DeleteKey` 在"行不存在"时的 ErrNotFound 返回值与 Postgres 相反已对齐
 - **安全关键错误路径"结构性不可测"**：mock 的 63 个接口方法中 15 个没有错误注入字段，其中 4 个正好承载 fail-secure 逻辑（账户锁定防 DB 错误绕过、MFA 恢复码、重置令牌/授权码重放防护），而 `TestLoginFailureCounter_DatabaseError` 等两个名为 DatabaseError 的测试实际未注入任何错误，制造了"已覆盖"的假象。补齐全部注入字段并重写测试，另新增 fail-secure 回归测试 4 项
 - **空目录误导**：删除 `internal/audit`（含 11 个子目录）、`cmd/security-audit`、`cmd/mockserver`、`cmd/coverage-check`（审计功能实际位于 `internal/service/audit.go` + `auditutil`）
+- **CI 流水线三处失败（Test / Security Scan / E2E）**：① **迁移版本号撞车**——`022_add_nonce_to_authorization_codes`（`9c9bd97`）与新增的 `022_drop_dead_token_plaintext_indexes`（`e777216`）同为 022，golang-migrate 在打开 source 阶段即报 `duplicate migration file`，Test 与 E2E 两个 job 均跪在 "Run database migrations"（后续步骤全被 skip，Build/Docker 连带 skipped）。死索引迁移重命名为 `023_`（不能反向重命名已推送并已在环境应用的 022）。② **gosec 不识别 `//nolint:gosec`**——那是 golangci-lint 的指令，gosec CLI 只认 `#nosec`，`dummyPasswordHash` 与 `INSECURE_PROD_BYPASS` 枚举常量共 7 处 G101 误报使 Security Scan 失败，改为项目既有惯例的逐行 `#nosec G101 -- 理由`。③ **迁移文件名校验前移**——lint job 新增 `Validate migration filenames` 步骤：按 up/down 方向分别判版本号唯一、并校验每个迁移 up/down 成对，纯文件名检查不依赖 DB，秒级 fail-fast，避免同类撞车再次拖到连库阶段才暴露
 
 ### Changed
 

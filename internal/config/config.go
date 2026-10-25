@@ -439,20 +439,20 @@ func validateProductionConfig(c *Config) error {
 // 生产校验豁免项名称（INSECURE_PROD_BYPASS 逗号分隔的可选值）
 // 每项豁免只放开对应的一项校验，必须在配置中按名称显式列出
 //
-//nolint:gosec // G101 误报：这些是配置枚举值名称，不是硬编码凭据
+// 逐行 #nosec G101：这些是配置枚举值名称，不是硬编码凭据。
 const (
-	prodBypassDBSSL             = "db_ssl"
-	prodBypassRateLimit         = "rate_limit"
-	prodBypassMaxLoginAttempts  = "max_login_attempts"
-	prodBypassCORSLocalhost     = "cors_localhost"
-	prodBypassCORSDefault       = "cors_default"
-	prodBypassJWTIssuer         = "jwt_issuer"
-	prodBypassSMTPHost          = "smtp_host"
-	prodBypassMetricsAuth       = "metrics_auth"
-	prodBypassRedisPassword     = "redis_password"
-	prodBypassPublicBaseURL     = "public_base_url"
-	prodBypassJWTKeyPermissions = "jwt_key_permissions"
-	prodBypassMFARecoveryKey    = "mfa_recovery_key"
+	prodBypassDBSSL             = "db_ssl"              // #nosec G101 -- 豁免项名称，非凭据
+	prodBypassRateLimit         = "rate_limit"          // #nosec G101 -- 豁免项名称，非凭据
+	prodBypassMaxLoginAttempts  = "max_login_attempts"  // #nosec G101 -- 豁免项名称，非凭据
+	prodBypassCORSLocalhost     = "cors_localhost"      // #nosec G101 -- 豁免项名称，非凭据
+	prodBypassCORSDefault       = "cors_default"        // #nosec G101 -- 豁免项名称，非凭据
+	prodBypassJWTIssuer         = "jwt_issuer"          // #nosec G101 -- 豁免项名称，非凭据
+	prodBypassSMTPHost          = "smtp_host"           // #nosec G101 -- 豁免项名称，非凭据
+	prodBypassMetricsAuth       = "metrics_auth"        // #nosec G101 -- 豁免项名称，非凭据
+	prodBypassRedisPassword     = "redis_password"      // #nosec G101 -- 豁免项名称，非凭据
+	prodBypassPublicBaseURL     = "public_base_url"     // #nosec G101 -- 豁免项名称，非凭据
+	prodBypassJWTKeyPermissions = "jwt_key_permissions" // #nosec G101 -- 豁免项名称，非凭据
+	prodBypassMFARecoveryKey    = "mfa_recovery_key"    // #nosec G101 -- 豁免项名称，非凭据
 )
 
 // knownProdBypasses 豁免项白名单：解析与判定均以此为准，防止拼写漂移
