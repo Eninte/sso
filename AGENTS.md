@@ -143,7 +143,7 @@ SSO/
 | `DB_SSL_MODE` | `prefer` | **必须为 `require` 或更高** |
 | `BCRYPT_COST` | 12 | **必须 >= 12** |
 | `MFA_RECOVERY_HMAC_KEY` | 空 | **生产必须设置强密钥（>= 32 字节）** |
-| `JWT_KEY_ENCRYPTION_KEY` | 空 | 64 位 hex（`openssl rand -hex 32`），用于 DB 中私钥的 AES-256-GCM 信封加密。**注意：DB 密钥轮换/信封加密链路当前未接线**（`KEY_ROTATION_ENABLED=true` 仅激活文件式过渡公钥），配置了也不会被使用，缺失仅告警 |
+| `JWT_KEY_ENCRYPTION_KEY` | 空 | 64 位 hex（`openssl rand -hex 32`），用于 DB 中私钥的 AES-256-GCM 信封加密。**注意：DB 密钥轮换/信封加密链路当前未接线**（`KEY_ROTATION_ENABLED=true` 仅激活文件式过渡公钥），配置了也不会被使用，缺失仅告警。**接线强制要求**：接线 PR 必须包含运行时断言——`KEY_ROTATION_ENABLED=true` 且走 DB 存储而 KEK 缺失时拒绝启动 |
 | `SOCIAL_STATE_COOKIE_BINDING` | `true` | 社交登录 state 绑定发起方会话（login CSRF 防护），纯 API 客户端可设 `false`（生产关闭会告警） |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | **必须配置生产域名** |
 | `JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH` | `./keys/*.pem` | 必填 |

@@ -16,7 +16,9 @@
 - **关键审计事件强制同步落库**：密码修改/MFA 启停/账户锁定等关键事件有 6 处误用异步 `SafeAuditLog`，channel 拥塞或服务关闭时审计直接丢失，而 `IsCriticalEvent` 判定器全仓库零调用。修复为在 `SafeAuditLog` 内部按清单强制路由到同步 `LogSync`（单一收口点，调用方无法再搞错）；服务不支持同步记录时明确告警而非静默降级
 - **账户锁定不再撤销全部 Token**：锁定是"有人知道邮箱并连续输错密码"的信号而非失窃证据，攻击者可借此每 30 分钟重复锁定任意已知邮箱账号、迫使受害者所有设备反复掉线。改为仅冻结新登录（Refresh token 重放检测与管理员禁用路径仍负责失窃场景的吊销）
 - **`LAN_DEPLOYMENT` 一键总开关移除，改为 `INSECURE_PROD_BYPASS` 逐项豁免**：原开关一键放开全部 10 项生产校验（含 metrics 认证、MFA 密钥、CORS、HTTPS base URL），一次误配即让生产在无 CORS 限制、无指标认证、弱 MFA 密钥下静默运行。现每个豁免必须按名称显式声明（13 个具名项），未知项名拒绝启动；旧开关设置后仅记录错误日志。**部署迁移**：使用 `LAN_DEPLOYMENT=true` 的环境（含 `docker/.env.truenas.example`）升级后需按需改为 `INSECURE_PROD_BYPASS=db_ssl` 等，否则校验生效会拒绝启动
-- **KEK 生产必填降级为告警**：`JWT_KEY_ENCRYPTION_KEY` 此前在 `KEY_ROTATION_ENABLED=true` 时生产硬必填，但 DB 密钥轮换与信封加密链路（`KeyRotationService`/`LoadKeysFromStore`/`SetKeyEncryptionKey`）在组合根中从未接线，为一个不会执行的路径强制要密钥属于误导。格式校验（64 位 hex）仍硬生效，缺失改为告警，相关代码补充"未接线"标注
+- **KEK 生产必填降级为告警**：`JWT_KEY_ENCRYPTION_KEY` 此前在 `KEY_ROTATION_ENABLED=true` 时生产硬必填，但 DB 密钥轮换与信封加密链路（`KeyRotationService`/`LoadKeysFromStore`/`SetKeyEncryptionKey`）在组合根中从未接线，为一个不会执行的路径强制要密钥属于误导。格式校验（64 位 hex）仍硬生效，缺失改为告警，相关代码补充"未接线"标注。**接线强制要求**（已写入 CONFIGURATION.md 与 AGENTS.md）：接线 PR 必须包含运行时断言——`KEY_ROTATION_ENABLED=true` 且走 DB 存储而 KEK 缺失时拒绝启动
+- **dummy bcrypt 静默失效补可观测性**：`validateUserCredentials` 两处防账号枚举的 dummy bcrypt 分支此前在 `passwordSvc` 未装配（组合根装配遗漏）时直接跳过——等耗时均衡消失、登录时序侧信道重新打开，且无任何日志痕迹，只能在生产被时序测量后发现。现补 Error 日志（不含用户输入，避免错误日志随登录量膨胀）；不改变登录行为，正常装配下该分支不触发
+- **配置向导 `.env` 写入顺序确定性**：`WriteEnvFile` 的固定顺序列表未同步 `PUBLIC_BASE_URL`/`TRUSTED_PROXIES`（setup 向导 `allowedEnvKeys` 早已接受这两个键），两键落入 map 随机序遍历分支导致保存的 `.env` 行序逐次不稳定。补入顺序列表（与 `allowedEnvKeys` 序列对齐），读取不受影响
 
 ### Fixed
 

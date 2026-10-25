@@ -32,6 +32,10 @@ func (s *AuthService) validateUserCredentials(ctx context.Context, email, passwo
 			// 用户不存在：执行 dummy bcrypt 均衡耗时，再返回通用凭据错误
 			if s.passwordSvc != nil {
 				_ = s.passwordSvc.VerifyDummyPassword(password)
+			} else {
+				// passwordSvc 缺失时均衡耗时静默失效，账号枚举防护消失且无痕迹；
+				// 此处仅观测，不改变登录行为（正常装配下该分支不应触发）
+				logger.Error("passwordSvc 未装配，用户不存在分支的 dummy bcrypt 未执行，账号枚举时序防护失效")
 			}
 			return nil, ErrInvalidCredentials
 		}
@@ -44,6 +48,8 @@ func (s *AuthService) validateUserCredentials(ctx context.Context, email, passwo
 		// 均衡耗时：未验证分支不执行真实 bcrypt，用 dummy 比较抹平差异
 		if s.passwordSvc != nil {
 			_ = s.passwordSvc.VerifyDummyPassword(password)
+		} else {
+			logger.Error("passwordSvc 未装配，未验证邮箱分支的 dummy bcrypt 未执行，账号枚举时序防护失效", "user_id", user.ID)
 		}
 		// 不暴露邮箱未验证状态，返回通用凭据错误
 		// 同时异步触发发送验证邮件，帮助用户完成验证

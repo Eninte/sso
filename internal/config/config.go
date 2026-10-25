@@ -995,6 +995,7 @@ func WriteEnvFile(path string, values map[string]string) error {
 		"CORS_ALLOWED_ORIGINS",
 		"METRICS_USERNAME", "METRICS_PASSWORD",
 		"SHUTDOWN_TIMEOUT", "INSECURE_PROD_BYPASS",
+		"PUBLIC_BASE_URL", "TRUSTED_PROXIES",
 	}
 	written := make(map[string]bool)
 	for _, key := range order {

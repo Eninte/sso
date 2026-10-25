@@ -71,6 +71,8 @@ JWT_KEY_ENCRYPTION_KEY=     # DB 中私钥的 AES-256-GCM 信封加密密钥（6
                             # 注意：DB 密钥轮换/信封加密链路当前未接线
                             # （KEY_ROTATION_ENABLED=true 仅激活文件式过渡公钥），
                             # 配置不会生效，缺失仅告警：openssl rand -hex 32
+                            # 接线强制要求：接线 PR 必须包含运行时断言——
+                            # KEY_ROTATION_ENABLED=true 且走 DB 存储而 KEK 缺失时拒绝启动
 ```
 
 ### 5. 安全配置
