@@ -141,6 +141,7 @@ var allowedEnvKeys = map[string]bool{
 	"METRICS_USERNAME":     true, "METRICS_PASSWORD": true,
 	"SHUTDOWN_TIMEOUT": true, "INSECURE_PROD_BYPASS": true,
 	"PUBLIC_BASE_URL": true, "TRUSTED_PROXIES": true, "LAN_DEPLOYMENT": true,
+	"STRICT_KEY_PERMISSIONS": true,
 }
 
 func (h *SetupHandler) HandleSetupSave(w http.ResponseWriter, r *http.Request) {

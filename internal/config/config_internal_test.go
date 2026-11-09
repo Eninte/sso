@@ -1,4 +1,4 @@
-// Package config 内部测试（访问未导出函数 escapeEnvValue）
+// Package config 内部测试（访问未导出函数 escapeEnvValue / validateJWTPrivateKeyPermissions）
 package config
 
 import (
@@ -269,6 +269,80 @@ func TestGetJWTTransitionPubKeyPaths(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+// ============================================================================
+// validateJWTPrivateKeyPermissions 测试
+// ============================================================================
+
+// skipPermTestOnWindows 跳过 Windows（不支持 Unix 权限位，os.Stat 总是返回 0666）
+func skipPermTestOnWindows(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows 不支持 Unix 权限位，跳过权限检查测试")
+	}
+}
+
+func TestValidateJWTPrivateKeyPermissions(t *testing.T) {
+	t.Run("显式关闭_唯一豁免途径", func(t *testing.T) {
+		// STRICT_KEY_PERMISSIONS=false：检查整体跳过，路径不存在也不报错
+		t.Setenv("STRICT_KEY_PERMISSIONS", "false")
+		c := &Config{JWTPrivateKeyPath: "/nonexistent/private.pem"}
+		assert.NoError(t, validateJWTPrivateKeyPermissions(c))
+	})
+
+	t.Run("文件不存在_交由keyloader统一报错", func(t *testing.T) {
+		// 空字符串等同 unset（config 包所有 getEnvXXX 检查 value != ""）
+		t.Setenv("STRICT_KEY_PERMISSIONS", "")
+		c := &Config{JWTPrivateKeyPath: filepath.Join(t.TempDir(), "absent.pem")}
+		assert.NoError(t, validateJWTPrivateKeyPermissions(c))
+	})
+
+	t.Run("权限过开_拒绝_无容器隐式豁免", func(t *testing.T) {
+		skipPermTestOnWindows(t)
+		t.Setenv("STRICT_KEY_PERMISSIONS", "")
+		keyPath := filepath.Join(t.TempDir(), "private.pem")
+		require.NoError(t, os.WriteFile(keyPath, []byte("x"), 0644))
+		// 显式 Chmod 确保权限精确（umask 可能将 0644 降为 0640 等）
+		require.NoError(t, os.Chmod(keyPath, 0644))
+
+		c := &Config{JWTPrivateKeyPath: keyPath}
+		err := validateJWTPrivateKeyPermissions(c)
+		require.Error(t, err, "权限过开必须拒绝，不再有 /.dockerenv 隐式豁免分支")
+		assert.Contains(t, err.Error(), "STRICT_KEY_PERMISSIONS=false", "错误信息应给出显式豁免途径")
+	})
+
+	t.Run("权限0600_通过", func(t *testing.T) {
+		skipPermTestOnWindows(t)
+		t.Setenv("STRICT_KEY_PERMISSIONS", "")
+		keyPath := filepath.Join(t.TempDir(), "private.pem")
+		require.NoError(t, os.WriteFile(keyPath, []byte("x"), 0600))
+		require.NoError(t, os.Chmod(keyPath, 0600))
+
+		c := &Config{JWTPrivateKeyPath: keyPath}
+		assert.NoError(t, validateJWTPrivateKeyPermissions(c))
+	})
+
+	t.Run("相对路径_按工作目录解析", func(t *testing.T) {
+		skipPermTestOnWindows(t)
+		t.Setenv("STRICT_KEY_PERMISSIONS", "")
+
+		// 在临时目录中创建权限过开的私钥，以相对路径引用
+		dir := t.TempDir()
+		keyPath := filepath.Join(dir, "rel.pem")
+		require.NoError(t, os.WriteFile(keyPath, []byte("x"), 0644))
+		require.NoError(t, os.Chmod(keyPath, 0644))
+
+		wd, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(dir)) // t.TempDir 由 t.Cleanup 清理，Chdir 需自行恢复
+		t.Cleanup(func() {
+			_ = os.Chdir(wd)
+		})
+
+		c := &Config{JWTPrivateKeyPath: "rel.pem"}
+		require.Error(t, validateJWTPrivateKeyPermissions(c), "相对路径应解析到权限过开文件并拒绝")
+	})
 }
 
 // 辅助：排序字符串切片（用于断言无序场景）

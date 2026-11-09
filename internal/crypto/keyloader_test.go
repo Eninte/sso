@@ -241,7 +241,7 @@ func TestLoadPublicKeyFromFile_InvalidKey(t *testing.T) {
 // ============================================================================
 
 func TestLoadPrivateKeyFromFile_PermissionTooOpen(t *testing.T) {
-	skipOnWindowsOrContainer(t)
+	skipOnWindows(t)
 	t.Setenv("STRICT_KEY_PERMISSIONS", "true")
 	tmpDir := t.TempDir()
 
@@ -265,8 +265,35 @@ func TestLoadPrivateKeyFromFile_PermissionTooOpen(t *testing.T) {
 	assert.ErrorIs(t, err, crypto.ErrKeyPermissionOpen)
 }
 
+// TestLoadPrivateKeyFromFile_ExplicitDisableSkipsPermCheck 验证显式关闭是唯一豁免途径：
+// STRICT_KEY_PERMISSIONS=false 时权限过开（0644）也放行——环境可见、可审计；
+// 未显式关闭时一律硬拒绝（容器与宿主机一致，无 /.dockerenv 隐式豁免分支）
+func TestLoadPrivateKeyFromFile_ExplicitDisableSkipsPermCheck(t *testing.T) {
+	skipOnWindows(t)
+	t.Setenv("STRICT_KEY_PERMISSIONS", "false")
+	tmpDir := t.TempDir()
+
+	// 生成密钥
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	privateKeyBytes := x509.MarshalPKCS1PrivateKey(privateKey)
+	privateKeyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: privateKeyBytes,
+	})
+
+	// 写入权限过开的私钥文件（0644），显式 Chmod 确保不受 umask 影响
+	keyPath := filepath.Join(tmpDir, "open_key.pem")
+	require.NoError(t, os.WriteFile(keyPath, privateKeyPEM, 0644))
+	require.NoError(t, os.Chmod(keyPath, 0644))
+
+	_, err = crypto.LoadPrivateKeyFromFile(keyPath)
+	assert.NoError(t, err, "STRICT_KEY_PERMISSIONS=false 显式关闭后应放行")
+}
+
 func TestLoadPublicKeyFromFile_PermissionTooOpen(t *testing.T) {
-	skipOnWindowsOrContainer(t)
+	skipOnWindows(t)
 	t.Setenv("STRICT_KEY_PERMISSIONS", "true")
 	tmpDir := t.TempDir()
 

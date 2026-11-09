@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -170,14 +169,12 @@ func validateKeyPath(path string) error {
 	perm := info.Mode().Perm()
 	// 阶段 D 预存问题修复：Windows 不支持 Unix 权限位，os.Stat 总是返回 0666，
 	// 无法通过 Chmod 改变。在 Windows 上跳过权限检查（生产部署目标为 Linux 容器）
+	//
+	// 跳过检查的唯一途径是显式设置 STRICT_KEY_PERMISSIONS=false（环境可见、可审计）。
+	// 不做 /.dockerenv 容器隐式豁免：该检测构成 INSECURE_PROD_BYPASS 显式豁免体系
+	// 之外的隐式开关，且 containerd/CRI-O 运行时不创建该文件，行为不可预期
 	skipPermCheck := runtime.GOOS == "windows" ||
 		os.Getenv("STRICT_KEY_PERMISSIONS") == "false"
-	// 容器环境：K8s Secret 挂载默认 0644，权限过开时告警而非拒绝加载
-	// （消除静默豁免，与 config.go validateJWTPrivateKeyPermissions 行为一致）
-	inContainer := false
-	if _, err := os.Stat("/.dockerenv"); err == nil {
-		inContainer = true
-	}
 
 	// 读取文件内容以确定密钥类型（基于PEM内容而非文件名）
 	data, err := os.ReadFile(path) // #nosec G304 -- 路径已通过前面的验证
@@ -198,18 +195,14 @@ func validateKeyPath(path string) error {
 	isPrivateKey := block.Type == "RSA PRIVATE KEY" || block.Type == "PRIVATE KEY"
 
 	if !skipPermCheck {
-		// 权限要求：私钥不允许组/其他用户任何权限（0077）；
-		// 公钥不允许组/其他用户写权限（0022）
-		permOpen := perm&0022 != 0
 		if isPrivateKey {
-			permOpen = perm&0077 != 0
-		}
-		if permOpen {
-			if inContainer {
-				// 容器环境告警不阻断（K8s Secret 挂载默认 0644），保留可观测痕迹
-				slog.Warn("容器环境内密钥文件权限过开（不阻断加载；建议 K8s Secret 挂载 defaultMode: 0600、Dockerfile chmod 600）",
-					"path", path, "mode", fmt.Sprintf("%o", perm))
-			} else {
+			// 私钥：不允许组和其他用户有任何权限
+			if perm&0077 != 0 {
+				return fmt.Errorf("%w: %o", ErrKeyPermissionOpen, perm)
+			}
+		} else {
+			// 公钥：不允许写权限给组和其他用户
+			if perm&0022 != 0 {
 				return fmt.Errorf("%w: %o", ErrKeyPermissionOpen, perm)
 			}
 		}

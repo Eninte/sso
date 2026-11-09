@@ -18,16 +18,14 @@ import (
 	"github.com/example/sso/internal/crypto"
 )
 
-// skipOnWindowsOrContainer 跳过 Windows 和容器环境（阶段 D 预存问题修复）
-// Windows 不支持 Unix 权限位，权限检查测试无法验证；
-// 容器环境权限检查被禁用。
-func skipOnWindowsOrContainer(t *testing.T) {
+// skipOnWindows 跳过 Windows 环境（阶段 D 预存问题修复）
+// Windows 不支持 Unix 权限位（os.Stat 总是返回 0666），权限检查测试无法验证。
+// 容器环境不再跳过：权限检查已移除 /.dockerenv 隐式豁免，
+// 容器内与宿主机行为一致，可在容器 CI 中真实执行。
+func skipOnWindows(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows 不支持 Unix 权限位，跳过权限检查测试")
-	}
-	if _, err := os.Stat("/.dockerenv"); err == nil {
-		t.Skip("Skipping permission test in Docker container")
 	}
 }
 
@@ -47,7 +45,7 @@ func skipOnWindowsOrContainer(t *testing.T) {
 // Bug Condition: Public key with "private" in filename → incorrectly rejected with 0077 mask
 // Expected Behavior: Public key should be accepted with 0022 mask (no group/other write)
 func TestBugCondition_PublicKeyWithPrivateInPath(t *testing.T) {
-	skipOnWindowsOrContainer(t)
+	skipOnWindows(t)
 	t.Setenv("STRICT_KEY_PERMISSIONS", "true")
 
 	tmpDir := t.TempDir()
@@ -86,7 +84,7 @@ func TestBugCondition_PublicKeyWithPrivateInPath(t *testing.T) {
 // Bug Condition: Private key without "private" in name + 0640 permissions → incorrectly accepted
 // Expected Behavior: Private key should be rejected with 0640 permissions (group read not allowed)
 func TestBugCondition_PrivateKeyWithoutPrivateInName(t *testing.T) {
-	skipOnWindowsOrContainer(t)
+	skipOnWindows(t)
 	t.Setenv("STRICT_KEY_PERMISSIONS", "true")
 
 	tmpDir := t.TempDir()
@@ -122,7 +120,7 @@ func TestBugCondition_PrivateKeyWithoutPrivateInName(t *testing.T) {
 // Bug Condition: Public key content in file named "private.pem" → permission check uses filename
 // Expected Behavior: Permission check should use PEM content (PUBLIC KEY type)
 func TestBugCondition_ContentVsFilenameMismatch(t *testing.T) {
-	skipOnWindowsOrContainer(t)
+	skipOnWindows(t)
 	t.Setenv("STRICT_KEY_PERMISSIONS", "true")
 
 	tmpDir := t.TempDir()
@@ -160,7 +158,7 @@ func TestBugCondition_ContentVsFilenameMismatch(t *testing.T) {
 // Bug Condition: Invalid PEM content → may return permission error
 // Expected Behavior: Should return ErrKeyParseFailed
 func TestBugCondition_CorruptedPEMReturnsParseError(t *testing.T) {
-	skipOnWindowsOrContainer(t)
+	skipOnWindows(t)
 	t.Setenv("STRICT_KEY_PERMISSIONS", "true")
 
 	tmpDir := t.TempDir()

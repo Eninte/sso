@@ -147,6 +147,7 @@ SSO/
 | `SOCIAL_STATE_COOKIE_BINDING` | `true` | 社交登录 state 绑定发起方会话（login CSRF 防护），纯 API 客户端可设 `false`（生产关闭会告警） |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | **必须配置生产域名** |
 | `JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH` | `./keys/*.pem` | 必填 |
+| `STRICT_KEY_PERMISSIONS` | 空（检查启用） | 私钥权限过开（非 600）拒绝启动；显式 `false` 才跳过（无容器隐式豁免） |
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM` | 邮件相关 | 邮件功能必填 |
 | `INSECURE_PROD_BYPASS` | 空 | 逐项显式声明的生产校验豁免（逗号分隔），**不存在总开关**，未知项名拒绝启动。可选值：`db_ssl`、`rate_limit`、`max_login_attempts`、`cors_localhost`、`cors_default`、`jwt_issuer`、`smtp_host`、`metrics_auth`、`redis_password`、`public_base_url`、`jwt_key_permissions`、`mfa_recovery_key`。**公网部署必须留空** |
 
@@ -486,10 +487,10 @@ make deploy             # 默认部署到 192.168.1.3
 3. **lint**：依赖 validate；运行 `golangci-lint`（从源码构建 v1.64.8，10 分钟超时）
 4. **security**：运行 `gosec`（排除 G118/G201/G202/G706/G710）和 `govulncheck`
 5. **e2e**：依赖 validate + lint；启动服务，准备数据，运行 E2E 测试，清理数据
-6. **build**：依赖 test/lint/security/e2e；构建二进制并上传 artifact
+6. **build**：依赖 test/lint/security；构建二进制并上传 artifact（非发布路径，PR 亦运行，不设 e2e 门禁）
 7. **docker**：依赖 test/lint/security/e2e；main 分支触发，构建并推送 Docker Hub 镜像（latest + sha）
 
-> 注意：build 与 docker 均以 e2e 为门禁（E2E 失败不发布）；全部 job 均设置 `timeout-minutes`（5~30 分钟），防止挂死耗满 GitHub Actions 默认 360 分钟。
+> 注意：docker 以 e2e 为发布门禁（E2E 失败不推送镜像，`latest` 被部署环境直接拉取）；build 仅产出 artifact 不设 e2e 门禁。全部 job 均设置 `timeout-minutes`（5~30 分钟），防止挂死耗满 GitHub Actions 默认 360 分钟。
 
 > 注意：CI 中 gosec 的 G118/G201/G202/G706/G710 被排除，详见 workflow 注释。
 

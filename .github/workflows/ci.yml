@@ -36,13 +36,28 @@ jobs:
         # 且只有在连上数据库、打开 source 阶段才暴露（Test/E2E 先后跪在这一步）。
         # 这里做纯文件名校验，秒级 fail-fast，不依赖 DB。
         # 注意：同一迁移的 .up.sql / .down.sql 共享版本号属于正常，判重必须按方向分别做。
+        # 加固：显式 set -euo pipefail（runner 默认 shell 仅带 -eo pipefail）；
+        # nullglob + for 循环替代 ls（无匹配时 ls 失败的 stderr 会被 2>/dev/null 吞掉，
+        # 在 -e 下静默退出无任何诊断）；新增三位序号文件名格式校验（与 AGENTS.md 口径一致）。
         run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          # 0) migrations/ 必须存在迁移文件（目录缺失/为空属于结构异常，显式报错
+          #    而非让后续 glob 静默空转）
+          up_files=(migrations/*.up.sql)
+          if [ ${#up_files[@]} -eq 0 ]; then
+            echo "::error::migrations/ 下未找到任何 .up.sql 迁移文件"
+            exit 1
+          fi
+
           fail=0
 
           # 1) 同一方向上版本号不得重复
           for dir in up down; do
-            dup=$(ls migrations/*.${dir}.sql 2>/dev/null \
-                  | sed -E 's#.*/([0-9]+)_.*#\1#' | sort | uniq -d)
+            dup=$(for f in migrations/*.${dir}.sql; do
+                    basename "$f" | sed -E 's#^([0-9]+)_.*#\1#'
+                  done | sort | uniq -d)
             if [ -n "$dup" ]; then
               echo "::error::${dir} 方向存在重复版本号：$(echo "$dup" | paste -sd, -)"
               for v in $dup; do
@@ -54,16 +69,30 @@ jobs:
           done
 
           # 2) 每个迁移必须有 up + down 成对存在
-          unbalanced=$(ls migrations/*.sql | sed -E 's#\.(up|down)\.sql$##' \
-                       | sort | uniq -c | awk '$1 != 2 { print $2 }')
+          unbalanced=$(for f in migrations/*.sql; do
+                         basename "$f" | sed -E 's#\.(up|down)\.sql$##'
+                       done | sort | uniq -c | awk '$1 != 2 { print $2 }')
           if [ -n "$unbalanced" ]; then
             echo "::error::以下迁移缺少 up 或 down（应各一个）："
             echo "$unbalanced"
             fail=1
           fi
 
+          # 3) 文件名格式：三位序号_名称.(up|down).sql（AGENTS.md「3 位序号命名」）
+          bad=$(for f in migrations/*.sql; do
+                  b=$(basename "$f")
+                  if ! printf '%s' "$b" | grep -qE '^[0-9]{3}_.+\.(up|down)\.sql$'; then
+                    printf '%s\n' "$b"
+                  fi
+                done)
+          if [ -n "$bad" ]; then
+            echo "::error::以下迁移文件名不符合「三位序号_名称.(up|down).sql」格式："
+            echo "$bad"
+            fail=1
+          fi
+
           [ "$fail" -eq 0 ] || exit 1
-          echo "迁移文件校验通过：$(ls migrations/*.up.sql | wc -l) 组 up/down"
+          echo "迁移文件校验通过：${#up_files[@]} 组 up/down"
 
   test:
     name: Test
@@ -385,10 +414,10 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    # E2E 纳入发布门禁：E2E 是唯一覆盖完整 HTTP 链路（服务进程 + 真实 DB/Redis
-    # + 中间件栈）的层级，历史上抓到过单测漏掉的真 bug（缓存命中下客户端密钥
-    # 校验必然失败），不应在 E2E 未通过时发布二进制
-    needs: [test, lint, security, e2e]
+    # 仅构建并上传 artifact，非发布路径，且 PR 上同样运行：
+    # 不设 e2e 门禁，避免无发布意义的 PR 反馈被 E2E 拉长
+    # 发布门禁由 docker job 承担（:latest/:sha 镜像被部署环境直接拉取）
+    needs: [test, lint, security]
     timeout-minutes: 15
 
     steps:
