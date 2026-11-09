@@ -56,7 +56,7 @@
 - **Refresh Token**：有效期7天，支持轮换
 - **Token撤销**：支持即时撤销
 - **明文不落库**：tokens 表与邮箱验证/密码重置令牌仅存储 SHA-256 哈希，查询与轮换均按哈希匹配，明文不出现在数据库、日志与 Redis 缓存键中（token 缓存键同样使用哈希）
-- **轮换私钥信封加密**：启用密钥轮换（DB 密钥存储）时，私钥以 AES-256-GCM 加密落库（密文格式 `v1:gcm:`），KEK 由 `JWT_KEY_ENCRYPTION_KEY`（64 位 hex，生产启用轮换时必填）提供；存量明文私钥在加载时自动懒加密回写，无需迁移脚本
+- **轮换私钥信封加密（当前未接线）**：设计上启用密钥轮换（DB 密钥存储）时私钥以 AES-256-GCM 加密落库（密文格式 `v1:gcm:`），KEK 由 `JWT_KEY_ENCRYPTION_KEY`（64 位 hex）提供；**该链路在组合根中未接线**（`KEY_ROTATION_ENABLED=true` 仅激活文件式过渡公钥），KEK 配置后不会被使用，缺失仅告警（格式校验仍硬生效）
 - **角色变更生效时效**：管理员修改/撤销用户角色时，该用户的全部 refresh token 与会话立即撤销；已签发的 access token 无法召回，最迟在其剩余有效期（≤15 分钟）内自然失效后新角色完全生效
 - **管理员操作防护**：admin 不能修改或删除自己的角色（403）；当目标用户是系统最后一个 active admin 时，降级/禁用/删除均被拒绝（409），防止管理面锁死
 
@@ -97,7 +97,8 @@ SERVER_ENV=production
 DB_SSL_MODE=require
 BCRYPT_COST=14
 MFA_RECOVERY_HMAC_KEY=<32字节以上强随机密钥>
-JWT_KEY_ENCRYPTION_KEY=<64位hex，启用密钥轮换时必填>
+# JWT_KEY_ENCRYPTION_KEY：DB 密钥轮换链路当前未接线，配置后不会被使用
+# （可预生成 64 位 hex 备用：openssl rand -hex 32）
 
 # 建议配置
 RATE_LIMIT_REQUESTS=50
@@ -113,7 +114,7 @@ METRICS_PASSWORD=<strong-password>
 - RSA私钥文件权限设置为600
 - 定期轮换密钥（建议每年）
 - 使用环境变量或密钥管理服务存储敏感配置
-- 启用 DB 密钥轮换时，私钥经 AES-256-GCM 信封加密后落库（KEK 为 `JWT_KEY_ENCRYPTION_KEY`，使用 `openssl rand -hex 32` 生成）
+- DB 密钥轮换/私钥信封加密链路当前未接线，`JWT_KEY_ENCRYPTION_KEY`（`openssl rand -hex 32` 生成）暂不会被使用，可预生成备用
 
 ### 数据库安全
 

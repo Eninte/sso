@@ -660,15 +660,12 @@ func validateProdInitEnabled(c *Config) error {
 
 // validateJWTPrivateKeyPermissions 校验 JWT 私钥文件权限
 // 阶段 4 安全增强：私钥文件必须仅所有者可读写（mode & 0077 == 0）
-// 容器环境或 STRICT_KEY_PERMISSIONS=false 时跳过校验（与 keyloader.go 行为一致）
+// STRICT_KEY_PERMISSIONS=false 时跳过校验（与 keyloader.go 行为一致）
+// 容器环境不硬拒绝启动（Kubernetes Secret 挂载默认权限 0644），
+// 但权限过开时记录告警而非静默跳过（与 keyloader.go 行为一致）
 func validateJWTPrivateKeyPermissions(c *Config) error {
 	// STRICT_KEY_PERMISSIONS=false 时跳过（与 keyloader.go 行为一致）
 	if os.Getenv("STRICT_KEY_PERMISSIONS") == "false" {
-		return nil
-	}
-
-	// 容器环境跳过（Kubernetes Secret 挂载默认权限 0644）
-	if _, err := os.Stat("/.dockerenv"); err == nil {
 		return nil
 	}
 
@@ -690,10 +687,20 @@ func validateJWTPrivateKeyPermissions(c *Config) error {
 		return nil
 	}
 	mode := info.Mode().Perm()
-	if mode&0077 != 0 {
-		return fmt.Errorf("JWT private key file permissions too open (mode=%o), require chmod 600: %s", mode, keyPath)
+	if mode&0077 == 0 {
+		return nil
 	}
-	return nil
+
+	// 容器环境：不硬拒绝启动（K8s Secret 挂载默认 0644，避免破坏存量部署），
+	// 但降级为告警而非静默跳过——容器是项目主力部署形态，静默豁免会让
+	// 生产检查清单「chmod 600」在主流路径整体失效且无任何可观测痕迹
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		slog.Warn("容器环境内 JWT 私钥权限过开（不阻断启动；建议 K8s Secret 挂载 defaultMode: 0600、Dockerfile chmod 600，或显式设置 STRICT_KEY_PERMISSIONS=false）",
+			"mode", fmt.Sprintf("%o", mode), "path", keyPath)
+		return nil
+	}
+
+	return fmt.Errorf("JWT private key file permissions too open (mode=%o), require chmod 600: %s", mode, keyPath)
 }
 
 // validate 验证配置有效性：依次执行数据库、JWT、安全、生产环境校验

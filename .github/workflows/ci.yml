@@ -19,9 +19,57 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # 迁移文件名校验：秒级 fail-fast 前置门禁（test/lint/e2e 的共享依赖）
+  # 版本号撞车（duplicate migration file）此前要到 test/e2e 连库跑 migrate 时才暴露
+  # （白跑数分钟 service container 启动），纯文件名检查不依赖 DB 与 Go 工具链
+  validate:
+    name: Validate Migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Validate migration filenames
+        # golang-migrate 在同一版本号存在多个迁移时直接报 duplicate migration file，
+        # 且只有在连上数据库、打开 source 阶段才暴露（Test/E2E 先后跪在这一步）。
+        # 这里做纯文件名校验，秒级 fail-fast，不依赖 DB。
+        # 注意：同一迁移的 .up.sql / .down.sql 共享版本号属于正常，判重必须按方向分别做。
+        run: |
+          fail=0
+
+          # 1) 同一方向上版本号不得重复
+          for dir in up down; do
+            dup=$(ls migrations/*.${dir}.sql 2>/dev/null \
+                  | sed -E 's#.*/([0-9]+)_.*#\1#' | sort | uniq -d)
+            if [ -n "$dup" ]; then
+              echo "::error::${dir} 方向存在重复版本号：$(echo "$dup" | paste -sd, -)"
+              for v in $dup; do
+                echo "--- 版本 $v ---"
+                ls migrations/ | grep -E "^${v}_.*\.${dir}\.sql$" || true
+              done
+              fail=1
+            fi
+          done
+
+          # 2) 每个迁移必须有 up + down 成对存在
+          unbalanced=$(ls migrations/*.sql | sed -E 's#\.(up|down)\.sql$##' \
+                       | sort | uniq -c | awk '$1 != 2 { print $2 }')
+          if [ -n "$unbalanced" ]; then
+            echo "::error::以下迁移缺少 up 或 down（应各一个）："
+            echo "$unbalanced"
+            fail=1
+          fi
+
+          [ "$fail" -eq 0 ] || exit 1
+          echo "迁移文件校验通过：$(ls migrations/*.up.sql | wc -l) 组 up/down"
+
   test:
     name: Test
     runs-on: ubuntu-latest
+    needs: [validate]
+    timeout-minutes: 30
 
     services:
       postgres:
@@ -134,6 +182,8 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    needs: [validate]
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
@@ -144,40 +194,6 @@ jobs:
         with:
           go-version: '1.26.10'
           cache: true
-
-      - name: Validate migration filenames
-        # golang-migrate 在同一版本号存在多个迁移时直接报 duplicate migration file，
-        # 且只有在连上数据库、打开 source 阶段才暴露（Test/E2E 先后跪在这一步）。
-        # 这里做纯文件名校验，秒级 fail-fast，不依赖 DB。
-        # 注意：同一迁移的 .up.sql / .down.sql 共享版本号属于正常，判重必须按方向分别做。
-        run: |
-          fail=0
-
-          # 1) 同一方向上版本号不得重复
-          for dir in up down; do
-            dup=$(ls migrations/*.${dir}.sql 2>/dev/null \
-                  | sed -E 's#.*/([0-9]+)_.*#\1#' | sort | uniq -d)
-            if [ -n "$dup" ]; then
-              echo "::error::${dir} 方向存在重复版本号：$(echo "$dup" | paste -sd, -)"
-              for v in $dup; do
-                echo "--- 版本 $v ---"
-                ls migrations/ | grep -E "^${v}_.*\.${dir}\.sql$" || true
-              done
-              fail=1
-            fi
-          done
-
-          # 2) 每个迁移必须有 up + down 成对存在
-          unbalanced=$(ls migrations/*.sql | sed -E 's#\.(up|down)\.sql$##' \
-                       | sort | uniq -c | awk '$1 != 2 { print $2 }')
-          if [ -n "$unbalanced" ]; then
-            echo "::error::以下迁移缺少 up 或 down（应各一个）："
-            echo "$unbalanced"
-            fail=1
-          fi
-
-          [ "$fail" -eq 0 ] || exit 1
-          echo "迁移文件校验通过：$(ls migrations/*.up.sql | wc -l) 组 up/down"
 
       - name: Install golangci-lint
         # 预构建二进制用 go1.24 编译，无法分析 go1.26 项目
@@ -191,6 +207,7 @@ jobs:
   security:
     name: Security Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout code
@@ -220,7 +237,8 @@ jobs:
   e2e:
     name: E2E Tests
     runs-on: ubuntu-latest
-    needs: [lint]
+    needs: [validate, lint]
+    timeout-minutes: 30
 
     services:
       postgres:
@@ -367,7 +385,11 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [test, lint, security]
+    # E2E 纳入发布门禁：E2E 是唯一覆盖完整 HTTP 链路（服务进程 + 真实 DB/Redis
+    # + 中间件栈）的层级，历史上抓到过单测漏掉的真 bug（缓存命中下客户端密钥
+    # 校验必然失败），不应在 E2E 未通过时发布二进制
+    needs: [test, lint, security, e2e]
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
@@ -391,8 +413,10 @@ jobs:
   docker:
     name: Docker Build
     runs-on: ubuntu-latest
-    needs: [test, lint, security]
+    # E2E 纳入发布门禁：:latest 镜像被部署环境直接拉取，必须在 E2E 通过后才推送
+    needs: [test, lint, security, e2e]
     if: github.ref == 'refs/heads/main'
+    timeout-minutes: 30
     # 阶段 4 安全增强：docker job 需要写权限（推送镜像到 GHCR 时使用 packages: write）
     # 当前推送到 Docker Hub 使用 username/password secret，但保留 packages: write
     # 以便未来切换到 GHCR 时无需再次修改权限

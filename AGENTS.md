@@ -31,11 +31,11 @@ SSO 服务是一个生产级单点登录（Single Sign-On）微服务，基于 G
 | `.env.example` | 配置模板，所有配置项的默认值与说明 |
 | `.env.test` | 测试环境配置（含真实凭据，**不可提交/分发**） |
 | `.golangci.yml` | golangci-lint 配置，`enable-all: true` 并显式禁用部分规则 |
-| `.github/workflows/ci.yml` | CI/CD 流水线：test、lint、security、e2e、build、docker |
+| `.github/workflows/ci.yml` | CI/CD 流水线：validate、test、lint、security、e2e、build、docker |
 | `docker/Dockerfile` | 多阶段 Docker 构建，基于 `golang:1.26.10-alpine` |
 | `docker/docker-compose.yml` | 开发/部署 Compose，含 postgres、redis、sso 三服务 |
 | `docker/entrypoint.sh` | 容器启动脚本：自动构造无密码迁移 DSN（密码经 `PGPASSWORD` 子进程环境传递）并执行 `migrate up` |
-| `migrations/` | 数据库迁移脚本，共 023 个版本（3 位序号命名；版本号全局唯一，up/down 成对，CI lint job 会校验） |
+| `migrations/` | 数据库迁移脚本，共 023 个版本（3 位序号命名；版本号全局唯一，up/down 成对，CI validate job 会校验） |
 | `keys/` | RSA 密钥对（脚本生成，Git 忽略） |
 
 ### 2.2 技术栈
@@ -481,12 +481,15 @@ make deploy             # 默认部署到 192.168.1.3
 
 `.github/workflows/ci.yml` 定义以下任务：
 
-1. **test**：在 Ubuntu 上运行 PostgreSQL/Redis service container，执行迁移后运行集成测试（`-tags=integration -race -p 1`），检查覆盖率 >= 80%
-2. **lint**：运行 `golangci-lint`（从源码构建 v1.64.8，10 分钟超时）
-3. **security**：运行 `gosec`（排除 G118/G201/G202/G706/G710）和 `govulncheck`
-4. **e2e**：依赖 lint 成功后，启动服务，准备数据，运行 E2E 测试，清理数据
-5. **build**：构建二进制并上传 artifact
-6. **docker**：main 分支触发，构建并推送 Docker Hub 镜像（latest + sha）
+1. **validate**：迁移文件名校验（版本号全局唯一、up/down 成对），秒级 fail-fast 前置门禁，是 test/lint/e2e 的共享依赖
+2. **test**：依赖 validate；在 Ubuntu 上运行 PostgreSQL/Redis service container，执行迁移后运行集成测试（`-tags=integration -race -p 1`），检查覆盖率 >= 80%
+3. **lint**：依赖 validate；运行 `golangci-lint`（从源码构建 v1.64.8，10 分钟超时）
+4. **security**：运行 `gosec`（排除 G118/G201/G202/G706/G710）和 `govulncheck`
+5. **e2e**：依赖 validate + lint；启动服务，准备数据，运行 E2E 测试，清理数据
+6. **build**：依赖 test/lint/security/e2e；构建二进制并上传 artifact
+7. **docker**：依赖 test/lint/security/e2e；main 分支触发，构建并推送 Docker Hub 镜像（latest + sha）
+
+> 注意：build 与 docker 均以 e2e 为门禁（E2E 失败不发布）；全部 job 均设置 `timeout-minutes`（5~30 分钟），防止挂死耗满 GitHub Actions 默认 360 分钟。
 
 > 注意：CI 中 gosec 的 G118/G201/G202/G706/G710 被排除，详见 workflow 注释。
 
