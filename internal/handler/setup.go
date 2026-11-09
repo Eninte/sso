@@ -140,7 +140,7 @@ var allowedEnvKeys = map[string]bool{
 	"CORS_ALLOWED_ORIGINS": true,
 	"METRICS_USERNAME":     true, "METRICS_PASSWORD": true,
 	"SHUTDOWN_TIMEOUT": true, "INSECURE_PROD_BYPASS": true,
-	"PUBLIC_BASE_URL": true, "TRUSTED_PROXIES": true, "LAN_DEPLOYMENT": true,
+	"PUBLIC_BASE_URL": true, "TRUSTED_PROXIES": true,
 	"STRICT_KEY_PERMISSIONS": true,
 }
 

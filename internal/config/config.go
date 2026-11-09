@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -441,34 +442,32 @@ func validateProductionConfig(c *Config) error {
 //
 // 逐行 #nosec G101：这些是配置枚举值名称，不是硬编码凭据。
 const (
-	prodBypassDBSSL             = "db_ssl"              // #nosec G101 -- 豁免项名称，非凭据
-	prodBypassRateLimit         = "rate_limit"          // #nosec G101 -- 豁免项名称，非凭据
-	prodBypassMaxLoginAttempts  = "max_login_attempts"  // #nosec G101 -- 豁免项名称，非凭据
-	prodBypassCORSLocalhost     = "cors_localhost"      // #nosec G101 -- 豁免项名称，非凭据
-	prodBypassCORSDefault       = "cors_default"        // #nosec G101 -- 豁免项名称，非凭据
-	prodBypassJWTIssuer         = "jwt_issuer"          // #nosec G101 -- 豁免项名称，非凭据
-	prodBypassSMTPHost          = "smtp_host"           // #nosec G101 -- 豁免项名称，非凭据
-	prodBypassMetricsAuth       = "metrics_auth"        // #nosec G101 -- 豁免项名称，非凭据
-	prodBypassRedisPassword     = "redis_password"      // #nosec G101 -- 豁免项名称，非凭据
-	prodBypassPublicBaseURL     = "public_base_url"     // #nosec G101 -- 豁免项名称，非凭据
-	prodBypassJWTKeyPermissions = "jwt_key_permissions" // #nosec G101 -- 豁免项名称，非凭据
-	prodBypassMFARecoveryKey    = "mfa_recovery_key"    // #nosec G101 -- 豁免项名称，非凭据
+	prodBypassDBSSL            = "db_ssl"             // #nosec G101 -- 豁免项名称，非凭据
+	prodBypassRateLimit        = "rate_limit"         // #nosec G101 -- 豁免项名称，非凭据
+	prodBypassMaxLoginAttempts = "max_login_attempts" // #nosec G101 -- 豁免项名称，非凭据
+	prodBypassCORSLocalhost    = "cors_localhost"     // #nosec G101 -- 豁免项名称，非凭据
+	prodBypassCORSDefault      = "cors_default"       // #nosec G101 -- 豁免项名称，非凭据
+	prodBypassJWTIssuer        = "jwt_issuer"         // #nosec G101 -- 豁免项名称，非凭据
+	prodBypassSMTPHost         = "smtp_host"          // #nosec G101 -- 豁免项名称，非凭据
+	prodBypassMetricsAuth      = "metrics_auth"       // #nosec G101 -- 豁免项名称，非凭据
+	prodBypassRedisPassword    = "redis_password"     // #nosec G101 -- 豁免项名称，非凭据
+	prodBypassPublicBaseURL    = "public_base_url"    // #nosec G101 -- 豁免项名称，非凭据
+	prodBypassMFARecoveryKey   = "mfa_recovery_key"   // #nosec G101 -- 豁免项名称，非凭据
 )
 
 // knownProdBypasses 豁免项白名单：解析与判定均以此为准，防止拼写漂移
 var knownProdBypasses = map[string]bool{
-	prodBypassDBSSL:             true,
-	prodBypassRateLimit:         true,
-	prodBypassMaxLoginAttempts:  true,
-	prodBypassCORSLocalhost:     true,
-	prodBypassCORSDefault:       true,
-	prodBypassJWTIssuer:         true,
-	prodBypassSMTPHost:          true,
-	prodBypassMetricsAuth:       true,
-	prodBypassRedisPassword:     true,
-	prodBypassPublicBaseURL:     true,
-	prodBypassJWTKeyPermissions: true,
-	prodBypassMFARecoveryKey:    true,
+	prodBypassDBSSL:            true,
+	prodBypassRateLimit:        true,
+	prodBypassMaxLoginAttempts: true,
+	prodBypassCORSLocalhost:    true,
+	prodBypassCORSDefault:      true,
+	prodBypassJWTIssuer:        true,
+	prodBypassSMTPHost:         true,
+	prodBypassMetricsAuth:      true,
+	prodBypassRedisPassword:    true,
+	prodBypassPublicBaseURL:    true,
+	prodBypassMFARecoveryKey:   true,
 }
 
 // prodBypassNamesSorted 返回全部已知豁免名称（排序后，用于错误提示与日志）
@@ -617,12 +616,13 @@ func validateProdPublicBaseURL(c *Config) error {
 
 // validateProdJWTKeyPermissions 阶段 4 安全增强：JWT 私钥文件权限校验
 // 私钥必须仅所有者可读写（chmod 600），否则拒绝启动
+//
+// 豁免收口：不提供 INSECURE_PROD_BYPASS=jwt_key_permissions——该豁免仅作用于
+// 本校验层而 keyloader 从不读取 INSECURE_PROD_BYPASS，配置后启动校验放行、
+// 加载密钥仍被 ErrKeyPermissionOpen 拒绝，属「看似生效实则无效」的开关。
+// 跳过检查统一走 STRICT_KEY_PERMISSIONS=false（校验与加载两层一致）。
 func validateProdJWTKeyPermissions(c *Config) error {
 	if err := validateJWTPrivateKeyPermissions(c); err != nil {
-		if c.prodBypassAllowed(prodBypassJWTKeyPermissions) {
-			slog.Warn("生产环境 JWT 私钥权限校验失败（INSECURE_PROD_BYPASS=jwt_key_permissions 显式豁免）", "error", err)
-			return nil
-		}
 		slog.Error("生产环境 JWT 私钥权限校验失败", "error", err)
 		return err
 	}
@@ -661,15 +661,26 @@ func validateProdInitEnabled(c *Config) error {
 // validateJWTPrivateKeyPermissions 校验 JWT 私钥文件权限
 // 阶段 4 安全增强：私钥文件必须仅所有者可读写（mode & 0077 == 0）
 //
-// 豁免只有显式配置一条路：STRICT_KEY_PERMISSIONS=false（环境可见、可审计）。
+// 跳过检查的两条途径均与 keyloader.go 行为一致：
+//  1. 显式设置 STRICT_KEY_PERMISSIONS=false（唯一豁免途径，环境可见；
+//     本函数仅在生产校验链路被调用，设置时记录告警保证可审计）
+//  2. Windows 平台跳过（os.Stat 恒返回 0666 且无法 Chmod，权限检查
+//     不可实现；生产部署目标为 Linux 容器）
+//
 // 不做 /.dockerenv 容器隐式豁免——容器是项目主力部署形态（Compose/K8s/TrueNAS），
 // 隐式豁免使生产检查清单「chmod 600」在主流路径整体失效且无日志痕迹；
 // 且 containerd/CRI-O 运行时不创建该文件，隐式分支行为不可预期。
 // 权限过开的容器环境应修正权限（Secret defaultMode: 0600 / chmod 600）
 // 或显式声明 STRICT_KEY_PERMISSIONS=false。
 func validateJWTPrivateKeyPermissions(c *Config) error {
-	// 显式关闭：唯一豁免途径（与 keyloader.go 行为一致）
+	// 显式关闭：唯一豁免途径；生产校验链路中触发，记录告警（可审计）
 	if os.Getenv("STRICT_KEY_PERMISSIONS") == "false" {
+		slog.Warn("JWT 私钥权限检查已被显式关闭（STRICT_KEY_PERMISSIONS=false），权限过开将不再拦截")
+		return nil
+	}
+
+	// Windows：os.Stat 恒返回 0666 且无法 Chmod，与 keyloader.go 一致跳过
+	if runtime.GOOS == "windows" {
 		return nil
 	}
 

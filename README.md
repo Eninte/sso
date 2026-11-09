@@ -422,6 +422,7 @@ sso/
 | MAX_LOGIN_ATTEMPTS | 最大登录失败次数 | 5 | - |
 | LOCKOUT_DURATION | 账户锁定时长 | 30m | - |
 | TRUSTED_PROXIES | 受信代理IP（CIDR） | - | 反代后必填 |
+| STRICT_KEY_PERMISSIONS | JWT私钥权限检查 | 空（启用） | 权限过开拒绝启动；显式 `false` 跳过 |
 | MFA_RECOVERY_HMAC_KEY | MFA恢复码HMAC密钥 | - | **生产必须设置** |
 | CAPTCHA_ENABLED | 是否启用验证码 | true | - |
 | CAPTCHA_FAIL_THRESHOLD | 触发验证码失败次数 | 3 | - |

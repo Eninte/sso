@@ -291,6 +291,29 @@ func TestValidateJWTPrivateKeyPermissions(t *testing.T) {
 		assert.NoError(t, validateJWTPrivateKeyPermissions(c))
 	})
 
+	t.Run("显式关闭_权限过开也放行", func(t *testing.T) {
+		// 与 keyloader 的 ExplicitDisableSkipsPermCheck 用例对应：
+		// 0644 文件在显式关闭后放行（Windows 上经平台跳过分支同样放行）
+		t.Setenv("STRICT_KEY_PERMISSIONS", "false")
+		keyPath := filepath.Join(t.TempDir(), "private.pem")
+		require.NoError(t, os.WriteFile(keyPath, []byte("x"), 0644))
+		c := &Config{JWTPrivateKeyPath: keyPath}
+		assert.NoError(t, validateJWTPrivateKeyPermissions(c))
+	})
+
+	t.Run("windows_跳过检查_与keyloader一致", func(t *testing.T) {
+		// os.Stat 在 Windows 恒返回 0666 且无法 Chmod，权限检查不可实现，
+		// 校验层应与 keyloader 一致跳过（否则 Windows 生产校验拒绝、keyloader 放行）
+		if runtime.GOOS != "windows" {
+			t.Skip("仅在 Windows 上验证跳过行为（Linux 为真实权限校验路径）")
+		}
+		t.Setenv("STRICT_KEY_PERMISSIONS", "")
+		keyPath := filepath.Join(t.TempDir(), "private.pem")
+		require.NoError(t, os.WriteFile(keyPath, []byte("x"), 0644))
+		c := &Config{JWTPrivateKeyPath: keyPath}
+		assert.NoError(t, validateJWTPrivateKeyPermissions(c), "Windows 上应与 keyloader 一致跳过权限检查")
+	})
+
 	t.Run("文件不存在_交由keyloader统一报错", func(t *testing.T) {
 		// 空字符串等同 unset（config 包所有 getEnvXXX 检查 value != ""）
 		t.Setenv("STRICT_KEY_PERMISSIONS", "")

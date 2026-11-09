@@ -414,9 +414,8 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    # 仅构建并上传 artifact，非发布路径，且 PR 上同样运行：
-    # 不设 e2e 门禁，避免无发布意义的 PR 反馈被 E2E 拉长
-    # 发布门禁由 docker job 承担（:latest/:sha 镜像被部署环境直接拉取）
+    # 仅构建并上传 artifact（无 CI 下游消费，仅供人工下载），非发布路径，
+    # 不设 e2e 门禁；发布门禁由 docker job 承担（:latest/:sha 镜像被部署环境直接拉取）
     needs: [test, lint, security]
     timeout-minutes: 15
 

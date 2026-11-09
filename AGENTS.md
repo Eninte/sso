@@ -149,7 +149,7 @@ SSO/
 | `JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH` | `./keys/*.pem` | 必填 |
 | `STRICT_KEY_PERMISSIONS` | 空（检查启用） | 私钥权限过开（非 600）拒绝启动；显式 `false` 才跳过（无容器隐式豁免） |
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM` | 邮件相关 | 邮件功能必填 |
-| `INSECURE_PROD_BYPASS` | 空 | 逐项显式声明的生产校验豁免（逗号分隔），**不存在总开关**，未知项名拒绝启动。可选值：`db_ssl`、`rate_limit`、`max_login_attempts`、`cors_localhost`、`cors_default`、`jwt_issuer`、`smtp_host`、`metrics_auth`、`redis_password`、`public_base_url`、`jwt_key_permissions`、`mfa_recovery_key`。**公网部署必须留空** |
+| `INSECURE_PROD_BYPASS` | 空 | 逐项显式声明的生产校验豁免（逗号分隔），**不存在总开关**，未知项名拒绝启动。可选值：`db_ssl`、`rate_limit`、`max_login_attempts`、`cors_localhost`、`cors_default`、`jwt_issuer`、`smtp_host`、`metrics_auth`、`redis_password`、`public_base_url`、`mfa_recovery_key`。**公网部署必须留空** |
 
 > `LAN_DEPLOYMENT` 已废弃：原“一键放开全部生产校验”的总开关已移除，设置后仅记录错误日志，不再豁免任何校验。请按需改用 `INSECURE_PROD_BYPASS=<项名>`。
 
@@ -164,7 +164,7 @@ SSO/
 - `METRICS_USERNAME`/`METRICS_PASSWORD` 必须同时设置（豁免项 `metrics_auth`）
 - `REDIS_ENABLE=true` 时 `REDIS_PASSWORD` 必须非空（豁免项 `redis_password`）
 - `PUBLIC_BASE_URL` 必须设置且为 `https://`（豁免项 `public_base_url`）
-- JWT 私钥文件权限必须为 `600`（豁免项 `jwt_key_permissions`）
+- JWT 私钥文件权限必须为 `600`（唯一跳过途径：显式 `STRICT_KEY_PERMISSIONS=false`，校验与加载两层一致，生产设置时记录告警）
 
 ### 4.3 配置向导
 
@@ -487,7 +487,7 @@ make deploy             # 默认部署到 192.168.1.3
 3. **lint**：依赖 validate；运行 `golangci-lint`（从源码构建 v1.64.8，10 分钟超时）
 4. **security**：运行 `gosec`（排除 G118/G201/G202/G706/G710）和 `govulncheck`
 5. **e2e**：依赖 validate + lint；启动服务，准备数据，运行 E2E 测试，清理数据
-6. **build**：依赖 test/lint/security；构建二进制并上传 artifact（非发布路径，PR 亦运行，不设 e2e 门禁）
+6. **build**：依赖 test/lint/security；构建二进制并上传 artifact（无 CI 下游消费，非发布路径，PR 亦运行，不设 e2e 门禁）
 7. **docker**：依赖 test/lint/security/e2e；main 分支触发，构建并推送 Docker Hub 镜像（latest + sha）
 
 > 注意：docker 以 e2e 为发布门禁（E2E 失败不推送镜像，`latest` 被部署环境直接拉取）；build 仅产出 artifact 不设 e2e 门禁。全部 job 均设置 `timeout-minutes`（5~30 分钟），防止挂死耗满 GitHub Actions 默认 360 分钟。

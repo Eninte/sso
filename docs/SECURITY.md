@@ -73,6 +73,7 @@
 - **MFA恢复码密钥**：生产环境 `MFA_RECOVERY_HMAC_KEY` 必填且 ≥32 字节（不足拒绝启动）
 - **环境白名单**：`SERVER_ENV` 仅接受 `development` / `production` / `test`，其他值拒绝启动，防止拼写错误导致生产校验被旁路
 - **密钥加密密钥**：`JWT_KEY_ENCRYPTION_KEY` 配置即须为 64 位 hex（所有环境 fail-fast）
+- **私钥文件权限**：JWT 私钥必须仅所有者可读写（600），启动校验与密钥加载双层强制；唯一跳过途径是显式设置 `STRICT_KEY_PERMISSIONS=false`（生产环境设置时记录告警）
 
 ### 限流与故障降级
 
@@ -111,7 +112,7 @@ METRICS_PASSWORD=<strong-password>
 
 ### 密钥管理
 
-- RSA私钥文件权限设置为600
+- RSA私钥文件权限设置为600（服务启动与加载双层强制校验，唯一跳过途径为显式 `STRICT_KEY_PERMISSIONS=false`，生产设置时记录告警）
 - 定期轮换密钥（建议每年）
 - 使用环境变量或密钥管理服务存储敏感配置
 - DB 密钥轮换/私钥信封加密链路当前未接线，`JWT_KEY_ENCRYPTION_KEY`（`openssl rand -hex 32` 生成）暂不会被使用，可预生成备用

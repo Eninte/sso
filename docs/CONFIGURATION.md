@@ -85,6 +85,7 @@ MFA_CHALLENGE_TTL=5m       # MFA 登录挑战有效期
 SOCIAL_STATE_COOKIE_BINDING=true  # 社交登录 state 绑定发起方会话（login CSRF 防护）
                             # 纯 API 客户端可设 false（生产关闭会告警）
 TRUSTED_PROXIES=            # 受信代理IP（CIDR，逗号分隔，留空则不信任 X-Real-IP 头）
+STRICT_KEY_PERMISSIONS=      # JWT私钥权限检查（留空=启用；权限过开拒绝启动；false=显式跳过，生产设置时告警）
 ```
 
 ### 6. 验证码配置（防机器人）
@@ -134,7 +135,7 @@ E2E_ADMIN_PASSWORD=Admin1234!        # 测试管理员密码
 INSECURE_PROD_BYPASS=        # 逐项显式声明的生产校验豁免（逗号分隔），不存在总开关
                             # 可选值：db_ssl,rate_limit,max_login_attempts,cors_localhost,
                             #   cors_default,jwt_issuer,smtp_host,metrics_auth,redis_password,
-                            #   public_base_url,jwt_key_permissions,mfa_recovery_key
+                            #   public_base_url,mfa_recovery_key
                             # 仅用于内网部署场景，正式生产环境（公网）必须留空
                             # 注意：LAN_DEPLOYMENT 已废弃，设置后不再豁免任何校验
 INIT_ENABLED=true           # 初始化面板（/init），初始化完成后建议设为 false 永久关闭
